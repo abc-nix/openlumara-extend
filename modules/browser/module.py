@@ -20,6 +20,8 @@ File layout (step-6 split, 2026-10-07; contract in README.md):
   discovery, launching, endpoint probing).
 - page.py: page/DOM helpers (AX-tree walker, element refs, screenshots,
   grid overlay, metrics). Helpers are stateless: the class owns all state.
+- util.py: pure helpers (URL normalisation for navigate/new_tab, tail slicing
+  of the log deques) - stdlib only, unit-tested by tests/test_util.py.
 
 Setup (for the user):
 1. Enable this module (it is auto-detected after a restart).
@@ -33,7 +35,6 @@ import asyncio
 import base64
 import json
 import os
-import urllib.parse
 from collections import deque
 from datetime import datetime
 
@@ -49,11 +50,11 @@ import channels.webui.api as webui
 from . import cdp, page
 from .cdp import CDPClient, CDPError, CDP_CALL_TIMEOUT, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
+from .util import normalize_url, tail_entries
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
 MAX_URL_LEN = 200
-
 
 # ---------------------------------------------------------------------------
 # The Module
@@ -715,12 +716,7 @@ class Browser(core.module.Module):
             wait_seconds: Seconds to wait for the page load event.
         """
         await self._ensure_connection()
-        url = url.strip()
-        parsed = urllib.parse.urlparse(url)
-        # urlparse treats "localhost:3000" as scheme "localhost", so only
-        # accept real schemes and prepend https:// otherwise
-        if parsed.scheme not in ("http", "https", "file", "about", "data", "chrome"):
-            url = "https://" + url
+        url = normalize_url(url)
         sid = self._current_session()
         self._load_event.clear()
         res = await self._cdp.cmd("Page.navigate", {"url": url}, sid, timeout=CDP_CALL_TIMEOUT)
@@ -934,23 +930,30 @@ class Browser(core.module.Module):
             quality: JPEG quality 0-100 (default 80).
         """
         await self._ensure_connection()
+        # hoisted once: re-resolving the session inside the finally block could
+        # raise "no tab attached" and mask the real screenshot error
+        sid = self._current_session()
         # normalize format
         fmt = "jpeg" if format in ("jpeg", "jpg") else ("png" if format == "png" else None)
         if fmt is None:
             return self.result(
                 f"Unsupported screenshot format '{format}'. Use 'png' or 'jpeg'.", success=False)
+        try:
+            quality = max(0, min(100, int(quality)))
+        except (TypeError, ValueError):
+            quality = 80
         grid_spacing = page.normalize_grid(grid)
         grid_id = None
         try:
             if grid_spacing:
-                grid_id = await page.inject_grid(self._cdp, self._current_session(),
+                grid_id = await page.inject_grid(self._cdp, sid,
                                                  grid_spacing, full_page=full_page, log=self.log)
             path, raw = await page.capture_screenshot(
-                self._cdp, self._current_session(), self._screenshots_dir,
+                self._cdp, sid, self._screenshots_dir,
                 full_page=full_page, fmt=fmt, quality=quality)
         finally:
-            await page.remove_grid(self._cdp, self._current_session(), grid_id)
-        metrics = await page.viewport_metrics(self._cdp, self._current_session())
+            await page.remove_grid(self._cdp, sid, grid_id)
+        metrics = await page.viewport_metrics(self._cdp, sid)
         px_w, px_h = page.image_size(raw, fmt)
         if metrics:
             if full_page:
@@ -983,7 +986,7 @@ class Browser(core.module.Module):
             "hint": "Screenshot image is attached. Coordinates: doc_x = shot_x + region.x, doc_y = shot_y + region.y.",
         }
         if fmt == "jpeg":
-            meta["quality"] = max(0, min(100, int(quality)))
+            meta["quality"] = quality
         if grid_spacing:
             meta["grid"] = {"spacing": grid_spacing, "applied": bool(grid_id)}
 
@@ -1036,14 +1039,14 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def console(self, count: int = 20, clear: bool = False):
-        """Returns recent console messages, errors, and uncaught exceptions.
+        """Returns recent console messages, errors, and uncaught exceptions from all tabs.
 
         Args:
-            count: How many recent entries to return.
+            count: How many of the most recent entries to return (0 = none).
             clear: Clear the buffer after reading.
         """
         await self._ensure_connection()
-        entries = list(self._console_log)[-int(count):]
+        entries = tail_entries(self._console_log, count)
         if clear:
             self._console_log.clear()
         return self.result(entries if entries else "No console output recorded.")
@@ -1053,7 +1056,7 @@ class Browser(core.module.Module):
         """Returns recent network requests (method + URL + status). Requires enable_network_monitoring.
 
         Args:
-            count: How many recent entries to return.
+            count: How many of the most recent entries to return (0 = none).
             clear: Clear the buffer after reading.
         """
         if not self.config.get("enable_network_monitoring", False):
@@ -1063,7 +1066,7 @@ class Browser(core.module.Module):
                 success=False,
             )
         await self._ensure_connection()
-        entries = list(self._network_log)[-int(count):]
+        entries = tail_entries(self._network_log, count)
         if clear:
             self._network_log.clear()
         return self.result(entries if entries else "No network requests recorded.")
@@ -1083,15 +1086,15 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def cookies(self, domain: str = None):
-        """Returns cookies for the current tab's domain (or a specific domain).
+        """Returns the cookies of the current tab's site (or of a specific domain), including their values.
 
         Args:
-            domain: Optional domain to filter cookies for (e.g. 'example.com').
+            domain: Optional domain to look up instead of the current tab (e.g. 'example.com').
         """
         await self._ensure_connection()
         sid = self._current_session()
         if domain:
-            urls = [f"https://{domain}/"]
+            urls = [f"https://{str(domain).strip().strip('/')}/"]
         else:
             try:
                 res = await self._cdp.cmd("Runtime.evaluate", {
@@ -1099,9 +1102,17 @@ class Browser(core.module.Module):
                     "returnByValue": True,
                 }, sid)
                 url = res.get("result", {}).get("value")
-                urls = [url] if isinstance(url, str) and url.startswith("http") else ["https://example.com/"]
             except Exception:
-                urls = ["https://example.com/"]
+                url = None
+            if not (isinstance(url, str) and url.startswith("http")):
+                # no silent example.com fallback: that looked like "this site
+                # has no cookies" when nothing was queried for the real site
+                return self.result(
+                    "The current tab is not an http(s) page, so there is no site to read cookies for. "
+                    "Pass a domain explicitly (e.g. domain='example.com').",
+                    success=False,
+                )
+            urls = [url]
         res = await self._cdp.cmd("Network.getCookies", {"urls": urls}, sid)
         cookies = res.get("cookies", [])
         return self.result([
@@ -1127,13 +1138,14 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def new_tab(self, url: str = "about:blank"):
-        """Opens a new tab and makes it the current tab.
+        """Opens a new tab and makes it the current tab. A schemeless URL gets https:// prepended, exactly like navigate.
 
         Args:
             url: URL to open in the new tab (default about:blank).
         """
         await self._ensure_connection()
-        res = await self._cdp.cmd("Target.createTarget", {"url": url or "about:blank"})
+        url = normalize_url(url)
+        res = await self._cdp.cmd("Target.createTarget", {"url": url})
         tid = res.get("targetId")
         await self._attach_target(tid)
         await self._cdp.cmd("Target.activateTarget", {"targetId": tid})
@@ -1142,12 +1154,16 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def switch_tab(self, target: str):
-        """Switches the current tab by id from list_tabs or zero-based index.
+        """Switches the current tab by id from list_tabs or by its zero-based index in that same list.
 
         Args:
-            target: Tab id or index (e.g. '0' for the first tab).
+            target: Tab id or index (e.g. '0' for the first tab; a bare number is accepted too).
         """
         await self._ensure_connection()
+        # tool arguments arrive uncoerced (core passes JSON straight through),
+        # so a model that answers with a number would otherwise crash on
+        # target.isdigit()
+        target = str(target)
         targets = await page.list_page_targets(self._cdp)
         if not targets:
             return self.result("No tabs open.", success=False)
@@ -1167,9 +1183,10 @@ class Browser(core.module.Module):
         """Closes a tab (default: the current tab) and switches to another one.
 
         Args:
-            target: Tab id or index to close (default: current tab).
+            target: Tab id or index to close (default: current tab; a bare number is accepted).
         """
         await self._ensure_connection()
+        target = None if target is None else str(target)
         targets = await page.list_page_targets(self._cdp)
         tid = self._current_target if target is None else page.find_target(targets, target)
         if tid is None:

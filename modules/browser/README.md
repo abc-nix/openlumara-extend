@@ -60,14 +60,18 @@ core code, plus refactoring notes. (Added 2026-10-07.)
 - Every AI tool must stay defined **directly** on the `Browser` class:
   `tool_loader` scans `type(module).__dict__` and does not walk the MRO —
   tools moved to a mixin/base class silently vanish.
-- File split APPLIED 2026-10-07: `cdp.py` (transport/process: `CDPClient`,
-  binary/port/profile discovery, launching, probing) + `page.py` (AX-tree
-  walker, refs, screenshots/grid, metrics — stateless helpers) +
-  `module.py` (class: settings, lifecycle, routes, all tools with thin
-  bodies). Dependency direction module.py -> cdp.py, page.py (never the
-  reverse); the class owns all state. Verified with
-  `tmp/browser_surface_harness.py` (public `type(Browser).__dict__`,
-  signatures + byte-identical tool docstrings + routes + settings).
+- File split APPLIED 2026-10-07, extended 2026-10-26 with `util.py`: `cdp.py`
+  (transport/process: `CDPClient`, binary/port/profile discovery, launching,
+  probing) + `page.py` (AX-tree walker, refs, screenshots/grid, metrics —
+  stateless helpers) + `util.py` (pure stdlib helpers: URL normalisation,
+  deque tail slicing) + `module.py` (class: settings, lifecycle, routes, all
+  tools with thin bodies). Dependency direction module.py -> cdp.py, page.py,
+  util.py (never the reverse); the class owns all state.
+- Unit tests live in `tests/` and run with
+  `python3 -m unittest discover -s modules/browser/tests -v` (from the
+  `openlumara-extend` root). They deliberately avoid importing `module.py`:
+  the page helpers are loaded with `core`/`aiohttp` stubbed, `util.py` is
+  loaded straight from the file. Add a case here for every bug fixed.
   Note: single-module-file is the upstream core convention (http module is
   also ~1500 lines) — this split is a local maintainability choice; to
   upstream, the three files can be concatenated back into module.py with
