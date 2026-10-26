@@ -1,0 +1,58 @@
+# openlumara-extend
+
+Personal OpenLumara content: user **modules** now, channels/skills/themes as
+they are moved over. Private repo — it mirrors the folder layout OpenLumara's
+module libraries expect, so the same tree can be installed on another machine:
+
+```
+/library add git@github.com:abc-nix/openlumara-extend.git
+/library sync
+/library install browser
+```
+
+## Layout
+
+A library repo must mirror OpenLumara's own folder layout — `core/module_manager.py`
+only picks entries up from these folders:
+
+| folder in this repo | installed as | entry file |
+|---|---|---|
+| `modules/<name>/` | user module (`user_modules/<name>`) | `module.py` |
+| `channels/<name>/` | user channel (`user_channels/<name>`) | `channel.py` |
+| `skills/<name>/` | skill | `SKILL.md` |
+| `themes/<name>.json` | webui theme | (json, optional `.css` sidecar) |
+
+A `module.py` sitting at the repo root, or in any other folder, is ignored.
+
+## How it is wired on this machine
+
+```
+~/git/openlumara/user_modules  ->  ~/git/openlumara-extend/modules
+```
+
+That symlink means editing a module through the usual
+`openlumara/user_modules/<name>/` path edits the files here directly (no copy,
+no sync step). Consequences:
+
+- OpenLumara's own checkout keeps `user_modules/` gitignored, so `git status`
+  there stays clean — this repo is the source of truth for module changes.
+- After editing `module.py`, a settings save reloads it; edits to helper files
+  (`cdp.py`, `page.py`, …) need a full server restart, not a reload.
+- Never copy `__pycache__/` in when moving a module; it is ignored anyway.
+
+## Modules
+
+| module | notes |
+|---|---|
+| `browser` | Chrome/Chromium over CDP. Open backlog in `modules/browser/REVIEW.md` (items B1–B25, phases in §9). |
+| `theme_gallery` | WebUI theme browser; see `BUGS.md` / `ELEMENTS.md` next to it. |
+
+## Conventions
+
+- One branch per fix phase (`browser/phase-1-settings`, …), squash-merged into
+  `master`; a bad phase is then one `git revert` away.
+- A docstring changes in the same commit as the behavior it describes.
+- Never commit credentials or local data — module settings live in
+  `openlumara/config.yml`, which stays in (and ignored by) the main checkout.
+- Module code follows the upstream template:
+  `modules/coder/templates/openlumara_module.py`.
