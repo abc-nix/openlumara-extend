@@ -47,6 +47,16 @@ no sync step). Consequences:
 | `browser` | Chrome/Chromium over CDP. Open backlog in `modules/browser/REVIEW.md` (items B1–B25, phases in §9). |
 | `theme_gallery` | WebUI theme browser; see `BUGS.md` / `ELEMENTS.md` next to it. |
 
+## Tests
+
+The stateless helpers in `page.py` have a pure-stdlib suite: it stubs `core`
+and `aiohttp`, so it runs anywhere without touching the install, and it never
+imports the entry `module.py`.
+
+```
+python3 -m unittest discover -s modules/browser/tests -v
+```
+
 ## Conventions
 
 - One branch per fix phase (`browser/phase-1-settings`, …), squash-merged into

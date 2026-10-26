@@ -11,11 +11,13 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 
 | Phase | Status | Commit | Notes |
 |---|---|---|---|
-| 0 — repo hygiene | done | `ae9271c` (import rewrite) · `e57919b` (README) | `__pycache__` untracked + ignored (it had shipped in the first import; the clean rewrite removed it). Tests skeleton deferred to phase 5 — see below. |
-| 1 — settings & metadata | done | `3f55aed` | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
+| 0 — repo hygiene | done | `ae9271c` (import rewrite) · `e57919b` (README) | `__pycache__` untracked + ignored (it had shipped in the first import; the clean rewrite removed it). `modules/browser/tests/` added: 12 pure-stdlib tests for `page.py`, all green. |
+| 1 — settings & metadata | done | `3f55aed` · `183ecbd` · `9090537` (docs) | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
 | 2 … 8 | pending | — | see §9 |
 
-Not verified yet: phase 1's gate (settings panel after a restart) — the module was not restarted when this was written, and the tests skeleton is deferred until there is a runnable harness (phase 5), because shipping unexecuted tests is worse than shipping none.
+Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
+
+Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` → 12 passed; `py_compile` on `module.py`/`cdp.py`/`page.py` clean.
 
 ---
 
@@ -371,7 +373,7 @@ Settings text:
 ### 8.4 Upstream proposals (do **not** patch core here)
 
 1. `fields.html` — `"string"` should render like `"text"` (either add the branch or normalize in `settings_structure`). Affects `auto_backup.backup_path`, the `ntfy` channel, and any module following the template.
-2. `fields.html:54` — `<option ... x-text="optionKey">` should be `optionLabel`; today every select shows raw keys and human labels only appear as the selected option's description. This single line restores all the label text written in `browser_binary`, `ssh.auth_method`, etc.
+2. `fields.html:54` — `<option ... x-text="optionKey">` should be `optionLabel`; today every select shows raw keys and human labels only appear as the selected option's description. This single line restores all the label text written in `browser_binary`, `ssh.auth_method`, etc. **Confirmed in the UI 2026-10-26**: `Browser Binary` displays `auto` / `custom` in the dropdown and the written label as the description below it.
 3. `openlumara_module.py` — its documented type list (`string`, `percentage`) doesn't match the implemented renderers.
 4. `core/manager.py` — expose a public `shutting_down` flag so modules can distinguish framework shutdown from module reload (needed for B5).
 5. `core/modules.py` — consider reloading package submodules on module reload (B25).
@@ -417,4 +419,5 @@ Config facts that shape phase 7 (from `openlumara/config.yml`): `show_unsafe_set
 - The module folder has no `tests/`; the earlier harnesses are gone. Don't cite them as existing coverage (B24).
 - `tmp/` is the right place for throwaway scripts; `REVIEW.md`, `tests/`, and `NOTES.md` belong in the module folder.
 - Anything touching `cdp.py`/`page.py` needs a **server restart** to take effect (B25), not a settings save.
+- `python3 -m unittest discover -s modules/browser/tests -v` from the `openlumara-extend` root runs the pure-helper suite (stubs `core`/`aiohttp`; safe anywhere). Add cases here for every bug fixed, and put the browser-driven harnesses (phases 5–6) next to it.
 - Keep the three invariants from §0 in mind when moving tools around; the tool loader does not walk the MRO for tools, only for routes.
