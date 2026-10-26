@@ -61,10 +61,15 @@ MAX_URL_LEN = 200
 
 class Browser(core.module.Module):
     """
-    Gives the AI its own Chrome/Chromium window to browse the web with: open
-    pages, click, type, screenshot, read what is on screen. Runs in a
-    dedicated profile with persistent logins, visible by default to watch it work.
+    Gives your AI its own Chrome/Chromium window to browse the web: open
+    pages, click, type, screenshot and read what is on screen. It runs in a
+    dedicated profile with persistent logins, visible by default so you can
+    watch it work.
     """
+
+    # category groups this module with the other web-facing ones in the
+    # settings list (without it the UI files it under "Other")
+    category = "web"
 
     # NOTE: intentionally NOT marked unsafe so it shows up in the WebUI
     # module list (unsafe modules are hidden when webui.show_unsafe_settings
@@ -91,18 +96,23 @@ class Browser(core.module.Module):
             },
         },
         "custom_binary_path": {
-            "type": "string",
-            "description": "Full path to the browser, used when 'Custom path' is selected above.",
+            # "text" is the type the settings UI renders for plain strings
+            # ("string" is accepted in the schema docs but has no renderer)
+            "type": "text",
+            "description": "Full path to the browser binary. Only used when 'Custom path' is selected above.",
             "default": "",
+            "depends": {"browser_binary": "custom"},
         },
         "port": {
             "type": "number",
-            "description": "Port used to talk to the browser. Only change it to attach to a browser you started yourself with --remote-debugging-port.",
+            "description": "Port used to talk to the browser. If a browser is already listening on it (for example one you started with --remote-debugging-port), the module attaches to that browser instead of launching a new one.",
             "default": DEFAULT_PORT,
+            "min": 1024,
+            "max": 65535,
         },
         "user_data_dir": {
-            "type": "string",
-            "description": "Profile folder of the controlled browser. Empty = data/browser/profile (persistent logins, separate from your own browsing). Absolute path = use an existing profile.",
+            "type": "text",
+            "description": "Profile folder of the controlled browser. Empty = data/browser/profile (persistent logins, separate from your own browsing). An absolute path uses an existing profile instead - **pointing it at your everyday browser gives the AI access to your logged-in sessions.**",
             "default": "",
         },
         "headless": {
@@ -111,8 +121,8 @@ class Browser(core.module.Module):
             "default": False,
         },
         "window_size": {
-            "type": "string",
-            "description": "Browser window size as WIDTH,HEIGHT (e.g. 1280,800).",
+            "type": "text",
+            "description": "Browser window size as WIDTH,HEIGHT (e.g. 1280,800). Only applies when the module launches a visible browser.",
             "default": "1280,800",
         },
         "auto_launch": {
@@ -132,8 +142,9 @@ class Browser(core.module.Module):
         },
         "snapshot_max_chars": {
             "type": "number",
-            "description": "Max characters of a page snapshot shown inline. Longer ones are saved to a file and the AI gets the path.",
+            "description": "Max characters of a page snapshot shown inline. Longer snapshots are cut and, when 'save_full_snapshots' is on, the full text is saved to a file and the AI gets the path.",
             "default": DEFAULT_SNAPSHOT_CHARS,
+            "min": 500,
         },
         "save_full_snapshots": {
             "type": "boolean",
@@ -142,7 +153,7 @@ class Browser(core.module.Module):
         },
         "auto_accept_dialogs": {
             "type": "boolean",
-            "description": "Accept website pop-ups automatically. Turn off to handle them with the handle_dialog tool instead.",
+            "description": "Automatically accept JavaScript dialogs (alert, confirm, prompt) so they never block the page. Turn off to decide with the handle_dialog tool instead. Note that accepting a confirm dialog can trigger irreversible actions on some sites.",
             "default": True,
         },
         "enable_network_monitoring": {
@@ -501,13 +512,16 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def open(self):
-        """Ensures the browser is running and connected (launches it if needed). Returns status info."""
+        """Starts the browser if it isn't running and connects to it. Use this before the other browser tools when the browser may be closed.
+
+        Returns the browser name, its debug endpoint (ws_url) and the number of open tabs.
+        """
         await self._ensure_connection()
         info = self._browser_info or await self._probe()
         return self.result({
             "status": "connected",
             "browser": info.get("Browser", "unknown") if info else "unknown",
-            "url": info.get("webSocketDebuggerUrl", "") if info else "",
+            "ws_url": info.get("webSocketDebuggerUrl", "") if info else "",
             "tabs": len(await page.list_page_targets(self._cdp)),
         })
 
@@ -538,7 +552,7 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def status(self):
-        """Reports connection state, current tab, open tabs, and whether the module owns the browser process."""
+        """Starts the browser if needed (auto_launch), then reports connection state, the current tab, all open tabs and whether the module launched the process."""
         await self._ensure_connection()
         targets = await page.list_page_targets(self._cdp)
         current = None
@@ -551,8 +565,12 @@ class Browser(core.module.Module):
             "owned_process": self._owned_proc is not None,
             "current_tab": current,
             "tabs": [
+                # `active` is OUR current tab, not CDP's targetInfo.attached
+                # (which only says "a debugger session is attached", true for
+                # every tab we have attached to)
                 {"id": t.get("targetId"), "title": t.get("title", ""),
-                 "url": t.get("url", ""), "active": t.get("attached", False)}
+                 "url": t.get("url", ""),
+                 "active": t.get("targetId") == self._current_target}
                 for t in targets
             ],
         })

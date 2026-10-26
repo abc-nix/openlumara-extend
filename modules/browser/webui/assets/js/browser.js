@@ -186,14 +186,21 @@ const BROWSER_PANEL = {
         if (!s) return 'checking..';
         if (s.connected) {
             return s.owned_process
-                ? 'connected - launched by the module'
-                : 'connected - external browser';
+                ? 'connected · launched by the module'
+                : 'connected · external browser';
         }
-        return s.browser_running ? 'browser running, not connected' : 'browser closed';
+        return s.browser_running ? 'running, not connected' : 'closed';
+    },
+
+    // pluralised tab count for the details block ("1 tab" / "3 tabs")
+    tabCountText() {
+        const n = this.status ? this.status.tab_count : null;
+        if (n === null || n === undefined) return '';
+        return n === 1 ? '1 tab' : n + ' tabs';
     },
 
     dotTitle() {
-        return 'Browser: ' + this.statusText();
+        return 'Browser — ' + this.statusText();
     },
 };
 

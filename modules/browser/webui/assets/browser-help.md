@@ -1,6 +1,6 @@
 #### What is this?
 
-A dedicated Chrome window the AI can drive for you: it browses, clicks, types, takes screenshots, and reads the page console and network activity. Log in to sites once — this profile is private to the module and persists across restarts.
+A dedicated Chrome window the AI can drive for you: it browses, clicks, types, runs JavaScript and takes screenshots, and reads the page console and network activity. It uses its own profile — separate from your everyday browser — so log in to sites once and the session persists across restarts.
 
 #### Open / Close
 

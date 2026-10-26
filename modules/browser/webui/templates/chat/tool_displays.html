@@ -6,15 +6,24 @@
 {% macro tool_views() %}
 <template x-if="toolDisplayView(tool) === 'browser-shot'">
     <div class="browser-shot"
-         x-data="{ src: '', loaded: '',
+         x-data="{ src: '', loaded: '', err: '',
                    load() {
                        const f = toolResponse(tool)?.content?.file;
                        if (!f || f === this.loaded) return;
                        this.loaded = f;
+                       this.err = '';
                        fetch('/api/ext/browser/shot?file=' + encodeURIComponent(f))
                            .then(r => r.json())
-                           .then(j => { if (j.success) this.src = 'data:' + j.data.mime + ';base64,' + j.data.data; })
-                           .catch(() => { this.loaded = ''; });
+                           .then(j => {
+                               // the route answers success:false when the file was
+                               // pruned (data/screenshots is not permanent)
+                               if (!j.success) throw new Error(String(j.data ?? 'could not load the screenshot'));
+                               this.src = 'data:' + j.data.mime + ';base64,' + j.data.data;
+                           })
+                           .catch(e => {
+                               this.err = (e && e.message) || 'could not load the screenshot';
+                               this.loaded = '';   // allow a retry on the next effect run
+                           });
                    } }"
          x-effect="load()">
         <template x-if="src">
@@ -22,7 +31,9 @@
         </template>
         <div class="browser-shot-path" x-show="toolResponse(tool)?.content?.path"
              x-text="toolResponse(tool)?.content?.path"></div>
-        <div class="display-error" x-show="toolDisplayError(tool)" x-text="toolDisplayError(tool)"></div>
+        {# tool errors are rendered by the core card (toolDisplayError), so this
+           row is only for the image fetch itself #}
+        <div class="display-error" x-show="err" x-text="err"></div>
     </div>
 </template>
 {% endmacro %}

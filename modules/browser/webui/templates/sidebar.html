@@ -79,7 +79,7 @@
         </div>
         <div class="browser-ext-detail"
              x-show="$store.browserPanel.status && $store.browserPanel.status.tab_count != null"
-             x-text="`${$store.browserPanel.status ? $store.browserPanel.status.tab_count : 0} tab(s)`">
+             x-text="$store.browserPanel.tabCountText()">
         </div>
         <div class="browser-ext-tabline"
              x-show="$store.browserPanel.status && $store.browserPanel.status.current_tab">
