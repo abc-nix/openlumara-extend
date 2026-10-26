@@ -123,8 +123,9 @@ const BROWSER_PANEL = {
     },
 
     restartLabel() {
-        // unknown headless (external/none) defaults to offering headless
-        return (this.status && this.status.headless) ? 'Restart visible' : 'Restart headless';
+        // "Restart headless" read as ambiguous (to? from?), so name the target
+        // mode instead. unknown headless (external/none) defaults to headless.
+        return (this.status && this.status.headless) ? 'Switch to visible window' : 'Switch to headless';
     },
 
     // ---- help window: body comes from assets/browser-help.md ----
