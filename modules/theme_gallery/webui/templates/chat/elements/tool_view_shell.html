@@ -1,0 +1,50 @@
+{# ================= E34 tool views: shell & scheduled jobs =================
+   Terminal-style command output and the scheduler job card. Scoped under
+   .tool-call-card like every custom tool view.
+   Source: templates/chat/tool_displays.html (shell / scheduler-job views) +
+   chat/custom_tool_views.css. #}
+<section class="tg-el-section">
+    <h3>Tool views &mdash; shell &amp; scheduled jobs</h3>
+
+    {# shell: prompt + streaming cursor + output #}
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Shell:&nbsp;</span><span class="name">run_command</span>
+            <span class="call-args">command="ls -la"</span>
+        </div>
+        <div class="body">
+            <div class="shell-box">
+                <div class="shell-prompt">
+                    <span class="shell-prompt-symbol">$</span><span class="shell-command hljs">ls <span class="hljs-built_in">-la</span></span><span class="shell-cursor"></span>
+                </div>
+                <div class="shell-divider"></div>
+                <div class="shell-output">total 24
+drwxr-xr-x  6 abc abc 4096 Oct 25 18:02 .
+drwxr-xr-x 12 abc abc 4096 Oct 25 17:40 ..
+-rw-r--r--  1 abc abc  395 Oct 25 12:10 .gitignore</div>
+            </div>
+            <div class="grep-note">output truncated to the last 2000 lines</div>
+        </div>
+    </div>
+
+    {# scheduler job card #}
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Scheduler:&nbsp;</span><span class="name">create_job</span>
+            <span class="call-result">&check; job created</span>
+        </div>
+        <div class="body">
+            <div class="job-card">
+                <div class="job-when">
+                    {% include 'svg/clock.svg' %}
+                    <span>every day at 09:00</span>
+                    <span class="job-tag">recurring</span>
+                    <span class="job-tag">prompt</span>
+                </div>
+                <div class="job-action">summarize overnight logs into data_backups/summary.md</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.shell-box &gt; .shell-prompt &gt; .shell-prompt-symbol + .shell-command.hljs + .shell-cursor &middot; .shell-divider &middot; .shell-output &middot; .job-card &gt; .job-when (svg + text + .job-tag) + .job-action &mdash; custom_tool_views.css, scoped under .tool-call-card</div>
+</section>

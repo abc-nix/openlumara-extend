@@ -1,0 +1,136 @@
+{# ================= E5 messages & turns + E6 markdown ================= #}
+<section class="tg-el-section">
+    <h3>Messages, turns &amp; markdown</h3>
+
+    <div class="fullwidth turn">
+        <div class="message-wrapper user">
+            <div class="message user">
+                <div class="content">
+                    <p>A user message with <strong>bold</strong>, <code>inline_code()</code>,
+                       <mark>a search hit</mark>, <a href="#" onclick="return false">a link</a>
+                       and emoji 🎨.</p>
+                </div>
+            </div>
+            <div class="message-buttons">
+                <span class="turn-timestamp">{% include 'svg/clock.svg' %}<span>Today 10:02</span></span>
+                <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                <button title="Delete">{% include 'svg/trash.svg' %}</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="fullwidth turn">
+        <div class="message-wrapper user">
+            <div class="message user">
+                <div class="multimodal-content">
+                    <div>With an attachment 👇</div>
+                    <div class="text-preview">{% include 'svg/paperclip.svg' %}<span>notes.txt</span></div>
+                    <div class="media-preview image-preview"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='110'%3E%3Crect width='180' height='110' rx='8' fill='%23354a5f'/%3E%3Ccircle cx='138' cy='28' r='12' fill='%23e8b84b'/%3E%3Cpath d='M14 92 L62 44 L98 72 L126 50 L166 92 Z' fill='%237fb069'/%3E%3C/svg%3E" alt="fake image attachment" loading="lazy"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="fullwidth turn">
+        <div class="message-wrapper assistant">
+            <div class="message assistant">
+                <div class="content">
+                    <h2>Markdown sample</h2>
+                    <p>Paragraph with <strong>bold</strong>, <em>italics</em>,
+                        <del>strikethrough</del>, <code>inline code</code>, a
+                        <mark>mark</mark>, a <a href="#" onclick="return false">link</a>, and code below.</p>
+                    <div class="tg-el-cap">inline &lt;code&gt; gets ONLY font-family from message_bubble.css — no pill, background or padding (app gap)</div>
+                    <ul>
+                        <li>bullet one
+                            <ul>
+                                <li>nested bullet</li>
+                                <li>nested with <code>code</code></li>
+                            </ul>
+                        </li>
+                        <li>bullet two</li>
+                    </ul>
+                    <ol>
+                        <li>numbered</li>
+                        <li>steps</li>
+                    </ol>
+                    <blockquote>
+                        <p>A blockquote — quote me on that.</p>
+                        <blockquote><p>nested quote keeps the accent border</p></blockquote>
+                    </blockquote>
+                    <ul>
+                        <li><input type="checkbox" disabled> task done</li>
+                        <li><input type="checkbox" checked disabled> task pending</li>
+                    </ul>
+                    <table>
+                        <thead><tr><th>Column</th><th>Value</th><th align="center">Centered</th></tr></thead>
+                        <tbody>
+                            <tr><td>rows</td><td>zebra</td><td align="center">1</td></tr>
+                            <tr><td>second</td><td>row</td><td align="center">2</td></tr>
+                        </tbody>
+                    </table>
+                    <hr>
+                    <h5>h5 — no CSS rule in message_bubble.css</h5>
+                    <h6>h6 — no CSS rule either</h6>
+                    <div class="tg-el-cap">h5/h6 are valid markdown but unstyled: they fall back to the browser's default sizes (app gap)</div>
+                    <pre><button class="copy-btn" type="button">Copy</button><code class="hljs language-python"><span class="hljs-keyword">def</span> <span class="hljs-title">greet</span>(name):
+    <span class="hljs-comment"># fake code, real highlighting</span>
+    <span class="hljs-keyword">return</span> <span class="hljs-string">f"hi {name}"</span></code></pre>
+                    <pre><button class="copy-btn" type="button">Copy</button><code class="hljs language-css"><span class="hljs-selector-class">.tg-cover</span> {
+    <span class="hljs-attribute">display</span>: flex;
+    <span class="hljs-attribute">background</span>: <span class="hljs-built_in">var</span>(--bg-primary);
+}</code></pre>
+                    <div class="tg-el-cap">one block per language = one code-theme palette each (github-light.css loaded here)</div>
+                    <p>Inline markdown image — no max-width rule in .content, so it renders at natural size:</p>
+                    <p><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='96'%3E%3Crect width='260' height='96' rx='8' fill='%23354a5f'/%3E%3Ccircle cx='210' cy='30' r='12' fill='%23e8b84b'/%3E%3Cpath d='M18 84 L80 40 L120 66 L160 46 L242 84 Z' fill='%237fb069'/%3E%3C/svg%3E" alt="fake inline chart" loading="lazy"></p>
+                </div>
+            </div>
+            <div class="message-buttons">
+                <span class="turn-timestamp">{% include 'svg/clock.svg' %}<span>Today 10:03</span></span>
+                <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                <button title="Delete">{% include 'svg/trash.svg' %}</button>
+            </div>
+        </div>
+    </div>
+
+    {# queued user message: .message.user.pending (dashed border) + .status;
+       the buttons row also demos .regenerate (accent border) and .stats #}
+    <div class="fullwidth turn">
+        <div class="message-wrapper user">
+            <div class="message user pending">
+                <div class="content"><p>Queued while the AI is still answering&hellip;</p></div>
+                <div class="status">queued</div>
+            </div>
+            <div class="message-buttons">
+                <span class="turn-timestamp">{% include 'svg/clock.svg' %}<span>Today 10:04</span></span>
+                <button class="regenerate" title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                <span class="stats">128 tokens &middot; 1.2 s</span>
+            </div>
+        </div>
+    </div>
+
+    {# slash-command message: message._metadata.is_cmd adds .command to content
+       (window.css: monospace, accent-tinted ground) #}
+    <div class="fullwidth turn">
+        <div class="message-wrapper user">
+            <div class="message user">
+                <div class="content command"><p>/prompt</p></div>
+            </div>
+        </div>
+    </div>
+
+    {# editing state — styled under .message.user/.assistant &:has(.editing) #}
+    <div class="fullwidth turn">
+        <div class="message-wrapper user">
+            <div class="message user">
+                <div class="flex fullwidth editing">
+                    <textarea rows="2">editing a message…</textarea>
+                    <div class="edit-actions"><button type="button">Save</button><button type="button">Cancel</button></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>

@@ -1,0 +1,19 @@
+{# ================= E31 welcome panel =================
+   The new-chat screen internals. Unlike E3's badge sample, this one is NOT
+   scoped away: window.css styles .welcome-panel itself (centering, flex,
+   fade) and that look IS the element.
+   Source: templates/chat/welcome.html + svg/sparkle.svg + chat/window.css. #}
+<section class="tg-el-section">
+    <h3>Welcome panel</h3>
+
+    <div class="tg-el-viewport">
+        <div class="welcome-panel">
+            {% include 'svg/sparkle.svg' %}
+            <h2 class="welcome-title">Hello there!</h2>
+            <p class="welcome-hint">Say hi, ask me anything, or let's plan something together.</p>
+            <span class="welcome-model-badge">{% include 'svg/cube.svg' %} llama-3.3-70b-instruct-awq</span>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.welcome-panel &gt; svg.welcome-icon + h2.welcome-title + p.welcome-hint (+ .welcome-model-badge) &mdash; rendered only while the chat is empty (x-if turnHistory.length === 0); greeting hides when a module fills an above/below_message slot</div>
+</section>

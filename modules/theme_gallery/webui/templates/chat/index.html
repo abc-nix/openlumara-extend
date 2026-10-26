@@ -1,0 +1,39 @@
+{# Theme gallery — main-window overlay (the big part) — split into includes
+   2026-10-25 (was one 1244-line file; see BUGS.md #20).
+
+   Mounted through core's `below_header` extension slot inside #chat-window
+   (exactly where testbench mounts its own cover), so the real stylesheet rules
+   that expect "#chat-window #messages", "#chat-window #input" etc. still match
+   the replica below -> the preview looks identical to a real chat.
+
+   This file only declares the macro; the content lives next to it:
+     chat/overlay.html        the cover itself: top bars, panes host, diff drawer
+     chat/sample_chat.html    #tg-sample-chat — mirrors the REAL chat DOM:
+                              .notice (top) · user turns · assistant turns with
+                              Thoughts / Process timeline (agent-chain + stations
+                              + finish flag) / tool cards · message-buttons under
+                              every turn · input bar with upload, pill, Send
+     chat/element_sheet.html  #tg-sample-elements + 15 section includes
+                              (chat/elements/*.html — one file per section)
+
+   INCLUDES MUST BE PREFIXED ('theme_gallery/...'): the jinja loader is core's
+   first, then a PrefixLoader keyed by module name, so an unprefixed path can
+   never resolve inside this module. The prefix is also why these partials stay
+   private: only paths mirroring a core template are ever rendered by core.
+
+   The chat sample is PLAIN STATIC HTML (no Alpine directives inside it): it is
+   cloned once per theme pane by theme_gallery.js. Theme variables are applied
+   inline on each .tg-pane container, so panes never touch the real <html> theme. #}
+{% macro below_header() %}
+{% include 'theme_gallery/chat/overlay.html' %}
+
+{# =====================================================================
+   THE SAMPLE MARKUP — cloned into every pane.
+   Uses the app's REAL classes only (message_bubble.css, window.css,
+   agent_chain.css, combined_block.css, toolcalls.css, reasoning.css,
+   input.css, context_pill.css, message_buttons.css). Never add custom
+   styling here; if something looks wrong, that IS the finding.
+   ===================================================================== #}
+{% include 'theme_gallery/chat/sample_chat.html' %}
+{% include 'theme_gallery/chat/element_sheet.html' %}
+{% endmacro %}

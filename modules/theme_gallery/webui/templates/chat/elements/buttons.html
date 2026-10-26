@@ -1,0 +1,51 @@
+{# ================= E1 buttons & actions ================= #}
+<section class="tg-el-section">
+    <h3>Buttons &amp; actions</h3>
+    {# app has NO global button styles — every button is styled by its
+       component scope, so each sample repeats the REAL ancestor chain #}
+    <div class="tg-el-row"><div class="settings-modal modal"><div class="settings-error">
+        <span>Connection failed.</span>
+        <button type="button">Retry</button>
+        <button type="button" disabled>Retry (disabled)</button>
+    </div></div>
+    <span class="tg-el-cap">.settings-error has NO CSS anywhere (app gap: modal.css styles .error, template uses .settings-error) → real Retry IS this plain browser-default button</span></div>
+    <div class="tg-el-row"><div class="settings-modal modal"><div class="settings-footer"><div class="footer-buttons">
+        <button type="button" class="footer-btn reset">Revert</button>
+        <button type="button" class="footer-btn save">Save</button>
+        <button type="button" class="footer-btn save" disabled>Save (disabled)</button>
+    </div></div></div>
+        <span class="tg-el-cap">.settings-footer &gt; .footer-buttons &gt; .footer-btn</span></div>
+    <div class="tg-el-row"><div class="settings-modal modal"><div class="close-prompt"><div class="prompt-box"><p class="prompt-text">You have unsaved changes. Save before closing?</p><div class="prompt-buttons">
+        <button type="button" class="prompt-btn">Cancel</button>
+        <button type="button" class="prompt-btn save">Save</button>
+        <button type="button" class="prompt-btn danger">Don't save</button>
+    </div></div></div></div>
+        <span class="tg-el-cap">.close-prompt &gt; .prompt-box &gt; .prompt-buttons</span></div>
+    <div class="tg-el-row"><div id="chat-list"><div class="sidebar-footer">
+        <button class="sidebar-btn">{% include 'svg/add.svg' %} New Chat</button>
+    </div></div>
+        <span class="tg-el-cap">#chat-list &gt; .sidebar-footer &gt; .sidebar-btn</span></div>
+    <div class="tg-el-row"><div id="chat-list"><div class="chats"><div class="item"><div class="title-row"><div class="item-actions">
+        <button class="action-btn" title="Actions">{% include 'svg/more_vertical.svg' %}</button>
+        <button class="action-btn active" title="Actions open">{% include 'svg/more_vertical.svg' %}</button>
+    </div></div></div></div></div>
+        <span class="tg-el-cap">#chat-list .chats .item-actions .action-btn (+ .active)</span></div>
+    <div class="tg-el-row"><div id="chat-list"><div class="search">
+        <span class="search-icon">{% include 'svg/search.svg' %}</span>
+        <input type="text" placeholder="Search..">
+        <button type="button" class="search-toggle">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
+        </button>
+        <button type="button" class="search-toggle active">{% include 'svg/tag.svg' %}</button>
+        </div></div>
+        <span class="tg-el-cap">#chat-list &gt; .search · .search-toggle(+.active)</span></div>
+    <div class="message-buttons">
+        <button title="Copy">{% include 'svg/copy.svg' %}</button>
+        <button title="Copied (state)">{% include 'svg/checkmark.svg' %}</button>
+        <button title="Edit">{% include 'svg/edit.svg' %}</button>
+        <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+        <button title="Delete">{% include 'svg/trash.svg' %}</button>
+        <button title="Disabled (streaming)" disabled>{% include 'svg/copy.svg' %}</button>
+        <span class="tg-el-cap">.message-buttons button (+copied/disabled)</span>
+    </div>
+</section>

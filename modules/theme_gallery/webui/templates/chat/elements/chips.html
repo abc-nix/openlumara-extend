@@ -1,0 +1,24 @@
+{# ================= E3 chips, tags & badges ================= #}
+<section class="tg-el-section">
+    <h3>Chips, tags &amp; badges</h3>
+    <div id="chat-list"><div class="tag-filter"><div class="tag-chips">
+        <button type="button" class="tag-chip">untagged</button>
+        <button type="button" class="tag-chip selected">selected-tag</button>
+        <button type="button" class="tag-chip" disabled>disabled</button>
+        <span class="inline-tag">inline-tag</span>
+    </div>
+    <button type="button" class="tag-filter-clear">clear filter</button></div></div>
+    <div class="tg-el-row combined-block expanded">
+        <span class="module-chip"><span class="module-action"><span>web search</span><span class="action-count">x3</span></span></span>
+        <span class="module-chip"><span class="module-action"><span>read file</span></span></span>
+        <span class="tg-el-cap">.module-chip (combined block)</span>
+    </div>
+    {# scope provider only — .tg-el-scope opts this out of the sheet's
+       .welcome-panel neutralizer so the badge keeps its real scope without
+       the panel's box styling (the REAL panel look lives in the Welcome
+       section, E35b / welcome_panel.html). #}
+    <div class="welcome-panel tg-el-scope" style="padding:16px; flex:none;">
+        <span class="welcome-model-badge">{% include 'svg/cube.svg' %} gpt-fake-4o-mini</span>
+        <span class="tg-el-cap">.welcome-model-badge (wrapped in .welcome-panel for scope)</span>
+    </div>
+</section>

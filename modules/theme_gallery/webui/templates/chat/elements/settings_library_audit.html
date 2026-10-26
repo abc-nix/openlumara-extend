@@ -1,0 +1,82 @@
+{# ================= E27 library audit overlay =================
+   Pre-install code review: flags, warnings, file bar, line gutter, code,
+   footer actions. The real element is a teleported full-screen overlay
+   (position:fixed, rgba backdrop, z-index 1500); here it is a static block
+   with a bounded height, so the dialog's own styling is what you see.
+   Source: templates/modals/settings/module_library.html +
+   settings/module_library.css (.library-audit-* are top-level rules). #}
+<section class="tg-el-section">
+    <h3>Module library &mdash; code review overlay</h3>
+
+    <div class="library-audit-overlay">
+        <div class="library-audit-modal" role="dialog" aria-modal="true">
+            <div class="library-audit-header">
+                <h3 class="section-title">Review code before installing: coder</h3>
+                <a class="library-audit-repo" href="#" onclick="return false">https://github.com/example/openlumara-modules</a>
+            </div>
+
+            <p class="library-audit-lead">Modules are Python code that runs with <strong>full access to your host system</strong>. Read through the source below first.</p>
+
+            <div class="library-audit-flags">
+                <button type="button" class="audit-flag danger focused">
+                    <span class="audit-flag-name">on_install</span>
+                    <span class="audit-flag-line">line 42</span>
+                    <span class="audit-flag-desc">runs at install time</span>
+                </button>
+                <button type="button" class="audit-flag warn">
+                    <span class="audit-flag-name">subprocess</span>
+                    <span class="audit-flag-line">line 57</span>
+                    <span class="audit-flag-desc">spawns a process</span>
+                </button>
+                <button type="button" class="audit-flag">
+                    <span class="audit-flag-name">requests</span>
+                    <span class="audit-flag-line">line 88</span>
+                    <span class="audit-flag-desc">network access</span>
+                </button>
+            </div>
+
+            <div class="library-audit-warnings">
+                <div class="audit-warning">This module calls subprocess &mdash; review the arguments it passes.</div>
+            </div>
+
+            <div class="library-audit-filebar">
+                <label>File:
+                    <select>
+                        <option selected>module.py</option>
+                        <option>__init__.py</option>
+                    </select>
+                </label>
+                <span class="audit-truncated">file is truncated in this view</span>
+            </div>
+
+            <div class="library-audit-loading"><div class="spinner"></div></div>
+            <div class="library-audit-error">Could not fetch module.py: 404</div>
+
+            <div class="library-audit-code">
+                <div class="audit-gutter" aria-hidden="true">
+                    <span class="audit-line">1</span>
+                    <span class="audit-line">2</span>
+                    <span class="audit-line focus">3</span>
+                    <span class="audit-line">4</span>
+                </div>
+<pre class="audit-code hljs">import subprocess
+from core import module
+
+class Coder(module.Module):
+    def on_install(self):
+        subprocess.run(["pip", "install", "x"])</pre>
+            </div>
+
+            <div class="library-audit-footer">
+                <span class="library-audit-footnote">Only install code you have read and trust.</span>
+                <div class="library-audit-actions">
+                    <button type="button" class="library-btn">Reject</button>
+                    <button type="button" class="library-btn danger">Install anyway</button>
+                    <button type="button" class="library-btn primary">Install</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.library-audit-overlay (real: fixed + rgba(0,0,0,.55) + z-index 1500, teleported to body) &gt; .library-audit-modal &gt; .library-audit-header (.section-title + .library-audit-repo) &middot; .library-audit-lead &middot; .library-audit-flags &gt; .audit-flag(.focused + kind class) &gt; .audit-flag-name/.audit-flag-line/.audit-flag-desc &middot; .library-audit-warnings &gt; .audit-warning &middot; .library-audit-filebar (+.audit-truncated) &middot; .library-audit-loading &middot; .library-audit-error &middot; .library-audit-code &gt; .audit-gutter &gt; .audit-line(.focus) + pre.audit-code.hljs &middot; .library-audit-footer &gt; .library-audit-footnote + .library-audit-actions &gt; .library-btn(.danger/.primary)</div>
+</section>

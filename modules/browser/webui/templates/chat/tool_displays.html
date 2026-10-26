@@ -1,0 +1,28 @@
+{# screenshot tool card: the tool result only carries the file name and the
+   geometry; the picture is fetched from the module route and rendered small
+   (css), so right-click -> open image in new tab shows the full-resolution
+   capture. rendered through the core tool_display extension slot, which
+   mirrors this template's path and calls the `tool_views` macro. #}
+{% macro tool_views() %}
+<template x-if="toolDisplayView(tool) === 'browser-shot'">
+    <div class="browser-shot"
+         x-data="{ src: '', loaded: '',
+                   load() {
+                       const f = toolResponse(tool)?.content?.file;
+                       if (!f || f === this.loaded) return;
+                       this.loaded = f;
+                       fetch('/api/ext/browser/shot?file=' + encodeURIComponent(f))
+                           .then(r => r.json())
+                           .then(j => { if (j.success) this.src = 'data:' + j.data.mime + ';base64,' + j.data.data; })
+                           .catch(() => { this.loaded = ''; });
+                   } }"
+         x-effect="load()">
+        <template x-if="src">
+            <img class="browser-shot-thumb" :src="src" loading="lazy" alt="screenshot">
+        </template>
+        <div class="browser-shot-path" x-show="toolResponse(tool)?.content?.path"
+             x-text="toolResponse(tool)?.content?.path"></div>
+        <div class="display-error" x-show="toolDisplayError(tool)" x-text="toolDisplayError(tool)"></div>
+    </div>
+</template>
+{% endmacro %}

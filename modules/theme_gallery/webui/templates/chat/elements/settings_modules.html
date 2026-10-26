@@ -1,0 +1,95 @@
+{# ================= E25 modules & channels tabs =================
+   The unified module/channel list and the per-item drill-down.
+   Source: templates/modals/settings/modules.html (+ channels.html, same
+   markup) + modal.css .unified-* / .module-drilldown rules. #}
+<section class="tg-el-section">
+    <h3>Modules &amp; channels &mdash; list and drill-down</h3>
+
+    <div class="settings-modal modal">
+        <div class="unified-list">
+            <h3>Modules</h3>
+            <p class="section-desc">Enable or disable core modules. Unsafe modules are highlighted.</p>
+
+            {# grouped by the category each module class declares #}
+            <div class="module-group">
+                <h4 class="module-group-label">Development</h4>
+
+                <div class="unified-card">
+                    <div class="info">
+                        <span type="button" class="btn">Coder</span>
+                        <p class="description">Code editing, file browsing and git tools.</p>
+                    </div>
+                    <button type="button" class="toggle toggle-on"></button>
+                </div>
+
+                <div class="unified-card">
+                    <div class="info">
+                        <span type="button" class="btn">Theme Gallery</span>
+                        <p class="description">Developer tool: compare every theme side by side.</p>
+                    </div>
+                    <button type="button" class="toggle toggle-on"></button>
+                </div>
+
+                <div class="unified-card disabled">
+                    <div class="info">
+                        <span type="button" class="btn">Scheduler</span>
+                        <p class="description">Run prompts on a schedule.</p>
+                    </div>
+                    <button type="button" class="toggle toggle-off"></button>
+                </div>
+
+                <div class="unified-card unsafe">
+                    <div class="info">
+                        <span type="button" class="btn">Host Shell</span>
+                        <p class="description">Lets your AI run shell commands with full access to your host system. EXTREMELY DANGEROUS!</p>
+                    </div>
+                    <button type="button" class="toggle toggle-on"></button>
+                </div>
+            </div>
+
+            <div class="module-group">
+                <h4 class="module-group-label">Writing</h4>
+                <div class="unified-card">
+                    <div class="info">
+                        <span type="button" class="channel-name-btn">Docs</span>
+                        <p class="description">Read and search local documentation folders.</p>
+                    </div>
+                    <button type="button" class="toggle toggle-on"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# drill-down: one module selected #}
+    <div class="settings-modal modal">
+        <div class="module-drilldown">
+            <div>
+                <button type="button" class="back-btn">&larr; Back</button>
+                <h3 class="section-title">Coder</h3>
+                <p class="section-desc">Code editing, file browsing and git tools.</p>
+
+                <div class="setting-item setting-parent">
+                    <div class="item"><div class="toggle-row">
+                        <label>Enable terminal</label>
+                        <button class="toggle active" type="button"></button>
+                    </div>
+                    <span class="description">Inline terminal in the coder panel.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# no-settings variant #}
+    <div class="settings-modal modal">
+        <div class="module-drilldown">
+            <div>
+                <button type="button" class="back-btn">&larr; Back</button>
+                <h3 class="section-title">Theme Gallery</h3>
+                <p class="no-settings-msg">This module has no configurable settings.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.unified-list &gt; .module-group &gt; h4.module-group-label + .unified-card(.disabled/.unsafe) &gt; .info &gt; (span.btn | span.channel-name-btn) + p.description + button.toggle(.toggle-on/.toggle-off) &middot; .module-drilldown &gt; .back-btn + .section-title + .section-desc / .no-settings-msg &middot; .setting-item.setting-parent (modal.css / fields.css)</div>
+</section>

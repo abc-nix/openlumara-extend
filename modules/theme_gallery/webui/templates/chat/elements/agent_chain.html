@@ -1,0 +1,104 @@
+{# ================= E9 agent chain & combined block ================= #}
+<section class="tg-el-section">
+    <h3>Agent chain &amp; combined blocks</h3>
+    <div class="agent-chain is-streaming">
+        {# step 1: done + collapsed with thought snippet + module chips #}
+        <div class="combined-block collapsed">
+            <div class="node-dot dot-done"></div>
+            <div class="header">
+                <svg class="standalone-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="text">
+                    <span class="thought-header">
+                        <span class="step-thought">Checked the two candidate libraries, marked the faster one…</span>
+                        <span class="tool-names"><span class="module-group"><span class="tool-module">Web:</span><span class="tool-action">search<span class="tool-repeat">x2</span></span></span></span>
+                    </span>
+                </span>
+            </div>
+        </div>
+        {# step 2: live + expanded, reasoning row + module chip header #}
+        <div class="combined-block expanded">
+            <div class="node-dot dot-live"></div>
+            <div class="header">
+                <svg class="standalone-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="text">
+                    <span class="thought-header">
+                        <span class="tool-names thinking-label">Thinking..</span>
+                        <span class="dots"><span aria-hidden="true">&nbsp;</span><span aria-hidden="true">&nbsp;</span><span aria-hidden="true">&nbsp;</span></span>
+                    </span>
+                    <span class="step-modules"><span class="module-chip"><span class="module-action"><span>read file</span></span></span></span>
+                </span>
+            </div>
+            <div class="block">
+                <div class="reasoning-row"><div class="reasoning-text">Weighing options: exl3 keeps winning on this hardware, but the iq4 sheet is close…</div></div>
+            </div>
+        </div>
+        {# step 3: failed #}
+        <div class="combined-block collapsed">
+            <div class="node-dot dot-failed"></div>
+            <div class="header">
+                <svg class="standalone-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="text">
+                    <span class="thought-header"><span class="step-thought">Download failed — mirror unreachable.</span></span>
+                </span>
+            </div>
+        </div>
+        {# step 4: reasoning-text overflow variant (user QA 2026-10-25:
+           show both sbox versions — short text has NO scrollbar,
+           long text scrolls inside max-height:120px + overflow-y:auto) #}
+        <div class="combined-block expanded">
+            <div class="node-dot dot-done"></div>
+            <div class="header">
+                <svg class="standalone-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="text">
+                    <span class="thought-header"><span class="step-thought">Comparing quant formats… (long thought — sbox scrolls)</span></span>
+                </span>
+            </div>
+            <div class="block">
+                <div class="reasoning-row"><div class="reasoning-text">exl3 keeps winning on this hardware, but let me be thorough before recommending.
+Checking the iq4 sheet first: throughput within 4% on batch-1, but decode latency spikes on long contexts — that is a known iq4 calibration gap around 8k.
+The gptq variant measured worse perplexity on the math evals; not close enough to consider.
+AWQ 4-bit holds up on reasoning benchmarks, yet it lacks the dynamic scale fallback that matters for this model's outlier layers.
+exl3 at 3.18bpw sits almost exactly between 3.0 and 3.5 quality tiers, and the community reports agree it is the sweet spot here.
+The only real downside is that exl3 quantization takes longer to build — one-time cost, irrelevant for inference choice.
+Memory: both formats land under 20 GB at 32k context, so the 24 GB card is fine either way.
+Conclusion: recommend qwen3-32b-exl3 @ 3.18bpw and note the 3.0bpw alternative if the user wants more headroom.
+The reasoning above is intentionally long to demonstrate the 120px clamp — anything past it scrolls inside the sbox.</div></div>
+            </div>
+        </div>
+
+        {# step 5 (2026-10-25 audit): the SINGLE-TOOL bare header variant.
+           combined_block.html renders .bare-header instead of the thought
+           rows when there is no reasoning content, and appends .step-args +
+           .step-summary from tool metadata; the markdown body is a
+           .flex.fullwidth.nogaps wrapper around .step-content. #}
+        <div class="combined-block expanded">
+            <div class="node-dot dot-done"></div>
+            <div class="header">
+                <svg class="standalone-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="bare-header">
+                    <span class="tool-names">
+                        <span class="module-group"><span class="tool-module">Web:</span><span class="tool-action">search text<span class="tool-repeat">x2</span></span></span>
+                    </span>
+                    <span class="step-args">"markdown pipeline 2026"</span>
+                    <span class="step-summary">6 results &middot; 2 sources kept</span>
+                </span>
+            </div>
+            <div class="block">
+                <div class="flex fullwidth nogaps">
+                    <div class="step-content">Rendered <strong>markdown</strong> body of the step (x-md fills this in the app; static here).</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {# locked chain (enable_chain_expansion off): header is not clickable #}
+    <div class="agent-chain">
+        <div class="agent-chain-header locked">
+            {% include 'svg/gear.svg' %}
+            <span class="label">Process</span>
+            <span class="activity">(2 steps)</span>
+        </div>
+    </div>
+    <div class="tg-el-cap">agent_chain.css: .agent-chain-header.locked &mdash; cursor:default, no hover feedback (chain expansion disabled)</div>
+
+    <div class="tg-el-cap">combined_block.html inside .agent-chain(.is-streaming): .combined-block(.collapsed/.expanded) + .dot-done/.dot-live/.dot-failed + thought/module rows · step 2 shows SHORT .reasoning-text (no scrollbar) vs step 4 LONG (clamped to 120px, scrolls) · step 5 = the no-reasoning variant: .bare-header &gt; .tool-names + .step-args + .step-summary, body in .block &gt; .flex.fullwidth.nogaps &gt; .step-content</div>
+</section>

@@ -1,0 +1,65 @@
+{# ================= E21 composer & header controls ================= #}
+<section class="tg-el-section">
+    <h3>Composer &amp; header controls</h3>
+    <header class="tg-el-header">
+        <div class="left">
+            <button class="menu-btn" title="Toggle sidebar">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <h1>My Chat</h1>
+        </div>
+        <div class="right">
+            <span class="stream-state" style="display:inline">idle</span>
+            <div class="model-switcher">
+                <select class="model-select" title="Switch model">
+                    <option>gemma-4-12b-it-qat</option>
+                    <option selected>llama-3.3-70b-instruct-awq</option>
+                    <option>qwen3-32b-exl3</option>
+                </select>
+            </div>
+            <button class="btn" id="settings-btn" title="Settings (Ctrl+S)">{% include 'svg/gear.svg' %}</button>
+            <button class="btn" title="Export chat">{% include 'svg/download.svg' %}</button>
+            <button class="btn" title="Clear chat">{% include 'svg/trash.svg' %}</button>
+        </div>
+    </header>
+    {# composer, idle — REAL structure: #input > .input-wrapper (flex,
+       align-items:stretch, bordered pill-container) > children #}
+    <div id="input">
+        <div class="input-wrapper">
+            <button id="upload" title="Upload file or paste images (Ctrl+V)" aria-label="Upload">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            </button>
+            <textarea id="user-input" placeholder="Type a message.." rows="1" aria-label="Message input"></textarea>
+            <div id="context-pill">
+                <button class="pill-button" type="button">
+                    <svg class="pill-outline" viewBox="0 0 76 30" preserveAspectRatio="none" aria-hidden="true">
+                        <path class="pill-track" d="M38 1 H61 A14 14 0 0 1 75 15 A14 14 0 0 1 61 29 H14 A14 14 0 0 1 1 15 A14 14 0 0 1 14 1 Z"></path>
+                        <path class="pill-fill" pathLength="100" stroke-dasharray="35 65" d="M38 1 H61 A14 14 0 0 1 75 15 A14 14 0 0 1 61 29 H14 A14 14 0 0 1 1 15 A14 14 0 0 1 14 1 Z"></path>
+                    </svg>
+                    <span class="pill-pct">35%</span>
+                </button>
+            </div>
+            <button id="send" aria-label="Send message">Send</button>
+        </div>
+    </div>
+    {# composer, streaming: stop button replaces send #}
+    <div id="input">
+        <div class="input-wrapper">
+            <button id="upload" title="Upload (disabled while streaming)" disabled aria-label="Upload">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            </button>
+            <textarea id="user-input" placeholder="Type a message.." rows="1" disabled></textarea>
+            <div id="context-pill">
+                <button class="pill-button active" type="button">
+                    <svg class="pill-outline" viewBox="0 0 76 30" preserveAspectRatio="none" aria-hidden="true">
+                        <path class="pill-track" d="M38 1 H61 A14 14 0 0 1 75 15 A14 14 0 0 1 61 29 H14 A14 14 0 0 1 1 15 A14 14 0 0 1 14 1 Z"></path>
+                        <path class="pill-fill" pathLength="100" stroke-dasharray="72 28" d="M38 1 H61 A14 14 0 0 1 75 15 A14 14 0 0 1 61 29 H14 A14 14 0 0 1 1 15 A14 14 0 0 1 14 1 Z"></path>
+                    </svg>
+                    <span class="pill-pct">72%</span>
+                </button>
+            </div>
+            <button id="stop" aria-label="Stop generation"><span class="streaming-icon">{% include 'svg/cross.svg' %}</span><span class="stop-text">Stop</span></button>
+        </div>
+    </div>
+    <div class="tg-el-cap">header.html (.menu-btn/.btn/#settings-btn/.model-select fake names/.stream-state) + #input &gt; .input-wrapper &gt; #upload/#user-input/#context-pill/#send|#stop — model names FAKE by design; composer IS typable (local)</div>
+</section>

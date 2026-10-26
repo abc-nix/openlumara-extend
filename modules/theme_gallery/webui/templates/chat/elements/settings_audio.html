@@ -1,0 +1,66 @@
+{# ================= E36 audio tab =================
+   The Audio category: volume/frequency sliders plus one row per event sound
+   (toggle, current file name, upload, Play/Clear actions).
+   Source: templates/modals/settings/audio.html + fields.css / modal.css .actions. #}
+<section class="tg-el-section">
+    <h3>Audio &mdash; sound effects</h3>
+
+    <div class="settings-modal modal">
+        <h3 class="section-title">Audio</h3>
+        <p class="section-desc">Sound effects played while the AI works, and the volume they play at.</p>
+
+        <hr>
+
+        <div class="item"><div class="row">
+            <label class="label">Volume</label>
+            <input type="range" min="0" max="100" value="60">
+            <span class="label right">60%</span>
+        </div></div>
+
+        <div class="item"><div class="row">
+            <label class="label">Token Generation Volume</label>
+            <input type="range" min="0" max="100" value="25">
+            <span class="label right">25%</span>
+        </div></div>
+
+        <div class="item"><div class="row">
+            <label class="label">Token Generation Sound Frequency</label>
+            <input type="range" min="100" max="9000" step="100" value="2400">
+            <span class="label right">2400 Hz</span>
+        </div></div>
+
+        {# one block per sound id: send_message, response_start, processing,
+           token, completion, reasoning_end #}
+        <div class="item">
+            <div class="toggle-row">
+                <label class="label">Send Message Sound</label>
+                <button type="button" class="toggle toggle-on"></button>
+            </div>
+            <div class="item">
+                <p class="description">Using generated sound</p>
+            </div>
+            <div class="item">
+                <input type="file" accept="audio/*" disabled>
+                <div class="actions">
+                    <button type="button" class="btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                        <span>Play</span>
+                    </button>
+                    <button type="button" class="btn">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="item">
+            <div class="toggle-row">
+                <label class="label">Completion Sound</label>
+                <button type="button" class="toggle toggle-off"></button>
+            </div>
+            <div class="item">
+                <p class="description">chime-final.wav</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.item &gt; .row &gt; label.label + input[type=range] + span.label.right &middot; .item &gt; .toggle-row (button.toggle.toggle-on/.toggle-off) &gt; .item &gt; p.description &middot; .item &gt; input[type=file] + .actions &gt; button.btn (modal.css .actions bar + fields.css rows)</div>
+</section>

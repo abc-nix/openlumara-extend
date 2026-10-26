@@ -1,0 +1,34 @@
+{# ================= E35 login page =================
+   The standalone login page. It is NOT part of the chat window: its own
+   document loads base.css + login.css and nothing else, and it links
+   css/base/variables.css WHICH DOES NOT EXIST in the repo (verified: no such
+   file anywhere) — so no theme var is ever defined on that page and every
+   login.css value falls back to its hardcoded colour.
+   => the honest preview resets the theme vars to exactly those fallbacks.
+   Source: templates/login.html + assets/css/login.css. #}
+<section class="tg-el-section">
+    <h3>Login page</h3>
+
+    <div class="tg-el-loginbox">
+        <div class="login-wrapper tg-el-login-real">
+            <div class="login-card">
+                <h1>OpenLumara</h1>
+                <form onsubmit="return false">
+                    <div class="error-msg">Invalid username or password</div>
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" name="username" placeholder="abc">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" placeholder="••••••••">
+                    </div>
+                    <button type="submit">Sign In</button>
+                    <button type="submit" disabled>Sign In (loading)</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.login-wrapper &gt; .login-card &gt; h1 + form &gt; .error-msg? + .form-group (label + input) &middot; button &mdash; login.css is nested entirely under .login-wrapper and uses var(--bg-primary, #111) etc.; since base/variables.css is missing, the real page always paints those fallbacks (shown here by resetting the vars). Note: --border does not exist in base.json (only --border-color), so inputs keep their #333 default on the real page too.</div>
+</section>

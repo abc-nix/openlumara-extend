@@ -1,0 +1,112 @@
+{# ================= E22 settings shell, nav & footer =================
+   Modal chrome only: the dialog frame, its left nav (categories, dividers,
+   module sub-groups), the loading state and the manual-save footer.
+   Source: templates/modals/settings/{index,sidebar}.html + settings/modal.css.
+   The frame is rendered REAL (.tg-el-real) inside a bounded box, because the
+   real element is a viewport-centred fixed dialog (see theme_gallery.css). #}
+<section class="tg-el-section">
+    <h3>Settings &mdash; shell, nav &amp; footer</h3>
+
+    <div class="tg-el-modalbox">
+        <div class="settings-modal modal tg-el-real">
+            <div class="header">
+                <h2>Settings</h2>
+                <button class="close" aria-label="Close settings">&times;</button>
+            </div>
+
+            <div class="body">
+                <aside class="sidebar">
+                    <nav class="nav">
+                        <div>
+                            <button class="item active">
+                                <span class="item-icon">{% include 'svg/sun.svg' %}</span>
+                                <span>Appearance</span>
+                            </button>
+                        </div>
+                        <div>
+                            <button class="item">
+                                <span class="item-icon">{% include 'svg/gear.svg' %}</span>
+                                <span>Core</span>
+                            </button>
+                        </div>
+                        <div>
+                            <button class="item">
+                                <span class="item-icon">{% include 'svg/wrench.svg' %}</span>
+                                <span>Modules</span>
+                            </button>
+                            {# expanded module sub-list: grouped by declared category #}
+                            <div class="sub-list">
+                                <div class="sub-group">
+                                    <button type="button" class="sub-group-label">
+                                        <span class="chevron">&#9658;</span>
+                                        <span>Development</span>
+                                    </button>
+                                    <div class="sub-group-items">
+                                        <button>Coder</button>
+                                        <button class="active">Theme Gallery</button>
+                                    </div>
+                                </div>
+                                <div class="sub-group">
+                                    <button type="button" class="sub-group-label collapsed">
+                                        <span class="chevron">&#9658;</span>
+                                        <span>Writing</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <hr class="nav-divider">
+                            <button class="item">
+                                <span class="item-icon">{% include 'svg/download.svg' %}</span>
+                                <span>Get Modules</span>
+                            </button>
+                        </div>
+                        <div>
+                            <hr class="nav-divider">
+                            <button class="item">
+                                <span class="item-icon">{% include 'svg/thought_bubble.svg' %}</span>
+                                <span>System Prompt</span>
+                            </button>
+                        </div>
+                    </nav>
+                </aside>
+
+                <main class="content-wrapper">
+                    <div class="content">
+                        <div class="section">
+                            <h3 class="section-title">Appearance</h3>
+                            <p class="section-desc">Theme family, mode, typography and the processing-chain preferences.</p>
+                        </div>
+                    </div>
+                </main>
+            </div>
+
+            <div class="settings-footer">
+                <span class="unsaved">Unsaved changes</span>
+                <div class="footer-buttons">
+                    <button type="button" class="footer-btn reset">Revert</button>
+                    <button type="button" class="footer-btn save">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# loading state: the whole main column while $store.settings.loading #}
+    <div class="tg-el-row">
+        <div class="settings-modal modal">
+            <div class="body"><main class="content-wrapper"><div class="loading"><div class="spinner"></div></div></main></div>
+        </div>
+        <span class="tg-el-cap">.loading &gt; .spinner &mdash; shown until the settings store lands (BUGS.md #17: this is what an early capture used to freeze)</span>
+    </div>
+
+    {# mobile category list: <template x-if="mobile && !activeCategory"> #}
+    <div class="tg-el-row">
+        <div class="settings-modal modal">
+            <div class="mobile-category-list">
+                <button class="mobile-category-btn"><span>Appearance</span></button>
+                <button class="mobile-category-btn"><span>Modules</span></button>
+            </div>
+        </div>
+        <span class="tg-el-cap">.mobile-category-list &gt; .mobile-category-btn (responsive.css &lt; 700px)</span>
+    </div>
+</section>

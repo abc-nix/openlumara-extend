@@ -1,0 +1,85 @@
+{# ================= E4 context pill states ================= #}
+<section class="tg-el-section">
+    <h3>Context pill — states</h3>
+    {# static replicas: same markup/vars as installFakeContextPill #}
+    {% set pill_d = 'M38 1 H61 A14 14 0 0 1 75 15 A14 14 0 0 1 61 29 H14 A14 14 0 0 1 1 15 A14 14 0 0 1 14 1 Z' %}
+    {# real thresholds: .pill-button gets .active at ≥70 (accent fill)
+       and .warning at ≥75 (error red); hero .danger at ≥75 #}
+    {% for pct, cls, label in [(35, '', 'normal 35%'), (72, 'active', 'active 72% (accent fill)'), (93, 'active warning', 'warning 93% (error red) · popup open')] %}
+    <div class="tg-el-row" style="align-items:flex-start">
+        <div id="context-pill" style="position:relative">
+            <button class="pill-button {{ cls }}" type="button">
+                <svg class="pill-outline" viewBox="0 0 76 30" preserveAspectRatio="none" aria-hidden="true">
+                    <path class="pill-track" d="{{ pill_d }}"></path>
+                    <path class="pill-fill" pathLength="100" stroke-dasharray="{{ pct }} {{ 100 - pct }}" d="{{ pill_d }}"></path>
+                </svg>
+                <span class="pill-pct">{{ pct }}%</span>
+            </button>
+            {% if 'popup' in label %}
+            {# FULL popup internals, exactly as chat/context_pill.html builds them:
+               hero + compaction + stacked bar (segments + threshold) + legend +
+               raw rows. The old fragment used invented .row-label/.row-tokens,
+               which NO stylesheet styles — fixed 2026-10-25 (audit find). #}
+            <div class="context-popup" style="display:block; position:relative;">
+                <div class="popup-header"><span class="popup-title">Context</span></div>
+                <div class="popup-body">
+                    <div class="popup-hero">
+                        <span class="hero-pct danger">93%</span>
+                        <span class="hero-sub">30,412 / 32,768 tokens</span>
+                    </div>
+
+                    <div class="ctx-compaction" title="older context was summarized away">
+                        <span class="compaction-label">compacted 2 times</span>
+                    </div>
+
+                    <div class="ctx-bar" role="img" aria-label="Context: 93 percent full">
+                        <div class="bar-seg seg-sys" style="width:5.6%" title="system prompt: 1,840 tokens"></div>
+                        <div class="bar-seg seg-tools" style="width:7.1%" title="tools: 2,320 tokens"></div>
+                        <div class="bar-seg seg-history" style="width:82.8%" title="message history: 27,120 tokens"></div>
+                        <div class="bar-seg seg-end" style="width:0.6%" title="end prompt: 210 tokens"></div>
+                        <div class="bar-seg seg-free" style="width:7.2%" title="free: 2,356 tokens"></div>
+                        <div class="bar-threshold-zone" style="left:80%" title="compression threshold: 80%"></div>
+                        <div class="bar-threshold" style="left:80%"></div>
+                    </div>
+
+                    <div class="ctx-legend">
+                        <div class="legend-item seg-sys"><span class="legend-dot"></span><span class="legend-label">system prompt</span><span class="legend-pct">6%</span></div>
+                        <div class="legend-item seg-tools"><span class="legend-dot"></span><span class="legend-label">tools</span><span class="legend-pct">7%</span></div>
+                        <div class="legend-item seg-history"><span class="legend-dot"></span><span class="legend-label">message history</span><span class="legend-pct">83%</span></div>
+                        <div class="legend-item seg-end"><span class="legend-dot"></span><span class="legend-label">end prompt</span><span class="legend-pct">&lt;1%</span></div>
+                    </div>
+
+                    <div class="popup-rows">
+                        <div class="popup-row"><span class="popup-key">system prompt</span><span class="popup-value">1,840 tokens</span></div>
+                        <div class="popup-row"><span class="popup-key">tools</span><span class="popup-value">9 active | 2,320 tokens</span></div>
+                        <div class="popup-row"><span class="popup-key">message history</span><span class="popup-value">27,120 tokens</span></div>
+                        <div class="popup-row"><span class="popup-key">end prompt</span><span class="popup-value">210 tokens</span></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        <span class="tg-el-cap">{{ label }}</span>
+    </div>
+    {% endfor %}
+
+    {# loading state: <template x-if="loading && !details"> #}
+    <div class="tg-el-row" style="align-items:flex-start">
+        <div id="context-pill" style="position:relative">
+            <button class="pill-button" type="button">
+                <svg class="pill-outline" viewBox="0 0 76 30" preserveAspectRatio="none" aria-hidden="true">
+                    <path class="pill-track" d="{{ pill_d }}"></path>
+                    <path class="pill-fill" pathLength="100" stroke-dasharray="0 100" d="{{ pill_d }}"></path>
+                </svg>
+                <span class="pill-pct">0%</span>
+            </button>
+            <div class="context-popup" style="display:block; position:relative;">
+                <div class="popup-header"><span class="popup-title">Context</span></div>
+                <div class="popup-loading">Loading..</div>
+            </div>
+        </div>
+        <span class="tg-el-cap">popup loading state (.popup-loading) — first open, before /api/system/context_size answers</span>
+    </div>
+
+    <div class="tg-el-cap">context_pill.css: .pill-button(.active/.warning) + .context-popup internals — .popup-hero/.hero-pct(.danger)/.hero-sub &middot; .ctx-compaction + .compaction-label &middot; .ctx-bar &gt; .bar-seg(.seg-sys/.seg-tools/.seg-history/.seg-end/.seg-free) + .bar-threshold-zone + .bar-threshold &middot; .ctx-legend &gt; .legend-item &gt; .legend-dot + .legend-label + .legend-pct &middot; .popup-rows &gt; .popup-row &gt; .popup-key + .popup-value &middot; .popup-loading</div>
+</section>

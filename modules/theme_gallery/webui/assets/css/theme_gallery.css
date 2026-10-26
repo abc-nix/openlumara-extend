@@ -1,0 +1,935 @@
+/* Theme gallery — dev tool styles.
+
+   THEME CONTRACT (same as testbench's): every colour/shape here is a core theme
+   var from base.json's vocabulary, so the gallery itself renders natively under
+   every theme family. No hex values in this file (one exception: the dropdown
+   arrow svg inside a data-uri, copied verbatim from the appearance settings).
+
+   SHOW/HIDE MODEL (testbench/meditation pattern):
+     body[data-tg]  → this module's sidebar tab is active → .tg-cover covers the
+                      chat column, the chat underneath is hidden (visibility so
+                      layout/scroll positions survive).
+   Everything is scoped under .tg-* or body[data-tg] — loading this file on
+   normal pages changes nothing. */
+
+/* ---------- cover the chat column ---------- */
+body[data-tg] #chat-window { position: relative; }
+body[data-tg] #chat-window > #messages,
+body[data-tg] #chat-window > #input,
+body[data-tg] #chat-window > .notice,
+body[data-tg] #chat-window > header { visibility: hidden; }
+
+.tg-cover {
+    display: none;                  /* hidden until the tab is active */
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    flex-direction: column;
+    background: var(--bg-primary);
+    overflow: hidden;
+}
+body[data-tg] .tg-cover { display: flex; }
+
+/* ---------- top bar ----------
+   Same visual idiom as settings → appearance "Color Theme" row:
+   wide grouped dropdown + two square 36px mode buttons; Split/close live
+   on the far right so the row never feels crowded. */
+.tg-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    flex: none;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+.tg-bar-right {
+    margin-left: auto;              /* pushes Split + close to the right edge */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* dropdown — copied from appearance.css .theme-select (settings look) */
+.tg-select-wrap {
+    flex: 1;
+    max-width: 340px;
+    min-width: 0;
+}
+.tg-select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-family: var(--font-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 12px;
+    padding-right: 36px;
+}
+.tg-select:hover { border-color: var(--accent); }
+.tg-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow, rgba(0, 123, 255, 0.25));
+}
+.tg-select optgroup {
+    font-weight: 600;
+    font-style: normal;
+    color: var(--text-secondary);
+}
+.tg-select optgroup option {
+    font-weight: 400;
+    color: var(--text-primary);
+    padding-left: 24px;
+}
+
+/* mode buttons — copied from appearance.css .mode-button */
+.tg-mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.tg-mode-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+}
+.tg-mode-btn svg { width: 18px; height: 18px; }
+/* "Both" = same square idiom, but it carries a word instead of an icon */
+.tg-both-btn { width: auto; padding: 0 12px; font-size: 12px; font-weight: 600; }
+.tg-mode-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
+.tg-mode-btn.active { border-color: var(--accent); background-color: var(--accent); color: var(--bg-primary); }
+.tg-mode-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* Split + close: quiet pills, right-aligned */
+.tg-split-btn, .tg-close-btn {
+    background: var(--button-bg);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 9999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.tg-split-btn:hover:not(:disabled), .tg-close-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tg-split-btn.on {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-input));
+}
+.tg-split-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ---------- the theme panes ---------- */
+.tg-panes {
+    display: flex;
+    flex: 1;
+    min-height: 0;                  /* allows children to scroll */
+    gap: 1px;
+    background: var(--border-color); /* hairline between panes */
+}
+
+/* Each pane is an independent theme island: theme_gallery.js writes every
+   custom property inline on this div, and its background/colour below resolve
+   against THOSE inline values, not the real app theme. */
+.tg-pane {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 0;
+    overflow: hidden;
+}
+
+.tg-pane-label {
+    flex: none;
+    padding: 6px 20px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary);   /* text-muted is too weak under light themes */
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* panes sit BELOW the diff drawer in stacking order: without this, sticky
+   bits inside the sample (context pill) paint over the drawer */
+.tg-pane { position: relative; z-index: 0; }
+
+/* in split, panes keep a readable minimum width and the row scrolls
+   horizontally rather than crushing each other */
+.tg-panes { overflow-x: auto; }
+.tg-pane { min-width: 380px; }
+
+/* per-pane controls (split): compact family dropdown + small mode buttons,
+   inside the pane's label strip */
+.tg-pane-mini-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    text-transform: none;
+    letter-spacing: normal;
+}
+.tg-mini-select {
+    flex: 1;
+    min-width: 0;
+    max-width: 220px;
+    padding: 5px 26px 5px 10px;
+    font-size: 12px;
+    background-position: right 8px center;
+}
+.tg-mini-mode-btn { width: 28px; height: 28px; border-width: 1px; font-size: 13px; }
+.tg-mini-mode-btn svg { width: 14px; height: 14px; }
+
+/* split bar: caption on the left, cross-pane pills on the right */
+.tg-bar-caption { font-size: 12px; color: var(--text-muted); }
+
+/* ---------- diff drawer (split mode) ---------- */
+.tg-drawer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    max-height: 42%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border-top: 2px solid var(--border-color);
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+.tg-drawer-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    flex: none;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+}
+.tg-drawer-head .tg-dim { margin-left: auto; }
+.tg-drawer-title { font-weight: 700; color: var(--text-primary); }
+.tg-drawer-list { overflow: auto; padding: 4px 16px 12px; }
+.tg-diff-row {
+    display: grid;
+    grid-template-columns: 1.3fr 1.2fr 1.2fr 1.2fr 1.2fr;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 11.5px;
+    border-bottom: 1px solid var(--border-color);
+    align-items: center;
+}
+.tg-diff-row:last-child { border-bottom: none; }
+.tg-diff-head {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+}
+.tg-diff-name { font-family: var(--code-font, monospace); color: var(--text-primary); }
+.tg-diff-val { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.tg-diff-text {
+    font-family: var(--code-font, monospace);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tg-chip {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid var(--border-color);
+}
+.tg-diff-row.missing .tg-diff-name { color: var(--error-color, var(--accent)); }
+.tg-diff-row.missing .tg-diff-text { color: var(--error-color, var(--accent)); }
+
+/* the replica #messages / #input inside a pane scroll exactly like the real
+   chat (they already carry the app's own rules via #chat-window ancestry).
+   NOTE the repeated #chat-window: matches the real rule's id specificity so
+   this override actually wins. */
+#chat-window .tg-pane #messages { padding-top: 12px; }
+
+/* hover outline: drawn ONLY by the sidebar "Highlight element" checkbox —
+   the element under the cursor (its own pane) + its counterpart when split.
+   sync (🔗) itself never draws it. --accent resolves per-island, so each
+   pane draws the outline in ITS accent. */
+.tg-opt-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+}
+.tg-opt-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+.tg-opt-row:hover { color: var(--accent); }
+.tg-opt-desc {
+    padding: 0 12px 8px 32px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+/* coverage category (report rows, chips per class) */
+/* the wrap IS the pane's scroller (the bare div has no app scroll rules —
+   other categories scroll because their root is #messages or a clone):
+   flex:1 + min-height:0 inside .tg-pane's column = scrollable box */
+.tg-cov-wrap {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.tg-cov-head { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text-primary); }
+.tg-cov-pct { color: var(--accent); font-weight: 700; font-size: 16px; }
+.tg-cov-note { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+.tg-cov-file {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    font-family: var(--code-font, monospace);
+}
+.tg-cov-classes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.tg-cov-chip {
+    font-family: var(--code-font, monospace);
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+}
+.tg-cov-chip.ok    { border-color: var(--success, var(--accent)); color: var(--success, var(--accent)); }
+.tg-cov-chip.miss  { border-color: var(--error); color: var(--error); border-style: dashed; }
+.tg-cov-chip.dead  { opacity: .45; text-decoration: line-through; }
+.tg-el-coverview-refresh {
+    margin-left: auto;
+    background: var(--button-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.tg-el-coverview-refresh:hover { border-color: var(--accent); color: var(--accent); }
+.tg-xhl {
+    outline: 2px solid var(--accent) !important;
+    outline-offset: -2px;
+    border-radius: 3px;
+}
+
+/* ---------- sidebar panel ---------- */
+.tg-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px;
+}
+.tg-panel-header { margin-bottom: 2px; }
+.tg-panel-title {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* category rows: sized like the chat list rows (.item in sidebar.css):
+   same radius, transparent border → hover fill, 0.9rem medium-weight label,
+   with a bit more vertical padding so they read as big tap targets */
+.tg-cats { display: flex; flex-direction: column; gap: 4px; }
+.tg-cat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+.tg-cat-name {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.tg-cat:hover:not(:disabled) { background: var(--bg-tertiary); }
+.tg-cat.on {
+    background: var(--bg-tertiary);
+    border-color: var(--accent);
+}
+.tg-cat.on .tg-cat-name { color: var(--accent); }
+.tg-cat-note { font-size: 10px; color: var(--text-muted); }
+
+/* small pill button (diff drawer close; formerly also freeze "Release all") */
+.tg-release-btn {
+    background: var(--button-bg);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 9999px;
+    padding: 3px 12px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.tg-release-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.tg-panel-status {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-primary);
+    padding: 8px 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+.tg-dim { color: var(--text-muted); }/* ---------- settings category ---------- */
+/* one "preparing/unavailable" note fills the pane body */
+.tg-note {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.tg-settings {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* all captured modals are stacked here; only one is displayed at a time.
+   position:relative + min-height:0 bounds them inside the pane */
+.tg-settings-host {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* the real .settings-modal is a fixed-position, viewport-sized dialog →
+   pin it to the pane instead: same class, same CSS, different containing
+   block. !important beats the app's dialog geometry; the internal flex
+   layout (header / body[sidebar+content] / footer) fills the pane as-is. */
+.tg-settings-host > .settings-modal {
+    position: absolute !important;
+    inset: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    z-index: auto !important;
+    box-shadow: none !important;
+    border-radius: 0;
+}/* ---------- sidebar category ---------- */
+.tg-sidebar-host {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* the real shell is sized by its parent #sidebar; inside a pane it pins to
+   the pane box instead and fills it (its internal tabbar+panel flex row
+   stretches to whatever width the pane gives) */
+.tg-sidebar-host > .sidebar-shell {
+    position: absolute;
+    inset: 0;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+}/* ---------- elements category (style guide) ---------- */
+.tg-elements { animation: none; }
+
+.tg-el-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+    margin: 6px 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    max-width: none;
+    width: auto;
+}
+
+.tg-el-section h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+}
+
+.tg-el-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+}
+
+.tg-el-cap {
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--text-secondary);
+    opacity: 0.75;
+}
+
+/* scope-provider wrappers: these classes exist ONLY so descendant selectors
+   from the app's nested CSS match the samples. their OWN box styling (dialog,
+   panel) must be neutralized or the sheet explodes. */
+/* NOTE (2026-10-25): the neutralizer is for SCOPE-PROVIDER wrappers only.
+   `.tg-el-real` marks a sample that must keep the real dialog frame (the
+   settings shell / move-chat boxes in E22/E29), and `.tg-el-scope` marks a
+   scope-only welcome panel (E3 badge) whose own box styling is NOT the
+   subject. Everything else still gets flattened. */
+.tg-elements .settings-modal:not(.tg-el-real),
+.tg-elements .welcome-panel.tg-el-scope {
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: none !important;
+    display: block;
+    flex: none;
+    animation: none !important;
+}
+
+.tg-elements #chat-list {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex: none;
+}
+
+/* swatch grid (E19) */
+.tg-el-swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 6px;
+}
+
+.tg-swatch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    font-size: 10px;
+}
+
+.tg-swatch-chip {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+.tg-swatch-name {
+    font-family: monospace;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tg-swatch-val {
+    font-family: monospace;
+    color: var(--text-secondary);
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 55%;
+}/* pass-2 / E1 scope wrappers: neutralize POSITIONING ONLY (dialogs/prompts
+   are fixed overlays in the real app); padding, borders and backgrounds are
+   deliberately kept — they ARE the look being previewed. */
+.tg-elements .settings-error,
+.tg-elements .settings-footer,
+.tg-elements .footer-buttons,
+.tg-elements .close-prompt,
+.tg-elements .prompt-box,
+.tg-elements .prompt-buttons {
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    z-index: auto !important;
+    animation: none !important;
+}
+
+.tg-elements .close-prompt { display: block; }
+
+/* pass-3: menus/popups are position:fixed overlays → make them static blocks
+   so they render inline as fragments; generic .modal neutralization covers
+   every dialog root (settings/global-search/categories/…).
+   user QA round 3: do NOT force display:block — that killed the app's own
+   display:flex on .tag-popup (chips merged into "galleryqa") and on the
+   menus (column flex). position:static alone is all they need. */
+.tg-elements .chat-action-menu,
+.tg-elements .category-menu,
+.tg-elements .tag-popup {
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.tg-elements .modal:not(.settings-modal) {
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+    z-index: auto !important;
+    display: block;
+}
+
+/* the global-search CONTENT box is the fixed element (not the .modal root).
+   user QA round 3 screenshot: it self-centers with transform
+   translate(-50%,-50%) — neutralizing `inset` alone left the sheet copy
+   shoved up-left OVER the previous section (half its text clipped away,
+   only right-aligned dates visible). Kill the transform too. */
+/* E11 image lightbox fragment: .image-modal is a position:fixed full-screen
+   overlay whose rgba(0,0,0,.9) bg would blacken the whole pane → static
+   fragment, backdrop not reproduced (caption says so). The img keeps its
+   REAL rules (max 90vw/90vh still apply inside the fragment, radius). */
+.tg-elements .image-modal {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    background: transparent !important;
+    cursor: default !important;
+    padding: 12px 0;
+}
+
+.tg-elements .global-search-modal-content {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+}
+
+/* teleported menus carry anchor positioning leftovers that look broken in
+   static flow (screenshot QA): .tag-popup lifts itself translateY(-100%),
+   .chat-action-menu anchors with margin-top:-24px (climbed onto the h3).
+   .category-menu's margin-top:-4px is the INTENTIONAL fused seam -> keep. */
+.tg-elements .chat-action-menu,
+.tg-elements .tag-popup {
+    transform: none !important;
+    margin: 0 !important;
+}
+
+/* E13 fused demo (user QA round 3): wrapper gets a realistic sidebar column
+   width; the neutralized #chat-list scope still carries border-left + bg
+   (harmless elsewhere) -> drop it here so only the fused unit shows.
+   NOTE: must out-specify the `.tg-elements #chat-list{width:auto!important}`
+   neutralization -> id + class selector with !important.
+   max-height/overflow lifted so the static fragment never scrolls. */
+.tg-elements #chat-list.tg-cat-fused-scope {
+    width: 240px !important;
+    border-left: none !important;
+    /* the trigger itself is background:none (transparent) — in the real app
+       it sits on the sidebar's bg; here it must NOT show the section's
+       slightly-grey ground through the fused box's top half */
+    background: var(--bg-primary) !important;
+    border-radius: var(--radius-sm);
+}
+.tg-elements .tg-cat-fused-scope .category-menu {
+    max-height: none;
+    overflow: visible;
+}
+
+/* agent chain: node dots are position:absolute at left:-1em, designed for
+   the 20px gutter of #chat-window #messages. inside a sheet section they
+   overlap the border → give the chain its own left gutter so dots + blocks
+   sit fully INSIDE the box (user QA 2026-10-25). */
+.tg-elements .agent-chain { padding-left: 1.8em; }
+
+/* diff fragment: .diff-container flips unified→side-by-side above 640px
+   (pure CSS container query). the sheet renders ONLY the unified child, so
+   cap the container width below the breakpoint — otherwise a wide pane shows
+   an empty box (side-by-side child absent). faithful: real app picks unified
+   at this width too. */
+.tg-elements .diff-container { max-width: 560px; }
+/* ---------- settings capture warning (BUGS.md #17) ---------- */
+/* Shown above the Settings pane when a tab was still mounting at capture time.
+   Without it, a frozen loading spinner inside someone's preview reads like a
+   theme bug; the banner says it was the capture that arrived early. */
+.tg-capture-note {
+    flex: none;
+    padding: 6px 12px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--error);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* ==========================================================================
+   COMPLETENESS PASS 2026-10-25 (E22..E35)
+   New surfaces: settings chrome/tabs, module library + audit, system tabs,
+   move-chat/restart/backdrop, sidebar shell, welcome panel, custom tool
+   views, login page. Everything below is still theme-var only.
+   ========================================================================== */
+
+/* ---------- bounded boxes: real fixed dialogs shown in-place ----------
+   .settings-modal / .move-chat-modal are viewport-centred fixed dialogs and
+   .restart-modal is a full-screen veil. Inside a pane they are re-parented
+   to a bounded box: same classes, same internal layout, no page takeover. */
+.tg-el-modalbox {
+    position: relative;
+    height: 420px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+}
+.tg-el-modalbox > .settings-modal.modal.tg-el-real,
+.tg-el-modalbox > .move-chat-modal.modal.tg-el-real {
+    position: absolute !important;
+    inset: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+    z-index: auto !important;
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    animation: none !important;
+}
+/* move chat is a snug single-row dialog by design (move_chat.css) */
+.tg-el-modalbox > .move-chat-modal.modal.tg-el-real {
+    inset: 12px auto auto 12px !important;
+    width: 380px !important;
+    height: fit-content !important;
+    flex: none !important;
+}
+.tg-el-modalbox > .restart-modal {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: auto !important;
+}
+
+/* settings nav is a fixed-width column; inside the neutralized box its
+   parent .body needs the flex context the real modal gives it */
+.tg-elements .settings-modal .body { display: flex; min-height: 0; }
+
+/* logs/system-prompt tabs are scoped containers with no intrinsic height in
+   a static sheet: give them the app's scrolling rhythm */
+.tg-elements .system-logs {
+    flex: none;
+    max-height: 240px;
+    min-height: 120px;
+    overflow-y: auto;
+}
+.tg-elements .system-prompt {
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+/* ---------- library audit overlay ----------
+   real: position:fixed, inset:0, rgba(0,0,0,.55), z-index 1500, teleported
+   to <body>. Static block here; the modal keeps its own surface. */
+.tg-elements .library-audit-overlay {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    background: none !important;
+    padding: 0 !important;
+    display: block !important;
+    height: auto !important;
+}
+.tg-elements .library-audit-modal {
+    width: auto !important;
+    max-width: none !important;
+    max-height: 480px !important;
+}
+.tg-elements .library-audit-code { max-height: 240px !important; }
+
+/* ---------- shared modal backdrop ----------
+   .modal-overlay is a full-page blurred veil; show it as a swatch so its
+   own background + backdrop-filter are what you compare. */
+.tg-elements .modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    width: 140px;
+    height: 64px;
+    border-radius: var(--radius-sm);
+}
+
+/* ---------- sidebar shell in a pane ----------
+   the real shell is a flex column sized by #sidebar; inside the sheet it
+   pins to a bounded box (same trick as the Sidebar category host) */
+.tg-el-section > .tg-sidebar-host {
+    flex: none;
+    height: 420px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+}
+
+/* ---------- welcome panel: real look, centred like the empty chat ---------- */
+.tg-el-viewport {
+    display: flex;
+    height: 280px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    overflow: hidden;
+}
+
+/* ---------- login page ----------
+   The login document loads base.css + login.css only and links
+   css/base/variables.css, which does not exist in the repo → no theme var is
+   ever defined there, so login.css's hardcoded fallbacks are the REAL paint.
+   Resetting the vars on the sample reproduces exactly that. (--border is not
+   a theme var at all — base.json has --border-color — so inputs stay #333
+   on the real page too.) */
+.tg-el-loginbox {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.tg-elements .login-wrapper {
+    min-height: 0 !important;
+    height: 380px;
+}
+.tg-elements .tg-el-login-real {
+    --bg-primary: #111;
+    --text-primary: #eee;
+    --bg-secondary: #1a1a1a;
+    --accent: #00d4ff;
+    --bg-input: #222;
+    --error: #ff4d4d;
+    --border: #333;
+}
+
+/* diff side-by-side sample (E8, 2026-10-25): .diff-container is a size
+   container; the default sheet cap of 560px keeps the UNIFIED child visible,
+   this class lifts it so the @container (min-width: 640px) branch can be
+   compared too. In a narrow split pane the container query still wins and
+   the unified child shows — that is the real app behavior at that width. */
+.tg-elements .tg-el-diffwide {
+    max-width: none;
+    width: 720px;
+}
+
+/* ---------- A6: visible failure notes (JS-built, 2026-10-25) ---------- */
+/* A boot failure used to be console-only: empty pane, empty dropdown, no
+   reason. The pane now carries the message + the exception + a retry. */
+.tg-error-note {
+    flex-direction: column;
+    gap: 8px;
+    text-align: center;
+}
+.tg-error-title {
+    color: var(--error);
+    font-weight: 700;
+    font-size: 13px;
+}
+.tg-error-detail {
+    color: var(--text-muted);
+    font-family: var(--code-font, monospace);
+    font-size: 11px;
+    line-height: 1.5;
+    max-width: 620px;
+    word-break: break-word;
+}
+.tg-retry-btn {
+    margin-top: 2px;
+    background: var(--button-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px 14px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.tg-retry-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+/* non-blocking strip: empty theme list, or one family's JSON failed.
+   Left border keeps it visible without pretending the pane is broken. */
+.tg-warn-note {
+    flex: none;
+    padding: 5px 16px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    border-left: 3px solid var(--error);
+}

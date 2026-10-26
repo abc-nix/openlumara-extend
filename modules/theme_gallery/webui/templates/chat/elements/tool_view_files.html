@@ -1,0 +1,123 @@
+{# ================= E33 tool views: file read, grep, glob, tools-load =================
+   The file-oriented custom displays. All scoped under .tool-call-card.
+   Source: templates/chat/tool_displays.html (file-read / grep / coder-path /
+   tools-load views) + chat/custom_tool_views.css. #}
+<section class="tg-el-section">
+    <h3>Tool views &mdash; file read, grep, glob, tools load</h3>
+
+    {# file read: highlighted box + footer + truncation note #}
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Editor:&nbsp;</span><span class="name">read</span>
+            <span class="call-args">path="config.yml"</span>
+            <span class="call-result">42 lines &check;</span>
+        </div>
+        <div class="body">
+            <div class="file-read-box hljs">
+                <div class="code-line"><span class="code-num">1</span><span class="code-text"><span class="hljs-attr">model:</span> <span class="hljs-string">llama-3.3-70b-instruct-awq</span></span></div>
+                <div class="code-line"><span class="code-num">2</span><span class="code-text"><span class="hljs-attr">max_context:</span> <span class="hljs-number">32768</span></span></div>
+                <div class="code-line"><span class="code-num">3</span><span class="code-text"><span class="hljs-attr">enable_admin_settings:</span> <span class="hljs-literal">true</span></span></div>
+            </div>
+            <div class="display-footer">openlumara: config.yml</div>
+            <div class="grep-note">truncated to the first 2000 lines</div>
+        </div>
+    </div>
+
+    {# grep: running preview, then results grouped per file #}
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Editor:&nbsp;</span><span class="name">grep</span>
+            <span class="call-args">regex_pattern="tg-cover"</span>
+        </div>
+        <div class="body">
+            <div class="grep-running">
+                <span class="grep-running-label">searching</span>
+                <span class="grep-running-pattern">tg-cover</span>
+                <span class="grep-running-label">in</span>
+                <span class="grep-running-pattern">openlumara: user_modules</span>
+            </div>
+            <div class="grep-results">
+                <div class="grep-file">
+                    <div class="grep-file-name">user_modules/theme_gallery/webui/assets/css/theme_gallery.css</div>
+                    <div class="grep-box">
+                        <div class="grep-line grep-add">
+                            <span class="grep-num">32</span>
+                            <span class="grep-text">.tg-cover { display: none; }</span>
+                        </div>
+                        <div class="grep-line grep-del">
+                            <span class="grep-num">40</span>
+                            <span class="grep-text">body[data-tg] .tg-cover { display: flex; }</span>
+                        </div>
+                        <div class="grep-line grep-ctx">
+                            <span class="grep-num">41</span>
+                            <span class="grep-text">    z-index: 40;</span>
+                        </div>
+                        <div class="grep-line grep-hit">
+                            <span class="grep-num">42</span>
+                            <span class="grep-text">    inset: 0; }</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="grep-note">stopped at 200 matches</div>
+        </div>
+    </div>
+
+    {# glob / path view: plain file list #}
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Editor:&nbsp;</span><span class="name">list</span>
+            <span class="call-args">workspace="git"</span>
+        </div>
+        <div class="body">
+            <div class="grep-running">
+                <span class="grep-running-label">listing</span>
+                <span class="grep-running-pattern">openlumara: user_modules</span>
+                <span class="grep-running-label">-&gt;</span>
+                <span class="grep-running-pattern">10 entries</span>
+            </div>
+            <div class="glob-files">
+                <div class="glob-file">theme_gallery/</div>
+                <div class="glob-file">testbench/</div>
+                <div class="glob-file">git/</div>
+                <div class="glob-file">editor/</div>
+            </div>
+            <div class="grep-note">note from the module, if any</div>
+            <div class="display-footer">git: user_modules</div>
+        </div>
+    </div>
+
+    {# tools-load: streaming chips, then grouped module rows #}
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Modules:&nbsp;</span><span class="name">load</span>
+        </div>
+        <div class="body">
+            <div class="module-chips">
+                <span class="module-chip">{% include 'svg/plug.svg' %}<span>docs</span></span>
+                <span class="module-chip">{% include 'svg/plug.svg' %}<span>memory</span></span>
+            </div>
+            <div class="tool-load-group">
+                <div class="tool-load-module">
+                    {% include 'svg/plug.svg' %}
+                    <span>docs</span>
+                    <span class="tool-load-count">2 tools</span>
+                </div>
+                <div class="tool-load-rows">
+                    <div class="tool-load-row">
+                        <span class="tool-load-name">list</span>
+                        <span class="tool-load-desc">List the documentation folders</span>
+                    </div>
+                    <div class="tool-load-row">
+                        <span class="tool-load-name">read</span>
+                        <span class="tool-load-desc">Read a document</span>
+                    </div>
+                </div>
+            </div>
+            <div class="grep-note">not found: vim &middot; enabled: docs, memory</div>
+            <div class="grep-note">skipped (disabled): shell</div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.file-read-box.hljs (+.display-footer, truncation .grep-note) &middot; .grep-running &gt; .grep-running-label + .grep-running-pattern &middot; .grep-results &gt; .grep-file &gt; .grep-file-name + .grep-box &gt; .grep-line(.grep-add/.grep-del) &gt; .grep-num + .grep-text &middot; .glob-files &gt; .glob-file &middot; .module-chips &gt; .module-chip &middot; .tool-load-group &gt; .tool-load-module (+.tool-load-count) + .tool-load-rows &gt; .tool-load-row &gt; .tool-load-name + .tool-load-desc</div>
+</section>

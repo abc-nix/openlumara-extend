@@ -1,0 +1,86 @@
+{# ================= E26 module library tab =================
+   Get Modules: type tabs, sync button, grouped library items, install /
+   update / uninstall buttons, restart banner, empty + loading states.
+   Source: templates/modals/settings/module_library.html +
+   settings/module_library.css (all nested under .module-library, which is
+   why the wrapper here is the plain class, not a dialog). #}
+<section class="tg-el-section">
+    <h3>Module library &mdash; Get Modules</h3>
+
+    <div class="settings-modal modal">
+        <div class="module-library">
+            <h3 class="section-title">Get Modules</h3>
+            <p class="section-desc">Install modules, channels, skills and themes from the git repositories configured under Core settings.</p>
+
+            {# message line: .library-message gets a kind class (success/warn/error) #}
+            <div class="library-message success">Installed coder 2.1.0</div>
+
+            {# restart banner after an install/update/uninstall #}
+            <div class="library-restart">
+                <span>Module changes need a server restart to take effect.</span>
+                <button type="button" class="library-btn primary">Restart Now</button>
+            </div>
+
+            <div class="library-type-tabs">
+                <button type="button" class="library-type-tab active">
+                    <span>Modules</span>
+                    <span class="tab-count">12</span>
+                </button>
+                <button type="button" class="library-type-tab">
+                    <span>Channels</span>
+                    <span class="tab-count">2</span>
+                </button>
+                <button type="button" class="library-type-tab">
+                    <span>Themes</span>
+                    <span class="tab-count">54</span>
+                </button>
+                <button type="button" class="library-type-tab">
+                    <span>Skills</span>
+                    <span class="tab-count">3</span>
+                </button>
+                <button type="button" class="library-btn primary library-sync-btn">
+                    <span class="library-sync-icon spinning">{% include 'svg/reload.svg' %}</span>
+                    <span>Syncing..</span>
+                </button>
+            </div>
+
+            <div class="library-loading"><div class="spinner"></div></div>
+
+            <div class="library-list">
+                <p class="library-empty">No library modules found. Add a repo url under Core settings, then press Sync Libraries.</p>
+
+                <div class="library-group">
+                    <h4 class="library-group-header"><a href="#" onclick="return false">https://github.com/example/openlumara-modules</a></h4>
+
+                    <div class="library-item installed">
+                        <div class="library-item-main">
+                            <div class="library-item-header">
+                                <span class="library-item-name">Coder</span>
+                            </div>
+                            <p class="library-item-doc">Code editing, file browsing and git tools.</p>
+                        </div>
+                        <span class="library-installed-indicator" title="Installed">{% include 'svg/check_disc.svg' %}</span>
+                        <div class="library-item-actions">
+                            <button type="button" class="library-btn">Update</button>
+                            <button type="button" class="library-btn danger">Uninstall</button>
+                        </div>
+                    </div>
+
+                    <div class="library-item">
+                        <div class="library-item-main">
+                            <div class="library-item-header">
+                                <span class="library-item-name">Browser</span>
+                            </div>
+                            <p class="library-item-doc">Headless browser for the AI.</p>
+                        </div>
+                        <div class="library-item-actions">
+                            <button type="button" class="library-btn">Install</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.module-library &gt; .library-message &middot; .library-restart (+.library-btn.primary) &middot; .library-type-tabs &gt; .library-type-tab(.active) &gt; .tab-count + .library-sync-btn &gt; .library-sync-icon &middot; .library-loading &middot; .library-list &gt; .library-empty &middot; .library-group &gt; .library-group-header &gt; a &middot; .library-item(.installed) &gt; .library-item-main &gt; .library-item-header &gt; .library-item-name + .library-item-doc + .library-installed-indicator + .library-item-actions &gt; .library-btn(.danger)</div>
+</section>

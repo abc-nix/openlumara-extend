@@ -1,0 +1,149 @@
+{# ================= E23 settings field widgets =================
+   One row per field TYPE the settings modal can render, exactly as
+   modals/settings/fields.html builds it (fields.css styles them under
+   .settings-modal > .item). Ancestors are neutralized, not removed: the
+   `.settings-modal .item` scope is what gives these their look.
+   Source: templates/modals/settings/fields.html + modals/fields.css. #}
+<section class="tg-el-section">
+    <h3>Settings &mdash; field widgets</h3>
+
+    <div class="settings-modal modal">
+        {# number #}
+        <div class="item"><div class="row">
+            <label>Max tokens</label>
+            <input type="number" value="4096">
+            <span class="description">number row: label + input + description</span>
+        </div></div>
+
+        {# text / url / textarea #}
+        <div class="item"><div class="row">
+            <label>API Base URL</label>
+            <input type="text" value="http://127.0.0.1:5000/v1">
+        </div></div>
+        <div class="item"><div class="row">
+            <label>System note</label>
+            <textarea rows="4">multi-line value, rows=4</textarea>
+        </div></div>
+
+        {# select #}
+        <div class="item"><div class="row">
+            <label>Prompt mode</label>
+            <select>
+                <option>chat</option>
+                <option selected>completion</option>
+            </select>
+            <span class="description">select row &mdash; options come from setting.options</span>
+        </div></div>
+
+        {# array / list #}
+        <div class="item"><div class="row">
+            <div class="array-field">
+                <div class="array-header">
+                    <label>Stop strings</label>
+                    <span class="description">array row &mdash; one input per item</span>
+                </div>
+                <div class="items">
+                    <div class="item">
+                        <input type="text" value="\nUser:">
+                        <button type="button" class="remove" title="Remove item">&times;</button>
+                    </div>
+                    <div class="item">
+                        <input type="text" value="\nAssistant:">
+                        <button type="button" class="remove" title="Remove item">&times;</button>
+                    </div>
+                    <div class="add-row">
+                        <input type="text" placeholder="Add new item...">
+                        <button type="button" class="add">+</button>
+                    </div>
+                </div>
+            </div>
+        </div></div>
+
+        {# object / dict #}
+        <div class="item"><div class="row">
+            <div class="array-field">
+                <div class="array-header"><label>Headers</label></div>
+                <div class="items">
+                    <div class="item">
+                        <input type="text" value="Authorization" placeholder="Key">
+                        <input type="text" value="Bearer ..." placeholder="Value">
+                        <button type="button" class="remove" title="Remove item">&times;</button>
+                    </div>
+                    <div class="add-row">
+                        <input type="text" placeholder="Key">
+                        <input type="text" placeholder="Value">
+                        <button type="button" class="add">+</button>
+                    </div>
+                </div>
+            </div>
+        </div></div>
+
+        {# empty collection hint #}
+        <div class="item"><div class="row">
+            <div class="array-field">
+                <div class="array-header"><label>Banned strings</label></div>
+                <div class="items">
+                    <span class="empty-hint">No items. Add items below.</span>
+                </div>
+            </div>
+        </div></div>
+
+        {# api_url: status dot + error row #}
+        <div class="item"><div class="row">
+            <label>TAILSCALE API URL</label>
+            <input type="text" value="http://127.0.0.1:5000/v1">
+            <div class="api-status">
+                <span class="status-dot connected"></span>
+                <span>connected</span>
+            </div>
+        </div></div>
+        <div class="item"><div class="row">
+            <label>API URL (unreachable)</label>
+            <input type="text" value="http://10.0.0.9:9999/v1">
+            <div class="api-status">
+                <span class="status-dot disconnected"></span>
+                <span>not connected</span>
+            </div>
+            <p class="error">Could not connect: connection refused</p>
+        </div></div>
+
+        {# model_select: select OR text fallback + refresh + empty note #}
+        <div class="item"><div class="row model-setting-row">
+            <label>Model</label>
+            <div class="model-input-container">
+                <select class="model-select">
+                    <option value="" disabled>-- Select a model --</option>
+                    <option selected>llama-3.3-70b-instruct-awq</option>
+                    <option>qwen3-32b-exl3</option>
+                </select>
+                <button type="button" class="model-refresh-btn" title="Refresh model list">{% include 'svg/reload.svg' %}</button>
+            </div>
+        </div></div>
+        <div class="item"><div class="row model-setting-row">
+            <label>Model (list empty)</label>
+            <div class="model-input-container">
+                <input type="text" placeholder="Enter model name" value="">
+                <button type="button" class="model-refresh-btn" title="Load models from API">{% include 'svg/reload.svg' %}</button>
+            </div>
+            <p class="model-empty-note">No models found on the API. Press the refresh button to load the model list.</p>
+        </div></div>
+    </div>
+
+    {# parent/child hierarchy: modal.css indents .setting-child under its parent #}
+    <div class="settings-modal modal">
+        <div class="setting-item setting-parent">
+            <div class="item"><div class="toggle-row">
+                <label>Enable feature</label>
+                <button type="button" class="toggle active"></button>
+            </div></div>
+            <div class="setting-item setting-child">
+                <div class="item"><div class="row">
+                    <label>Sub-setting (only when enabled)</label>
+                    <input type="text" value="child value">
+                </div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">fields.html row types: boolean (.toggle-row) &middot; number &middot; text/url &middot; textarea &middot; select &middot; array &middot; object &middot; api_url (+.api-status/.error) &middot; model_select (+.model-refresh-btn/.model-empty-note) &mdash; and the .setting-parent/.setting-child indent pair (modal.css)</div>
+</section>

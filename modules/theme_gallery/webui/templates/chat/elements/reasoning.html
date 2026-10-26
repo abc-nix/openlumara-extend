@@ -1,0 +1,28 @@
+{# ================= E7 reasoning / thinking ================= #}
+<section class="tg-el-section">
+    <h3>Reasoning / thinking</h3>
+    {# expanded "Thoughts" (done) — exact chain from reasoning.html #}
+    <div class="reasoning-wrapper expanded">
+        <div class="node-dot expanded">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"></polyline></svg>
+        </div>
+        <div class="header">
+            <svg class="standalone-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+            {% include 'svg/thought_bubble.svg' %}
+            <span class="text"><span class="label">Thoughts</span></span>
+        </div>
+        <div><div class="block"><div class="content">First I should check whether the user meant a local file. Then I'd search the web for the library version. The docs mention two ways to do this…</div></div></div>
+    </div>
+    {# collapsed "Thinking.." (active, animated dots) #}
+    <div class="reasoning-wrapper collapsed is-reasoning-active">
+        <div class="node-dot">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"></polyline></svg>
+        </div>
+        <div class="header">
+            <svg class="standalone-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+            {% include 'svg/thought_bubble.svg' %}
+            <span class="text"><span class="label">Thinking..</span><span class="dots"><span aria-hidden="true">&nbsp;</span><span aria-hidden="true">&nbsp;</span><span aria-hidden="true">&nbsp;</span></span></span>
+        </div>
+    </div>
+    <div class="tg-el-cap">reasoning.html: .reasoning-wrapper(.expanded/.collapsed/.is-reasoning-active) + node-dot + chevrons + .dots</div>
+</section>

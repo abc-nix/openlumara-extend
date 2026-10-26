@@ -1,0 +1,86 @@
+{# ================= E24 appearance tab: theme + typography =================
+   The special Appearance category, which does NOT go through fields.html:
+   it owns the theme row and the typography sliders.
+   Source: templates/modals/settings/appearance.html + settings/appearance.css
+   (all nested under .settings-modal .settings-section). #}
+<section class="tg-el-section">
+    <h3>Appearance &mdash; theme &amp; typography controls</h3>
+
+    <div class="settings-modal modal">
+        <div class="settings-section">
+            <h3 class="section-title">Appearance</h3>
+            <p class="section-desc">Select your color theme and typography preferences.</p>
+            <hr>
+
+            <h4>Color Theme</h4>
+            <div class="theme-controls-row">
+                <div class="theme-dropdown-wrapper">
+                    <select class="theme-select">
+                        <optgroup label="Pro">
+                            <option selected>Graphite Cobalt</option>
+                            <option>Graphite Ember</option>
+                        </optgroup>
+                        <optgroup label="Cute">
+                            <option>Stardew</option>
+                            <option>Rouge (dark only)</option>
+                        </optgroup>
+                        <optgroup label="Other">
+                            <option>Monochrome</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="theme-mode-toggle">
+                    <button type="button" class="mode-button active" title="Dark mode">{% include 'svg/moon.svg' %}</button>
+                    <button type="button" class="mode-button" title="Light mode">{% include 'svg/sun.svg' %}</button>
+                    <button type="button" class="mode-button" disabled title="Light mode unavailable">{% include 'svg/sun.svg' %}</button>
+                </div>
+            </div>
+
+            <div class="typography-section">
+                <h4>Typography</h4>
+
+                <div class="setting-item">
+                    <select name="font-family">
+                        <option>System Default</option>
+                        <option selected>Roboto</option>
+                        <option>Georgia</option>
+                    </select>
+                </div>
+
+                <div class="setting-item">
+                    <div class="slider-header">
+                        <span class="slider-label">Font Size</span>
+                        <span class="slider-value">16px</span>
+                    </div>
+                    <input type="range" min="12" max="24" value="16">
+                </div>
+
+                <div class="setting-item">
+                    <div class="slider-header">
+                        <span class="slider-label">Chat Width</span>
+                        <span class="slider-value">80%</span>
+                    </div>
+                    <input type="range" min="20" max="100" value="80">
+                </div>
+            </div>
+
+            <h4>Preferences</h4>
+            <div class="item">
+                <div class="toggle-row">
+                    <label>Collapse processing chain by default</label>
+                    <button class="toggle active" type="button"></button>
+                </div>
+                <span class="description">Show only the basics on one line while your AI works; expand by clicking.</span>
+            </div>
+            <div class="item">
+                <div class="toggle-row">
+                    <label>Collapse steps by default</label>
+                    <button class="toggle" type="button"></button>
+                </div>
+                <span class="description">Start each agentic step collapsed instead of expanded.</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.theme-controls-row &gt; .theme-dropdown-wrapper &gt; select.theme-select (grouped: first word of the family = group) + .theme-mode-toggle &gt; .mode-button(.active/:disabled) &middot; .typography-section &gt; .setting-item &gt; .slider-header &gt; .slider-label + .slider-value (appearance.css)</div>
+</section>

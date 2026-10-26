@@ -1,0 +1,23 @@
+{# ================= E11 upload queue ================= #}
+<section class="tg-el-section">
+    <h3>Upload queue &amp; attachments</h3>
+    <div id="upload-queue-container" class="upload-queue">
+        <div class="upload-section">
+            <div class="item">
+                <div class="file-info"><span class="file-icon">{% include 'svg/paperclip.svg' %}</span><span class="file-name">dataset-notes.csv</span></div>
+                <button class="delete" aria-label="Remove file">&times;</button>
+            </div>
+            <div class="item">
+                <div class="file-info"><span class="file-icon">{% include 'svg/clipboard.svg' %}</span><span class="file-name">pasted-image-2048.png</span></div>
+                <button class="delete" aria-label="Remove file">&times;</button>
+            </div>
+        </div>
+    </div>
+    <div class="tg-el-cap">upload.html: .upload-queue .item(.file-info/.delete) · attachment previews in E5 (.text-preview)</div>
+    {# image lightbox shell: fragment only — the real overlay bg is NOT
+       reproduced (a rgba(0,0,0,.9) full-bleed would blacken the sheet) #}
+    <div class="image-modal">
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='130'%3E%3Crect width='220' height='130' rx='10' fill='%23234'/%3E%3Ccircle cx='168' cy='34' r='15' fill='%23e8b84b'/%3E%3Cpath d='M18 106 L74 52 L118 86 L150 62 L202 106 Z' fill='%234a6fa5'/%3E%3C/svg%3E" alt="fake preview">
+    </div>
+    <div class="tg-el-cap">upload.css: .image-modal — full-screen lightbox (rgba(0,0,0,.9) + zoom-out cursor), img max 90vw/90vh + --radius-md. Overlay bg intentionally NOT reproduced in the fragment. NOTE: no template/JS instantiates this class — dead CSS kept for fidelity.</div>
+</section>

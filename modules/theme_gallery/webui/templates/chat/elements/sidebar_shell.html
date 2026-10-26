@@ -1,0 +1,82 @@
+{# ================= E30 sidebar shell, tabs & day groups =================
+   The sidebar's own chrome: tab bar, category row, day-grouped chat list,
+   search field with its in-flight spinner, tag icon and result snippet.
+   Source: templates/sidebar.html + sidebar.css. The real shell is a flex
+   column sized by #sidebar; .tg-el-sidebar-box gives it a bounded height so
+   the tab bar / list split renders like the app. #}
+<section class="tg-el-section">
+    <h3>Sidebar &mdash; shell, tabs &amp; chat list</h3>
+
+    <div class="tg-sidebar-host">
+        <div class="sidebar-shell">
+            <nav class="sidebar-tabbar" aria-label="Sidebar tabs">
+                <button type="button" class="sidebar-tab active" title="Chats">{% include 'svg/chat.svg' %}</button>
+                <button type="button" class="sidebar-tab" title="Chats">{% include 'svg/search.svg' %}</button>
+                <button type="button" class="sidebar-tab ext active" title="Theme gallery">{% include 'svg/package.svg' %}</button>
+                <button type="button" class="sidebar-tab ext" title="Testbench">{% include 'svg/gear.svg' %}</button>
+            </nav>
+
+            <div id="chat-list">
+                {# category trigger row (fused menu demo lives in E13) #}
+                <div class="search">
+                    <span class="search-icon">{% include 'svg/search.svg' %}</span>
+                    <span class="search-spinner"></span>
+                    <input name="search" type="text" placeholder="Search..">
+                    <button type="button" class="search-toggle active" title="Searching titles + message content">
+                        {% include 'svg/tag.svg' %}
+                    </button>
+                </div>
+
+                <div class="chats">
+                    <div class="day-group">
+                        <button type="button" class="day-header expanded" aria-expanded="true">
+                            <svg class="day-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="10" height="10"><path fill="currentColor" d="M4 1l5 5-5 5z"/></svg>
+                            <span class="day-label">Today</span>
+                            <span class="day-count">3</span>
+                        </button>
+
+                        <div class="day-chats">
+                            <div class="item active">
+                                <div>
+                                    <div class="title-row">
+                                        <span class="title">Theme gallery question</span>
+                                        <span class="tag-icon-wrap">{% include 'svg/tag.svg' %}</span>
+                                    </div>
+                                </div>
+                                {# actions row in its open state (.menu-open on the wrapper,
+                                   .active on the trigger) #}
+                                <div class="item-actions menu-open">
+                                    <button class="action-btn active" title="Actions">{% include 'svg/more_vertical.svg' %}</button>
+                                </div>
+                            </div>
+                            <div class="item">
+                                <div>
+                                    <div class="title-row">
+                                        <span class="title">Restart notes</span>
+                                    </div>
+                                </div>
+                                {# server-side highlight (channel.py builds <strong class="search-highlight">) #}
+                                <div class="snippet snippet-3">…the <mark>theme</mark> pipeline uses <strong class="search-highlight">marked</strong> + hljs…</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="day-group">
+                        <button type="button" class="day-header" aria-expanded="false">
+                            <svg class="day-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="10" height="10"><path fill="currentColor" d="M4 1l5 5-5 5z"/></svg>
+                            <span class="day-label">Yesterday</span>
+                            <span class="day-count">12</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {# module panel slot: one .sidebar-panel per extension sidebar #}
+            <div class="sidebar-panel">
+                <div class="tg-el-cap">extension panel body (module-owned content)</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.sidebar-shell &gt; nav.sidebar-tabbar &gt; button.sidebar-tab(.active/.ext) &middot; #chat-list &gt; .search (.search-icon/.search-spinner/input/.search-toggle) &middot; .chats &gt; .day-group &gt; button.day-header(.expanded) &gt; svg.day-chevron + .day-label + .day-count &gt; .day-chats &gt; .item &gt; .title-row &gt; span.title + .tag-icon-wrap &middot; .snippet.snippet-3 &middot; .sidebar-panel</div>
+</section>

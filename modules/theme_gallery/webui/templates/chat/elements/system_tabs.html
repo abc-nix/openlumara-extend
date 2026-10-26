@@ -1,0 +1,44 @@
+{# ================= E28 system tabs: logs & system prompt =================
+   The two read-only info tabs. Kept together because both are plain
+   containers: a scrolling log list and a pre-wrap prompt box.
+   Source: templates/modals/settings/logs.html + system_prompt.html,
+   settings/logs.css + system_prompt.css. #}
+<section class="tg-el-section">
+    <h3>System logs &amp; system prompt</h3>
+
+    <div class="settings-modal modal">
+        {# the logs tab mounts its main column with .nopadding (base.css utility) #}
+        <main class="content-wrapper nopadding">
+        <div class="system-logs">
+            <div class="entry">
+                <div class="category">INFO</div>
+                <div class="message">Module theme_gallery loaded (development).</div>
+            </div>
+            <div class="entry">
+                <div class="category">WARN</div>
+                <div class="message">Settings store took 470 ms to load.</div>
+            </div>
+            <div class="entry">
+                <div class="category">ERROR</div>
+                <div class="message">web_search.news timed out after 30s.</div>
+            </div>
+            <div class="entry">
+                <div class="category">INFO</div>
+                <div class="message">Chat stream finished: 128 tokens.</div>
+            </div>
+        </div>
+        </main>
+    </div>
+
+    <div class="settings-modal modal">
+        <div class="fullwidth">
+            <h3 class="section-title">System Prompt</h3>
+            <p class="section-desc">The full system prompt being sent to the AI at the start of every chat.</p>
+            <div class="system-prompt">You are a helpful assistant.
+Tools are available; call them when they help.
+Answer in the user's language.</div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.system-logs (id="log-container", x-auto-scroll) &gt; .entry &gt; .category + .message &middot; .fullwidth &gt; .system-prompt &mdash; both scoped under the settings modal, both read-only (no inputs)</div>
+</section>

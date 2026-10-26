@@ -1,0 +1,292 @@
+/* -- AI GENERATED CODE (Qwen3.8-Flash-Next) :: (2026-10-07)
+   browser module webui panel: icon-rail launcher (bottom_of_tabbar slot) +
+   tray-menu popover anchored beside the rail (fixed-position like the core
+   model-switcher; the old modal variant lives in the .backups folder).
+   Theme vars with fallbacks so every core theme works; served through the
+   ext-css pipeline (/ext-assets/browser/css/browser.css). */
+
+/* mount = rail child that pins itself to the rail bottom and groups
+   button+popover (the click-outside dismiss boundary) */
+.browser-ext-mount {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: auto;
+}
+
+/* status dot: inline by default (the popover's status line). The bug this
+   comment prevents: an absolute base dot + a static parent = the dot
+   escapes to the nearest positioned ancestor (page corner). So the
+   badge form is SCOPED to the launcher button, which becomes its own
+   containing block via position:relative. */
+.browser-ext-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted, #888);
+    flex-shrink: 0;
+}
+.browser-ext-btn {
+    position: relative; /* containing block for the badge */
+}
+.browser-ext-btn .browser-ext-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+}
+.browser-ext-dot.checking { opacity: 0.5; }
+.browser-ext-dot.off { background: var(--text-muted, #888); }
+.browser-ext-dot.on {
+    background: #2ecc71;
+    box-shadow: 0 0 6px rgba(46, 204, 113, 0.55);
+}
+.browser-ext-dot.ext {
+    background: #e67e22;
+    box-shadow: 0 0 6px rgba(230, 126, 34, 0.45);
+}
+
+/* launcher: a real .sidebar-tab inside the icon rail (bottom_of_tabbar
+   slot) - the mount's margin-top:auto separates it from the top tab group
+   and pins it to the rail's bottom; everything else (36px box, hover,
+   colors) comes from the core rail styles. Parked variants in .backups:
+   below_page+fixed icon, full modal panel. */
+
+/* popover: fixed so the rail's overflow/clipping can never cut it.
+   Desktop: rail is the 46px column at the left edge and the button sits at
+   the rail's bottom, so anchor bottom-left beside it. z-index above page
+   content, under core modals. */
+.browser-ext-pop {
+    position: fixed;
+    left: 54px;
+    bottom: 14px;
+    width: 280px;
+    max-width: calc(100vw - 70px);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.8rem 0.95rem 0.9rem;
+    background: var(--bg-primary, #1e1e24);
+    border: 1px solid var(--border-color, #444);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    z-index: 900;
+}
+
+/* mobile (<=768px, mirrors core sidebar.css breakpoint): the rail becomes
+   a 50px top bar, so the popover drops down from it full-width instead. */
+@media (max-width: 768px) {
+    .browser-ext-pop {
+        top: 58px;
+        bottom: auto;
+        left: 8px;
+        width: calc(100vw - 16px);
+        max-width: 340px;
+    }
+}
+.browser-ext-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+.browser-ext-tabs {
+    font-weight: 400;
+    opacity: 0.75;
+}
+.browser-ext-detail,
+.browser-ext-tabline {
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+.browser-ext-url {
+    font-family: monospace;
+    word-break: break-all;
+}
+.browser-ext-actions {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 0.25rem;
+}
+.browser-ext-action {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #444);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #eee);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.browser-ext-action:hover:not(:disabled) {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.12));
+}
+.browser-ext-action:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+/* connected -> the toggle turns into "Close browser" with the core danger
+   token (same red as the chat menu's Delete); flipping it is one CSS var
+   away if another color is preferred */
+.browser-ext-action.danger {
+    color: var(--error, #e74c3c);
+    border-color: var(--error, #e74c3c);
+}
+
+/* collapsible details */
+.browser-ext-details-btn {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: none;
+    border: none;
+    padding: 0.15rem 0;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    color: inherit;
+    cursor: pointer;
+}
+.browser-ext-details-btn:hover { opacity: 1; }
+.browser-ext-chevron { transition: transform 0.15s ease; }
+.browser-ext-chevron.open { transform: rotate(90deg); }
+.browser-ext-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.15rem 0 0.35rem 1.15rem;
+}
+.browser-ext-err {
+    color: #e74c3c;
+    font-size: 0.85rem;
+}
+
+.browser-ext-link {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.78rem;
+    color: inherit;
+    opacity: 0.6;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.browser-ext-link:hover { opacity: 0.9; }
+
+/* help "?" button: absolute inside the popover (which is fixed, hence a
+   containing block). Popover gets extra bottom padding so it never
+   overlaps the settings link. */
+.browser-ext-pop { padding-bottom: 2rem; }
+.browser-ext-help-btn {
+    position: absolute;
+    right: 10px;
+    bottom: 9px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color, #444);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    color: var(--text-muted, #999);
+    font-size: 0.8rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.browser-ext-help-btn:hover {
+    color: var(--text-primary, #eee);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.12));
+}
+
+/* help mini-window: same anchor as the popover, one z-step above it */
+.browser-ext-help {
+    position: fixed;
+    left: 54px;
+    bottom: 14px;
+    width: 360px;
+    max-width: calc(100vw - 70px);
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary, #1e1e24);
+    border: 1px solid var(--border-color, #444);
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    z-index: 901;
+}
+.browser-ext-help-head {
+    position: sticky;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    font-weight: 600;
+    background: var(--bg-primary, #1e1e24);
+    border-bottom: 1px solid var(--border-color, #444);
+}
+.browser-ext-help-close {
+    background: none;
+    border: none;
+    color: var(--text-muted, #999);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.browser-ext-help-close:hover { color: var(--text-primary, #eee); }
+.browser-ext-help-body { padding: 0.4rem 0.9rem 0.9rem; font-size: 0.88rem; }
+.browser-ext-help-body h4 { margin: 0.8rem 0 0.35rem; }
+.browser-ext-help-body h4:first-child { margin-top: 0.3rem; }
+.browser-ext-help-body p { margin: 0.35rem 0; }
+.browser-ext-help-body ul { margin: 0.35rem 0; padding-left: 1.2rem; }
+.browser-ext-help-body li { margin: 0.15rem 0; }
+.browser-ext-help-body code {
+    font-family: monospace;
+    font-size: 0.85em;
+    padding: 0.05em 0.3em;
+    border-radius: 4px;
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
+}
+.browser-ext-help-body hr { border: none; border-top: 1px solid var(--border-color, #444); margin: 0.7rem 0; }
+.browser-ext-help-body em { opacity: 0.65; }
+
+@media (max-width: 768px) {
+    .browser-ext-help {
+        top: 58px;
+        bottom: auto;
+        left: 8px;
+        width: calc(100vw - 16px);
+        max-width: 380px;
+        max-height: calc(100vh - 76px);
+    }
+}
+
+/* screenshot tool card: the full-resolution capture, shrunk by css - the same
+   idea as the attachment bubble's .media-preview img, just smaller. the src
+   is the real image, so right-click -> open image in new tab shows it at
+   native size. theme vars with fallbacks, like the rest of this file. */
+.browser-shot {
+    display: flex;
+    flex-direction: column;
+    /* a flex column stretches its children to the card width, which made the
+       thumbnail full-bleed and (with max-height) squashed - anchor it left */
+    align-items: flex-start;
+    gap: 6px;
+}
+.browser-shot-thumb {
+    display: block;
+    /* fixed height + auto width keeps the capture's aspect ratio and a
+       thumbnail footprint; object-fit covers panoramas clamped by max-width */
+    height: 160px;
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-sm, 6px);
+    cursor: zoom-in;
+}
+.browser-shot-path {
+    font-size: 0.72rem;
+    color: var(--text-muted, #888);
+    word-break: break-all;
+}

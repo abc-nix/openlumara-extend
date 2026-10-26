@@ -1,0 +1,116 @@
+{# ================= E8 tool calls ================= #}
+<section class="tg-el-section">
+    <h3>Tool calls</h3>
+    <div class="tool-calls-container">
+        {# pending, collapsed #}
+        <div class="tool-call-card tool-pending">
+            <div class="node-dot"></div>
+            <div class="header">
+                <svg class="card-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="module">Web:&nbsp;</span><span class="name">search</span>
+                <span class="call-args">"best markdown parser 2026"</span>
+            </div>
+        </div>
+        {# expanded with args + response #}
+        <div class="tool-call-card">
+            <div class="node-dot expanded"></div>
+            <div class="header">
+                <svg class="card-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="module">File:&nbsp;</span><span class="name">read_file</span>
+                <span class="call-result">12 lines ✓</span>
+            </div>
+            <div class="body">
+                <div class="default-display">
+                    <div class="arg-row"><span class="arg-name">path</span><span class="arg-value">notes/ideas.md</span></div>
+                    <div class="arg-row"><span class="arg-name">max_lines</span><span class="arg-value">50</span></div>
+                    {# keyless row for an unwrapped content field (.content-row >
+                       .value spans the full grid width) + trailing fields
+                       separated by a hairline (.response-rest) #}
+                    <div class="content-row"><span class="value">- buy more mechanical keyboard lube
+- try the new exl3 quant
+- gallery: pass 3 chrome sections</span></div>
+                    <div class="response-rest">
+                        <div class="response-row"><p class="raw-response">{"lines": 3, "truncated": false}</p></div>
+                    </div>
+                    <img class="tool-result-image" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='90'%3E%3Crect width='160' height='90' rx='8' fill='%2326323f'/%3E%3Ctext x='80' y='50' text-anchor='middle' fill='%239db2c8' font-size='13' font-family='monospace'%3Echart.png%3C/text%3E%3C/svg%3E" alt="fake tool result image">
+                </div>
+            </div>
+        </div>
+        {# error #}
+        <div class="tool-call-card tool-error">
+            <div class="node-dot"></div>
+            <div class="header">
+                <svg class="card-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="module">Shell:&nbsp;</span><span class="name">run_command</span>
+                <span class="call-args">rm -rf /</span>
+            </div>
+            <div class="display-error">Permission denied (this fake command was blocked)</div>
+        </div>
+        {# custom file-edit view: diff (user-QA audit find — was missing) #}
+        <div class="tool-call-card expanded">
+            <div class="node-dot expanded"></div>
+            <div class="header">
+                <svg class="card-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="module">Editor:&nbsp;</span><span class="name">edit</span>
+                <span class="call-args">theme_gallery.css</span>
+            </div>
+            <div class="diff-container">
+                <div class="tool-display hljs diff-unified">
+                    <div class="diff-line diff-del"><span class="diff-gutter">-</span><span class="diff-text">.tg-el-cap { color: <span class="hljs-number">var</span>(--text-muted); }</span></div>
+                    <div class="diff-line diff-add"><span class="diff-gutter">+</span><span class="diff-text">.tg-el-cap { color: <span class="hljs-number">var</span>(--text-secondary); }</span></div>
+                    <div class="diff-line diff-gap"><span class="diff-gutter">~</span><span class="diff-text">2 unchanged lines</span></div>
+                </div>
+                <div class="display-footer">theme_gallery.css · +1 −1</div>
+            </div>
+        </div>
+    </div>
+    {# 2026-10-25 audit: the side-by-side half of the same view. .diff-container
+       is a size container (container-type: inline-size); @container
+       (min-width: 640px) hides .diff-unified and shows .diff-side. The sheet
+       normally caps .diff-container at 560px so the unified child stays
+       visible; .tg-el-diffwide lifts that cap for this sample only. #}
+    <div class="tool-call-card expanded">
+        <div class="header">
+            <svg class="card-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+            <span class="module">Editor:&nbsp;</span><span class="name">edit</span>
+            <span class="call-args">theme_gallery.css &mdash; wide container</span>
+        </div>
+        <div class="diff-container tg-el-diffwide">
+            <div class="diff-side hljs">
+                <div class="diff2-row">
+                    <div class="diff2-cell diff2-del"><span class="diff2-gutter">-</span><span class="diff2-text">.tg-el-cap { color: var(--text-muted); }</span></div>
+                    <div class="diff2-cell diff2-empty"></div>
+                </div>
+                <div class="diff2-row">
+                    <div class="diff2-cell diff2-empty"></div>
+                    <div class="diff2-cell diff2-add"><span class="diff2-gutter">+</span><span class="diff2-text">.tg-el-cap { color: var(--text-secondary); }</span></div>
+                </div>
+                {# collapsed unchanged stretch: spans both columns #}
+                <div class="diff2-row diff2-gap"><span class="diff2-full">2 unchanged lines</span></div>
+            </div>
+            <div class="display-footer">theme_gallery.css &middot; +1 &minus;1</div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">toolcalls.html: .tool-call-card(.tool-pending/.tool-error) + .arg-row + .raw-response + .display-error &middot; custom_tool_views: .diff-container(.diff-del/.diff-add/.diff-gap + .display-footer) &middot; side-by-side: .diff-side &gt; .diff2-row &gt; .diff2-cell(.diff2-del/.diff2-add/.diff2-empty) &gt; .diff2-gutter + .diff2-text (container query &ge;640px)</div>
+    {# streaming sibling container: same cards, tighter rhythm (gap 8px vs 14px) #}
+    <div class="tool-calls-streaming-container">
+        <div class="tool-call-card">
+            <div class="node-dot expanded"></div>
+            <div class="header">
+                <svg class="card-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="module">Web:&nbsp;</span><span class="name">fetch</span>
+                <span class="call-args">"https://example.dev/docs"</span>
+            </div>
+        </div>
+        <div class="tool-call-card tool-pending">
+            <div class="node-dot"></div>
+            <div class="header">
+                <svg class="card-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                <span class="module">Web:&nbsp;</span><span class="name">fetch</span>
+                <span class="call-args">"https://example.dev/api"</span>
+            </div>
+        </div>
+    </div>
+    <div class="tg-el-cap">toolcalls.css: .tool-calls-streaming-container — sibling of .tool-calls-container, identical cards at gap 8px (vs 14px) while the agent is mid-stream</div>
+</section>

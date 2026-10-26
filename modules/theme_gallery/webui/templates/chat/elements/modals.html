@@ -1,0 +1,73 @@
+{# ================= E14 modal shell fragments ================= #}
+<section class="tg-el-section">
+    <h3>Modal shells (fragments)</h3>
+    <div class="modal global-search-modal">
+        <div class="global-search-modal-content">
+            <div class="global-search-header">
+                <svg class="global-search-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                <input class="global-search-input" type="text" placeholder="Search all chats..">
+                <button class="global-search-close" aria-label="Close search">&times;</button>
+            </div>
+            <div class="global-search-content-toggle">
+                <label class="global-search-checkbox"><input type="checkbox" checked><span class="global-search-checkbox-label">Search in message content</span></label>
+            </div>
+            <div class="global-search-result-count">2 results</div>
+            <div class="global-search-content"><div class="global-search-results">
+            {# audit find: the three empty-side states were missing —
+               loading / empty (no query) / no-results #}
+            <div class="global-search-loading">
+                <div class="spinner"></div>
+                <span class="loading-text">Searching...</span>
+            </div>
+            <div class="global-search-empty">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                <p>Start typing to search through all chats</p>
+            </div>
+            <div class="global-search-no-results">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                <p>No results found for "<span>nonexistent-term</span>"</p>
+            </div>
+                <div class="global-search-result">
+                    <div class="global-search-result-header">
+                        <span class="global-search-result-title">Notes about <mark>markdown</mark> parsers</span>
+                        <span class="global-search-result-date">Today</span>
+                    </div>
+                    <div class="global-search-result-snippet">…the <mark>markdown</mark> pipeline uses marked + hljs…</div>
+                    <div class="global-search-result-tags"><span class="global-search-result-tag">gallery</span><span class="global-search-result-tag">+2</span></div>
+                </div>
+                <div class="global-search-result active">
+                    <div class="global-search-result-header">
+                        <span class="global-search-result-title">Where is the <mark>markdown</mark> CSS</span>
+                        <span class="global-search-result-date">Yesterday</span>
+                    </div>
+                </div>
+            </div></div>
+        </div>
+    </div>
+    <div class="modal categories-modal">
+        <div class="header"><h2>Manage Categories</h2><button class="close" aria-label="Close">&times;</button></div>
+        <div class="categories-content">
+            <div class="category-rows">
+                <div class="category-row">
+                    <div class="category-info"><span class="category-name">general</span><span class="category-count">12 chats</span></div>
+                </div>
+                <div class="category-row">
+                    <div class="category-info"><span class="category-name">work</span><span class="category-count">4 chats</span></div>
+                    <div class="category-actions">
+                        <div class="confirm-inline">
+                            <span class="confirm-text">move 4 chats to general?</span>
+                            <button class="rename-action-btn save" title="Confirm">{% include 'svg/checkmark.svg' %}</button>
+                            <button class="rename-action-btn cancel" title="Cancel">{% include 'svg/cross.svg' %}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="add-category">
+                <input type="text" placeholder="New category name">
+                <button class="add-btn">Add</button>
+            </div>
+            <div class="category-error">category name already exists</div>
+        </div>
+    </div>
+    <div class="tg-el-cap">.global-search-modal (result rows w/ mark highlights · loading/empty/no-results states) · .categories-modal (.category-row/.confirm-inline/.add-btn/.category-error) · modal .header + .close — restart overlay & move_chat list: see Settings/Sidebar live categories</div>
+</section>

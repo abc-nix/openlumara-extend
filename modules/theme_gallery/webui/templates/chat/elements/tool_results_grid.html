@@ -1,0 +1,50 @@
+{# ================= E37 tool result value renderer =================
+   The JSON value grid every tool response goes through (renderers/
+   tool_results.js): arrays as index→value rows, objects as key/value rows,
+   nested structures recurse, scalars get their own spans. Scoped under
+   .tool-call-card like all tool markup.
+   Source: assets/js/renderers/tool_results.js + chat/toolcalls.css. #}
+<section class="tg-el-section">
+    <h3>Tool results &mdash; value renderer</h3>
+
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Shell:&nbsp;</span><span class="name">run_command</span>
+            <span class="call-result">&check; 0</span>
+        </div>
+        <div class="body">
+            <div class="default-display">
+                {# object → kv-rows #}
+                <div class="kv-rows">
+                    <div class="kv-row"><span class="key">branch</span><div class="value"><span class="string">main</span></div></div>
+                    <div class="kv-row"><span class="key">clean</span><div class="value"><span class="scalar boolean">true</span></div></div>
+                    <div class="kv-row"><span class="key">exit_code</span><div class="value"><span class="scalar number">0</span></div></div>
+                    <div class="kv-row"><span class="key">note</span><div class="value"><span class="null">null</span></div></div>
+
+                    {# nested array → array-rows.nested, index keys #}
+                    <div class="kv-row"><span class="key">files</span>
+                        <div class="value">
+                            <div class="array-rows nested">
+                                <div class="kv-row"><span class="key index">0</span><div class="value"><span class="string">config.yml</span></div></div>
+                                <div class="kv-row"><span class="key index">1</span><div class="value"><span class="string">main.py</span></div></div>
+                                <span class="truncated">+ 3 more</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {# empty structures #}
+                    <div class="kv-row"><span class="key">warnings</span><div class="value"><span class="empty">empty</span></div></div>
+                </div>
+
+                {# top-level array → array-rows with index keys #}
+                <div class="array-rows">
+                    <div class="kv-row"><span class="key index">0</span><div class="value"><span class="string">theme_gallery</span></div></div>
+                    <div class="kv-row"><span class="key index">1</span><div class="value"><span class="string">testbench</span></div></div>
+                    <span class="truncated">+ 2 more keys</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">tool_results.js: .kv-rows / .array-rows (+.nested) &gt; .kv-row &gt; .key(.index) + .value &gt; .string | .scalar.number | .scalar.boolean | .null | .empty | (nested rows) &middot; .truncated (&quot;+ N more&quot;) &middot; toolResponseRenderer wraps content in .content-row &gt; .value (keyless, full width) and trailing fields in .response-rest (toolcalls.css)</div>
+</section>

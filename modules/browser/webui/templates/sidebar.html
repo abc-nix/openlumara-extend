@@ -1,0 +1,121 @@
+{# -- AI GENERATED CODE (Qwen3.8-Flash-Next) :: (2026-10-07, popover variant)
+   browser panel launcher via the core bottom_of_tabbar slot: an icon-rail
+   button that opens a tray-menu style POPOVER (fixed-position, anchored
+   beside the rail) instead of a core modal — same spirit as the core
+   model-switcher dropdown and the windows module's custom floating
+   elements. The .browser-ext-mount wrapper holds button+popover together
+   so @click.outside dismisses correctly (clicking the button toggles) and
+   Esc closes while open. margin-top:auto moved to the mount (rail pin).
+   Icon-only button: name + live status in the dynamic :title tooltip;
+   dot = status badge on the icon corner. State lives in the shared
+   $store.browserPanel (assets/js/browser.js); the old modal variant is
+   parked in the .backups folder (browser-modal.html.*.popover-variant.bak). #}
+
+{% macro bottom_of_tabbar() %}
+<div class="browser-ext-mount"
+     @click.outside="$store.browserPanel.panelOpen && $store.browserPanel.closePanel()"
+     @keydown.escape.window="$store.browserPanel.panelOpen && $store.browserPanel.closePanel()">
+<button type="button" class="sidebar-tab ext browser-ext-btn"
+        x-init="$store.browserPanel.refresh()"
+        :title="$store.browserPanel.dotTitle()"
+        :aria-expanded="$store.browserPanel.panelOpen ? 'true' : 'false'"
+        aria-label="Browser panel"
+        @click="$store.browserPanel.togglePanel()">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M3 12h18"/>
+        <path d="M12 3c2.5 2.6 3.9 5.7 3.9 9S14.5 18.4 12 21c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z"/>
+    </svg>
+    <span class="browser-ext-dot" :class="$store.browserPanel.dotClass()"></span>
+</button>
+
+<div class="browser-ext-pop" x-show="$store.browserPanel.panelOpen" x-cloak>
+    <div class="browser-ext-status">
+        <span class="browser-ext-dot" :class="$store.browserPanel.dotClass()"></span>
+        <span x-text="$store.browserPanel.statusText()"></span>
+    </div>
+
+    {# single toggle: one browser instance can exist - label + danger color
+       flip with the connected state (labels via store.actionLabel()) #}
+    <div class="browser-ext-actions">
+        <button type="button" class="browser-ext-action"
+            :class="{ 'danger': $store.browserPanel.status && $store.browserPanel.status.connected }"
+            :disabled="$store.browserPanel.busy || !$store.browserPanel.status"
+            @click="$store.browserPanel.toggleBrowser()">
+            <span x-text="$store.browserPanel.actionLabel()"></span>
+        </button>
+    </div>
+
+    {# restart headless<->visible: offered only for module-owned browsers
+       (we never kill an external one). Session-scoped flip; the settings
+       value stays the permanent source of truth. #}
+    <div class="browser-ext-actions"
+         x-show="$store.browserPanel.status && $store.browserPanel.status.owned_process">
+        <button type="button" class="browser-ext-action"
+            :disabled="$store.browserPanel.busy || !$store.browserPanel.status"
+            :title="'Reopen the same tabs in ' + ($store.browserPanel.status && $store.browserPanel.status.headless ? 'visible' : 'headless') + ' mode (history stack and passwords are not carried over)'"
+            @click="$store.browserPanel.restartBrowser()">
+            <span x-text="$store.browserPanel.restartLabel()"></span>
+        </button>
+    </div>
+
+    <div class="browser-ext-err"
+         x-show="$store.browserPanel.error"
+         x-text="$store.browserPanel.error"></div>
+
+    {# collapsible info block (core loads the alpine-collapse plugin;
+       chevron mirrors the day-header pattern) #}
+    <button type="button" class="browser-ext-details-btn"
+            @click="$store.browserPanel.detailsOpen = !$store.browserPanel.detailsOpen"
+            :aria-expanded="$store.browserPanel.detailsOpen ? 'true' : 'false'">
+        <svg class="browser-ext-chevron" :class="{ 'open': $store.browserPanel.detailsOpen }"
+            xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="10" height="10"><path fill="currentColor" d="M4 1l5 5-5 5z"/></svg>
+        details
+    </button>
+    <div class="browser-ext-details" x-show="$store.browserPanel.detailsOpen" x-collapse>
+        <div class="browser-ext-detail"
+             x-show="$store.browserPanel.status && $store.browserPanel.status.browser"
+             x-text="$store.browserPanel.status ? ($store.browserPanel.status.browser || '') : ''">
+        </div>
+        <div class="browser-ext-detail"
+             x-show="$store.browserPanel.status && $store.browserPanel.status.tab_count != null"
+             x-text="`${$store.browserPanel.status ? $store.browserPanel.status.tab_count : 0} tab(s)`">
+        </div>
+        <div class="browser-ext-tabline"
+             x-show="$store.browserPanel.status && $store.browserPanel.status.current_tab">
+            current tab:
+            <span class="browser-ext-url"
+                  x-text="$store.browserPanel.status && $store.browserPanel.status.current_tab
+                          ? $store.browserPanel.status.current_tab.url : ''"></span>
+        </div>
+    </div>
+
+    <button type="button" class="browser-ext-link"
+            @click="$store.browserPanel.closePanel(); $store.ui.openModal('settings')">
+        open module settings...
+    </button>
+
+    {# help: corner button opening the mini-window below; body is fetched
+       from assets/browser-help.md (markdown), so help text edits never
+       touch this file #}
+    <button type="button" class="browser-ext-help-btn"
+            aria-label="Browser help" title="how this works"
+            :aria-expanded="$store.browserPanel.helpOpen ? 'true' : 'false'"
+            @click="$store.browserPanel.toggleHelp()">?</button>
+</div>
+
+{# help mini-window: inside the mount so the click-outside boundary keeps
+   dismissing both; closes with the panel (closePanel resets helpOpen) #}
+<div class="browser-ext-help" x-show="$store.browserPanel.helpOpen" x-cloak>
+    <div class="browser-ext-help-head">
+        <span>How the browser module works</span>
+        <button type="button" class="browser-ext-help-close"
+                aria-label="Close help"
+                @click="$store.browserPanel.helpOpen = false">&times;</button>
+    </div>
+    <div class="browser-ext-help-body" x-html="$store.browserPanel.helpHtml"></div>
+    <div class="browser-ext-err" x-show="$store.browserPanel.helpError"
+         x-text="$store.browserPanel.helpError"></div>
+</div>
+</div>
+{% endmacro %}

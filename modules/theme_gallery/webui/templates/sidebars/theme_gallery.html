@@ -1,0 +1,70 @@
+{# Theme gallery — sidebar panel (left panel).
+
+   This panel IS the category list. Core already wraps it in a .sidebar-panel
+   that shows only while the theme_gallery tab is active, so everything here is
+   always visible-on-demand. The x-effect below is the whole show/hide switch:
+   while this tab is active <body data-tg> is set, which (see theme_gallery.css)
+   covers the chat column with the overlay and hides the chat underneath.
+
+   All logic lives in assets/js/theme_gallery.js (shared reactive state `tgState`). #}
+<div class="tg-panel" x-data="{}"
+     x-effect="document.body.toggleAttribute('data-tg', sidebarTab === 'theme_gallery/theme_gallery')">
+
+    <div class="tg-panel-header">
+        <span class="tg-panel-title">Theme gallery</span>
+    </div>
+
+    {# ---- categories: one row per surface the panes can show ---- #}
+    <div class="tg-cats">
+        {# surface categories: Chat = handcrafted sample, Welcome = live clone
+           of the real new-chat screen, Settings = hidden capture of the real modal,
+           Sidebar = live clone of the shell, Elements = the static style guide,
+           Coverage = the per-stylesheet class audit. #}
+        <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'chat' }"
+                @click="tgState.setCategory('chat')">
+            <span class="tg-cat-name">Chat</span>
+            <span class="tg-cat-note">sample</span>
+        </button>
+        <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'welcome' }"
+                @click="tgState.setCategory('welcome')">
+            <span class="tg-cat-name">Welcome screen</span>
+            <span class="tg-cat-note">live clone</span>
+        </button>
+        <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'settings' }"
+                @click="tgState.setCategory('settings')">
+            <span class="tg-cat-name">Settings</span>
+            <span class="tg-cat-note">live clone</span>
+        </button>
+        <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'sidebar' }"
+                @click="tgState.setCategory('sidebar')">
+            <span class="tg-cat-name">Sidebar</span>
+            <span class="tg-cat-note">live clone</span>
+        </button>
+        <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'elements' }"
+                @click="tgState.setCategory('elements')">
+            <span class="tg-cat-name">Elements</span>
+            <span class="tg-cat-note">style guide</span>
+        </button>
+        <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'coverage' }"
+                @click="tgState.setCategory('coverage')">
+            <span class="tg-cat-name">Coverage</span>
+            <span class="tg-cat-note">report</span>
+        </button>
+    </div>
+
+    {# hover freeze was retired 2026-10-25 (user QA): the split "🔗 sync"
+       hover-mirror does its job better — see theme_gallery.js bindPaneMirror #}
+
+    {# ---- view options ---- #}
+    <label class="tg-opt-row" title="also outlines the same element in the other pane when split">
+        <input type="checkbox" :checked="tgState.highlight" @change="tgState.toggleHighlight()">
+        <span>Highlight element</span>
+    </label>
+    <div class="tg-opt-desc">Draws a box around the element your cursor is on</div>
+
+    {# ---- what is being previewed right now ---- #}
+    <div class="tg-panel-status">
+        <span x-text="tgState.slots[0].family || 'loading themes…'"></span>
+        <span class="tg-dim" x-text="tgState.modeSummary()"></span>
+    </div>
+</div>

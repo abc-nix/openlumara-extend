@@ -1,0 +1,54 @@
+{# =====================================================================
+   ELEMENTS STYLE GUIDE — one section per file, in the order below.
+   Static, fake content, app classes ONLY. Ancestor wrappers recreate the
+   CSS scoping the app expects (.settings-modal, #chat-list, .search,
+   .combined-block, .welcome-panel…). The pane is already inside the real
+   #chat-window, so window.css/message scoping applies as-is.
+   Swatches (E19) are an empty container theme_gallery.js fills per pane.
+   Inventory, states and QA notes: ELEMENTS.md.
+   ===================================================================== #}
+<template id="tg-sample-elements">
+    <div id="messages" class="tg-elements">
+
+        <div class="notice">Elements preview — every sample is FAKE content in real app markup.</div>
+
+        {% include 'theme_gallery/chat/elements/buttons.html' %}
+        {% include 'theme_gallery/chat/elements/form_controls.html' %}
+        {% include 'theme_gallery/chat/elements/chips.html' %}
+        {% include 'theme_gallery/chat/elements/pill_states.html' %}
+        {% include 'theme_gallery/chat/elements/messages.html' %}
+        {% include 'theme_gallery/chat/elements/composer.html' %}
+        {% include 'theme_gallery/chat/elements/reasoning.html' %}
+        {% include 'theme_gallery/chat/elements/tool_calls.html' %}
+        {% include 'theme_gallery/chat/elements/agent_chain.html' %}
+        {% include 'theme_gallery/chat/elements/prompt_processing.html' %}
+        {% include 'theme_gallery/chat/elements/uploads.html' %}
+        {% include 'theme_gallery/chat/elements/notices.html' %}
+        {% include 'theme_gallery/chat/elements/popups.html' %}
+        {% include 'theme_gallery/chat/elements/modals.html' %}
+
+        {# ---- 2026-10-25 completeness pass: everything the app renders that
+             the first 15 sections did not. Order = surface, then detail:
+             settings chrome → its tabs → other modals → sidebar shell →
+             welcome → custom tool views → the login page. #}
+        {% include 'theme_gallery/chat/elements/settings_shell.html' %}
+        {% include 'theme_gallery/chat/elements/settings_fields.html' %}
+        {% include 'theme_gallery/chat/elements/settings_appearance.html' %}
+        {% include 'theme_gallery/chat/elements/settings_audio.html' %}
+        {% include 'theme_gallery/chat/elements/settings_modules.html' %}
+        {% include 'theme_gallery/chat/elements/settings_library.html' %}
+        {% include 'theme_gallery/chat/elements/settings_library_audit.html' %}
+        {% include 'theme_gallery/chat/elements/system_tabs.html' %}
+        {% include 'theme_gallery/chat/elements/modals_system.html' %}
+        {% include 'theme_gallery/chat/elements/sidebar_shell.html' %}
+        {% include 'theme_gallery/chat/elements/welcome_panel.html' %}
+        {% include 'theme_gallery/chat/elements/tool_view_search.html' %}
+        {% include 'theme_gallery/chat/elements/tool_view_files.html' %}
+        {% include 'theme_gallery/chat/elements/tool_view_shell.html' %}
+        {% include 'theme_gallery/chat/elements/tool_results_grid.html' %}
+        {% include 'theme_gallery/chat/elements/login_page.html' %}
+
+        {% include 'theme_gallery/chat/elements/swatches.html' %}
+
+    </div>
+</template>

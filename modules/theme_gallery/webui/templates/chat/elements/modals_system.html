@@ -1,0 +1,44 @@
+{# ================= E29 system overlays: backdrop, move chat, restart =================
+   The two small modals that are NOT settings, plus the shared backdrop.
+   Source: modals/index.html (.modal-overlay), modals/move_chat.html,
+   modals/system/state.html + modals/move_chat.css / restart.css.
+   The backdrop is a full-screen veil in the app; shown here as a fixed-height
+   strip so its own background/opacity is what you see. #}
+<section class="tg-el-section">
+    <h3>System overlays &mdash; backdrop, move chat, restart</h3>
+
+    <div class="tg-el-row" style="align-items:flex-start">
+        <div class="modal-overlay tg-el-veil"></div>
+        <span class="tg-el-cap">.modal-overlay &mdash; blurred backdrop, rendered once whenever any modal is open (click closes the modal). Real: position:fixed, z-index 1000.</span>
+    </div>
+
+    <div class="tg-el-modalbox">
+        <div class="modal move-chat-modal tg-el-real">
+            <div class="header">
+                <h2>Move chat</h2>
+                <button class="close" aria-label="Close">&times;</button>
+            </div>
+            <div class="move-chat-content">
+                <p class="move-chat-title">move chat to:</p>
+                <div class="move-chat-row">
+                    <select>
+                        <option>general</option>
+                        <option>work</option>
+                        <option>research</option>
+                    </select>
+                    <button class="move-chat-accept" title="Move">{% include 'svg/checkmark.svg' %}</button>
+                    <button class="move-chat-accept" title="Move (disabled)" disabled>{% include 'svg/checkmark.svg' %}</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-modalbox tg-el-restartbox">
+        <div class="restart-modal tg-el-real">
+            <div class="spinner"></div>
+            <p>Restarting server&hellip;</p>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.modal.move-chat-modal &gt; .header (h2 + .close) + .move-chat-content &gt; p.move-chat-title + .move-chat-row &gt; select + button.move-chat-accept(:disabled) &middot; .restart-modal &gt; .spinner + p &mdash; both real modals are fixed/centred; bounded boxes here keep their real frame styling</div>
+</section>

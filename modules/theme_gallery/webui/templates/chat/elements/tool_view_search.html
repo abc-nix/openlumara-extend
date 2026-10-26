@@ -1,0 +1,45 @@
+{# ================= E32 tool view: web search results =================
+   The custom display a web-search call renders. Scoped under .tool-call-card
+   (custom_tool_views.css nests every view there), which is why the wrapper
+   here is a real card with an empty header.
+   Source: templates/chat/tool_displays.html (web-search view) +
+   chat/custom_tool_views.css. #}
+<section class="tg-el-section">
+    <h3>Tool view &mdash; web search results</h3>
+
+    <div class="tool-call-card">
+        <div class="header">
+            <span class="module">Web:&nbsp;</span><span class="name">search</span>
+            <span class="call-args">"best markdown parser 2026"</span>
+        </div>
+        <div class="body">
+            <div class="search-results">
+                <div class="search-card">
+                    <div class="search-title-row">
+                        <a class="search-title" href="#" onclick="return false">marked vs markdown-it &mdash; benchmark</a>
+                        <img class="search-thumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='88' height='56'%3E%3Crect width='88' height='56' rx='6' fill='%23263a4f'/%3E%3Ctext x='44' y='34' text-anchor='middle' fill='%239db2c8' font-size='10' font-family='monospace'%3Ebench%3C/text%3E%3C/svg%3E" alt="">
+                    </div>
+                    <div class="search-url">https://example.dev/bench/markdown-2026</div>
+                    <div class="search-snippet">…both are close on speed; marked wins on incremental parsing, markdown-it on plugin surface…</div>
+                </div>
+
+                <div class="search-card">
+                    <div class="search-title-row">
+                        <span class="search-title plain">A forum thread with no url</span>
+                    </div>
+                    <div class="search-snippet">…the <mark>markdown</mark> pipeline uses marked + hljs…</div>
+                </div>
+
+                <div class="search-card">
+                    <div class="search-title-row">
+                        <a class="search-title" href="#" onclick="return false">Blocked by search policy</a>
+                    </div>
+                    <div class="search-url">https://example.dev/blocked</div>
+                    <div class="grep-note">Result hidden: domain rejected by the module's search policy.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-el-cap">.tool-display view "web-search": .search-results &gt; .search-card &gt; .search-title-row &gt; a.search-title | span.search-title.plain + img.search-thumb &middot; .search-url &middot; .search-snippet &middot; .grep-note (policy-rejected results)</div>
+</section>

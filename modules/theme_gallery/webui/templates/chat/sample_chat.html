@@ -1,0 +1,505 @@
+<template id="tg-sample-chat">
+    {# notices sit ABOVE the messages, exactly like the real #chat-window #}
+    <div class="notice">Model reconnected — websocket closed cleanly.</div>
+
+    <div id="messages">
+
+        {# ================= turn 1: user ================= #}
+        <div class="fullwidth turn">
+            <div class="message-wrapper user">
+                <div class="message user">
+                    <div class="content">
+                        <p>How do I <strong>highlight</strong> a <mark>search term</mark> and see
+                            <code>inline_code()</code> rendering? Also check
+                            <a href="#" onclick="return false">this link</a> (hover it!).</p>
+                    </div>
+                </div>
+                <div class="message-buttons">
+                    <span class="turn-timestamp">
+                        {% include 'svg/clock.svg' %}
+                        <span>Yesterday 16:41</span>
+                    </span>
+                    <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                    <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                    <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                    <button title="Delete">{% include 'svg/trash.svg' %}</button>
+                </div>
+            </div>
+        </div>
+
+        {# ============ turn 1 answer: Thoughts + rich markdown ============ #}
+        <div class="fullwidth turn">
+            <div class="message-wrapper assistant">
+                <div class="message assistant">
+                    <div class="flex fullwidth segment">
+                        <div>
+                            {# standalone reasoning block (outside a chain), expanded #}
+                            <div class="reasoning-wrapper expanded">
+                                <div class="header">
+                                    {% include 'svg/thought_bubble.svg' %}
+                                    <span class="text">
+                                        <span class="label">Thoughts</span>
+                                    </span>
+                                </div>
+                                <div>
+                                    <div class="block"><div class="content">Based on what's in this conversation (a single meta-question about theming — no substantive topic yet), it doesn't fit a narrower category, and it's too thin to be anything more specific than general. One caveat: I can't read the stored category of the current chat directly — that field isn't exposed to me, only the ability to set it. So I can tell you what it should be, not what it currently is (it's likely still sitting in the default). The user also asked about the theme gallery specifically: the interesting comparison targets are the palette variables a theme leaves undefined, since those are exactly where light themes inherit dark values from the base palette. A dark-only base.json applied in both modes means any palette variable a light theme doesn't override keeps its dark value — the classic symptom is near-white button text on a light button. I should mention that leak explicitly, and also the hover-only looks — the split 🔗 sync hover-mirror exists exactly to chase those down across themes. The tool-call timeline matters too: pending, completed and failed cards each pull different tool variables, so the sample needs all three. Want me to file it under general? I'd also need a name — something like "Theme gallery question" — unless you'd rather leave it untouched.</div></div>
+                                </div>
+                            </div>
+
+                            <div class="content">
+                                <h2>Markdown &amp; code</h2>
+                                <p>One answer that exercises the pipeline: <strong>bold</strong>,
+                                    <em>italic</em>, <del>strikethrough</del>,
+                                    <code>inline_code()</code>, a <a href="#" onclick="return false">link</a>
+                                    (hover it), an emoji 🎨 and a <mark>search hit</mark>.</p>
+
+                                <h3>Lists</h3>
+                                <ul>
+                                    <li>plain item
+                                        <ul>
+                                            <li>nested item</li>
+                                            <li>nested item with <code>code</code></li>
+                                        </ul>
+                                    </li>
+                                    <li>another item</li>
+                                </ul>
+                                <ol>
+                                    <li>first step</li>
+                                    <li>second step</li>
+                                </ol>
+                                <ul>
+                                    <li><input type="checkbox" checked disabled> task done</li>
+                                    <li><input type="checkbox" disabled> task pending</li>
+                                </ul>
+
+                                <h3>Quote</h3>
+                                <blockquote>
+                                    <p>A blockquote — <code>border-left</code> uses the accent,
+                                        the ground is <code>--bg-tertiary</code>.</p>
+                                    <blockquote>
+                                        <p>Nested quote keeps the same border.</p>
+                                    </blockquote>
+                                </blockquote>
+
+                                <h3>Table</h3>
+                                <table>
+                                    <thead>
+                                        <tr><th>Variable</th><th>Defined by</th><th align="center">Used</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td><code>--button-text</code></td><td>base (leak!)</td><td align="center">3</td></tr>
+                                        <tr><td><code>--accent</code></td><td>theme</td><td align="center">18</td></tr>
+                                        <tr><td><code>--bg-code</code></td><td>base</td><td align="center">2</td></tr>
+                                    </tbody>
+                                </table>
+
+                                {# code blocks carry exactly what renderMarkdown emits:
+                                   .copy-btn injected BEFORE <code>, hljs class + token spans #}
+                                <pre><button class="copy-btn" type="button">Copy</button><code class="hljs language-python"><span class="hljs-keyword">def</span> <span class="hljs-title">resolve</span>(<span class="hljs-params">base, theme, mode</span>):
+    <span class="hljs-comment"># theme wins; a key it leaves unset falls back to base</span>
+    <span class="hljs-keyword">return</span> {**base, **(theme.get(mode) <span class="hljs-keyword">or</span> {})}</code></pre>
+
+                                <pre><button class="copy-btn" type="button">Copy</button><code class="hljs language-bash"><span class="hljs-built_in">grep</span> -r <span class="hljs-string">"--button-text"</span> channels/webui/assets/css \
+  | <span class="hljs-built_in">sort</span> -u</code></pre>
+
+                                <hr>
+                                <p>After the horizontal rule — and one inline image
+                                    (data URI, no network):</p>
+                                <p><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='96'%3E%3Crect width='260' height='96' rx='8' fill='%23354a5f'/%3E%3Ccircle cx='210' cy='30' r='12' fill='%23e8b84b'/%3E%3Cpath d='M18 84 L80 40 L120 66 L160 46 L242 84 Z' fill='%237fb069'/%3E%3C/svg%3E" alt="fake inline chart" loading="lazy"></p>
+
+                                {# a bare <mark> in a bubble stays browser-default; this
+                                   snippet shows the APP's themed mark (global_search.css) #}
+                                <div class="global-search-result-snippet">
+                                    snippet with a themed <mark>highlight</mark>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="message-buttons">
+                    <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                    <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                    <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                    <button title="Delete">{% include 'svg/trash.svg' %}</button>
+                    <span class="turn-timestamp">
+                        {% include 'svg/clock.svg' %}
+                        <span>Yesterday 16:42</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        {# ================= turn 2: user ================= #}
+        <div class="fullwidth turn">
+            <div class="message-wrapper user">
+                <div class="message user">
+                    <div class="content"><p>then move this chat to general</p></div>
+                </div>
+                <div class="message-buttons">
+                    <span class="turn-timestamp">
+                        {% include 'svg/clock.svg' %}
+                        <span>Yesterday 16:42</span>
+                    </span>
+                    <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                    <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                    <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                    <button title="Delete">{% include 'svg/trash.svg' %}</button>
+                </div>
+            </div>
+        </div>
+
+        {# ===== turn 2 answer: collapsed Process (1 step) + final content ===== #}
+        <div class="fullwidth turn">
+            <div class="message-wrapper assistant">
+                <div class="message assistant">
+                    <div class="agent-chain">
+                        <div class="agent-chain-header">
+                            {% include 'svg/gear.svg' %}
+                            <span class="label">Process</span>
+                            <span class="activity">(1 step)</span>
+                        </div>
+                    </div>
+                    <div class="flex fullwidth segment">
+                        <div>
+                            <div class="content">
+                                <p>Done — this chat is now in <code>general</code>, named
+                                    "Chat categorization question".</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="message-buttons">
+                    <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                    <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                    <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                    <button title="Delete">{% include 'svg/trash.svg' %}</button>
+                    <span class="turn-timestamp">
+                        {% include 'svg/clock.svg' %}
+                        <span>Yesterday 16:42</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        {# ================= turn 3: user (agentic request) ================= #}
+        <div class="fullwidth turn">
+            <div class="message-wrapper user">
+                <div class="message user">
+                    <div class="content">
+                        <p>Check the docs for how theme variables are resolved, save the
+                            important bits to memory, and schedule a reminder for tomorrow
+                            morning so I can review them. Put the summary in notes too.</p>
+                    </div>
+                </div>
+                <div class="message-buttons">
+                    <span class="turn-timestamp">
+                        {% include 'svg/clock.svg' %}
+                        <span>Today 09:40</span>
+                    </span>
+                    <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                    <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                    <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                    <button title="Delete">{% include 'svg/trash.svg' %}</button>
+                </div>
+            </div>
+        </div>
+
+        {# ===== turn 3 answer: EXPANDED agentic trace (the real timeline) ===== #}
+        <div class="fullwidth turn">
+            <div class="message-wrapper assistant">
+                <div class="message assistant">
+                    <div class="agent-chain">
+                        <div class="agent-chain-header">
+                            {% include 'svg/gear.svg' %}
+                            <span class="label">Process</span>
+                        </div>
+
+                        <div class="agent-chain-body">
+
+                            {# ---- station: thought + module provenance chips ---- #}
+                            <div class="chain-station">
+                                <div class="chain-rail"><div class="chain-dot"></div></div>
+                                <div class="chain-content">
+                                    <div class="combined-block collapsed">
+                                        <div class="node-dot dot-done"></div>
+                                        <div class="header">
+                                            <span class="text">
+                                                <span class="thought-header">
+                                                    <span class="step-thought">Start with the docs index to see which folders exist.</span>
+                                                    <span class="step-modules">
+                                                        <span class="module-chip">
+                                                            <span>Docs:</span>
+                                                            <span class="module-action">list</span>
+                                                        </span>
+                                                    </span>
+                                                </span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {# ---- station: thought + chips with ×2 count ---- #}
+                            <div class="chain-station">
+                                <div class="chain-rail"><div class="chain-dot"></div></div>
+                                <div class="chain-content">
+                                    <div class="combined-block collapsed">
+                                        <div class="node-dot dot-done"></div>
+                                        <div class="header">
+                                            <span class="text">
+                                                <span class="thought-header">
+                                                    <span class="step-thought">Read the theming guide and the variable reference in parallel.</span>
+                                                    <span class="step-modules">
+                                                        <span class="module-chip">
+                                                            <span>Docs:</span>
+                                                            <span class="module-action">read<span class="action-count">x2</span></span>
+                                                        </span>
+                                                    </span>
+                                                </span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {# ---- station EXPANDED: step with a tool card ---- #}
+                            <div class="chain-station">
+                                <div class="chain-rail"><div class="chain-dot"></div></div>
+                                <div class="chain-content">
+                                    <div class="combined-block expanded">
+                                        <div class="node-dot dot-done"></div>
+                                        <div class="header">
+                                            <span class="text">
+                                                <span class="thought-header">
+                                                    <span class="step-thought">Store the key points before moving on.</span>
+                                                    <span class="step-modules">
+                                                        <span class="module-chip">
+                                                            <span>Memory:</span>
+                                                            <span class="module-action">create</span>
+                                                        </span>
+                                                    </span>
+                                                </span>
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <div class="block">
+                                                <div class="tool-calls-container">
+                                                    <div class="tool-call-card">
+                                                        <div class="header">
+                                                            <svg class="card-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                                                            {% include 'svg/wrench.svg' %}
+                                                            <span class="name"><span class="module">Memory:</span><span>create</span></span>
+                                                            <span class="call-args">tags=["theming","docs"]…</span>
+                                                            <span class="call-result">✓ saved</span>
+                                                        </div>
+                                                        <div class="body">
+                                                            <div class="arg-row">
+                                                                <span class="arg-name">content</span>
+                                                                <span class="arg-value boxed">Theme vars resolve base → user runtime → theme[mode]; a key the theme leaves unset keeps the base value.</span>
+                                                            </div>
+                                                            <div class="arg-row">
+                                                                <span class="arg-name">tags</span>
+                                                                <span class="arg-value">["theming","docs"]</span>
+                                                            </div>
+                                                            <div class="response-row">
+                                                                <div class="raw-response">{"status": "success", "content": {"id": "mem_8f3a", "pinned": false}}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {# ---- station: FAILED call (dot-failed, red tool card) ---- #}
+                            <div class="chain-station">
+                                <div class="chain-rail"><div class="chain-dot"></div></div>
+                                <div class="chain-content">
+                                    <div class="tool-call-card tool-error">
+                                        <div class="node-dot dot-failed"></div>
+                                        <div class="header">
+                                            <svg class="card-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                                            {% include 'svg/wrench.svg' %}
+                                            <span class="name"><span class="module">Calendar:</span><span>add event</span></span>
+                                            <span class="call-args">notify_channel="telegram"…</span>
+                                            <span class="call-result">✗ unknown channel</span>
+                                        </div>
+                                        <div class="body">
+                                            <div class="response-row">
+                                                <div class="raw-response">{"status": "error", "content": "notify channel 'telegram' does not exist"}</div>
+                                            </div>
+                                            <div class="display-error">notify channel 'telegram' does not exist</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {# ---- station: Scheduler:add_job (expanded tool card) ---- #}
+                            <div class="chain-station">
+                                <div class="chain-rail"><div class="chain-dot"></div></div>
+                                <div class="chain-content">
+                                    <div class="combined-block expanded">
+                                        <div class="node-dot dot-done"></div>
+                                        <div class="header">
+                                            <span class="text">
+                                                <span class="thought-header">
+                                                    <span class="step-thought">Schedule the review for tomorrow morning.</span>
+                                                    <span class="step-modules">
+                                                        <span class="module-chip">
+                                                            <span>Scheduler:</span>
+                                                            <span class="module-action">add job</span>
+                                                        </span>
+                                                    </span>
+                                                </span>
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <div class="block">
+                                                <div class="tool-calls-container">
+                                                    <div class="tool-call-card">
+                                                        <div class="header">
+                                                            <svg class="card-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                                                            {% include 'svg/wrench.svg' %}
+                                                            <span class="name"><span class="module">Scheduler:</span><span>add job</span></span>
+                                                            <span class="call-args">duration="1d"…</span>
+                                                            <span class="call-result">✓ scheduled</span>
+                                                        </div>
+                                                        <div class="body">
+                                                            <div class="arg-row">
+                                                                <span class="arg-name">action</span>
+                                                                <span class="arg-value boxed">review the theming notes</span>
+                                                            </div>
+                                                            <div class="arg-row">
+                                                                <span class="arg-name">duration</span>
+                                                                <span class="arg-value">"1d"</span>
+                                                            </div>
+                                                            <div class="response-row">
+                                                                <div class="raw-response">{"status": "success", "content": {"id": "job_3c1e", "next_run": "2026-10-26 09:40"}}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {# ---- station: Notes:create — NO reasoning text, so the real
+                               header is the .bare-header variant (tool names + args +
+                               summary); body still holds the tool card. ---- #}
+                            <div class="chain-station">
+                                <div class="chain-rail"><div class="chain-dot"></div></div>
+                                <div class="chain-content">
+                                    <div class="combined-block expanded">
+                                        <div class="node-dot dot-done"></div>
+                                        <div class="header">
+                                            <span class="bare-header">
+                                                <span class="tool-names">
+                                                    <span class="module-group">
+                                                        <span class="tool-module">Notes:</span>
+                                                        <span class="tool-action">create</span>
+                                                    </span>
+                                                </span>
+                                                <span class="step-args">name="theming-cheatsheet"</span>
+                                                <span class="step-summary">saved to notes/theming</span>
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <div class="block">
+                                                <div class="tool-calls-container">
+                                                    <div class="tool-call-card">
+                                                        <div class="header">
+                                                            <svg class="card-chevron expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                                                            {% include 'svg/wrench.svg' %}
+                                                            <span class="name"><span class="module">Notes:</span><span>create</span></span>
+                                                            <span class="call-args">name="theming-cheatsheet"</span>
+                                                            <span class="call-result">✓ created</span>
+                                                        </div>
+                                                        <div class="body">
+                                                            <div class="arg-row">
+                                                                <span class="arg-name">category</span>
+                                                                <span class="arg-value boxed">theming</span>
+                                                            </div>
+                                                            <div class="arg-row">
+                                                                <span class="arg-name">name</span>
+                                                                <span class="arg-value boxed">theming-cheatsheet</span>
+                                                            </div>
+                                                            <div class="response-row">
+                                                                <div class="raw-response">{"status": "success", "content": {"category": "theming", "name": "theming-cheatsheet"}}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {# ---- spine terminator ---- #}
+                            <div class="chain-end">
+                                {% include 'svg/finish_flag.svg' %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex fullwidth segment">
+                        <div>
+                            <div class="content">
+                                <p>Done. I read the docs on variable resolution, saved
+                                    <strong>3 memory entries</strong> (tags <code>theming</code> +
+                                    <code>docs</code>), scheduled the review for tomorrow 09:00,
+                                    and wrote the cheatsheet to notes. Two notes: the
+                                    <code>theming-docs</code> folder doesn't exist (only
+                                    <code>openlumara_docs</code> and <code>user_guide</code> are
+                                    configured), and Calendar rejected the <code>telegram</code>
+                                    notify channel — the reminder fell back to the default channel.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="message-buttons">
+                    <button title="Copy">{% include 'svg/copy.svg' %}</button>
+                    <button title="Edit">{% include 'svg/edit.svg' %}</button>
+                    <button title="Regenerate">{% include 'svg/regenerate.svg' %}</button>
+                    <button title="Delete">{% include 'svg/trash.svg' %}</button>
+                    <span class="turn-timestamp">
+                        {% include 'svg/clock.svg' %}
+                        <span>Today 09:41</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    {# ---------- the input bar (real order: upload · textarea · pill · send) ---------- #}
+    <div id="input">
+        <div class="input-wrapper">
+            <button id="upload" title="Upload file or paste images (Ctrl+V)">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                </svg>
+            </button>
+            <textarea id="user-input" placeholder="Type a message.." rows="1"></textarea>
+
+            {# context chip: static version of chat/context_pill.html (11% fill) #}
+            <div id="context-pill">
+                <button class="pill-button" title="1.8k / 16k tokens">
+                    <svg class="pill-outline" viewBox="0 0 76 30" preserveAspectRatio="none" aria-hidden="true">
+                        <path class="pill-track"
+                              d="M38 1 H61 A14 14 0 0 1 75 15 A14 14 0 0 1 61 29 H14 A14 14 0 0 1 1 15 A14 14 0 0 1 14 1 Z"></path>
+                        <path class="pill-fill" pathLength="100" stroke-dasharray="11 89"
+                              d="M38 1 H61 A14 14 0 0 1 75 15 A14 14 0 0 1 61 29 H14 A14 14 0 0 1 1 15 A14 14 0 0 1 14 1 Z"></path>
+                    </svg>
+                    <span class="pill-pct">11%</span>
+                </button>
+            </div>
+
+            <button id="send" aria-label="Send message">Send</button>
+        </div>
+    </div>
+</template>

@@ -1,0 +1,40 @@
+{# ================= E13 popups & menus (fragments) ================= #}
+<section class="tg-el-section">
+    <h3>Popups &amp; menus</h3>
+    <div class="tg-el-row" style="align-items:flex-start">
+        <div class="chat-action-menu">
+            <button type="button">{% include 'svg/edit.svg' %} Rename</button>
+            <button type="button">{% include 'svg/folder.svg' %} Move to category</button>
+            <button type="button" class="danger">{% include 'svg/trash.svg' %} Delete</button>
+        </div>
+        <span class="tg-el-cap">.chat-action-menu (+ .danger row)</span>
+    </div>
+    {# FUSED demo (user QA round 3 fix): the real .category-menu is the
+       TRIGGER'S CONTINUATION (no top border/corners, overlaps by 1px,
+       width taken from the trigger) -> render the open state as ONE
+       unit, scoped like the app: #chat-list > .category-select
+       (sidebar.css nests the trigger there). Element stays static via
+       the existing menu-neutralization rule; margin-top:-4px seam kept. #}
+    <div class="tg-el-row" style="align-items:flex-start">
+        <div id="chat-list" class="tg-cat-fused-scope">
+            <div class="category-select">
+                <button type="button" class="category-trigger open" title="Filter chats by category">
+                    <span class="cat-icon">{% include 'svg/home.svg' %}</span>
+                    <span class="cat-label">general</span>
+                    <svg class="cat-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="12" height="12"><path fill="currentColor" d="M6 8L1 3h10z"/></svg>
+                </button>
+                <div class="category-menu">
+                    <button type="button" class="category-option"><span class="cat-icon">{% include 'svg/folder.svg' %}</span><span>work</span></button>
+                    <button type="button" class="category-option"><span class="cat-icon">{% include 'svg/folder.svg' %}</span><span>research</span></button>
+                    <div class="category-menu-divider"></div>
+                    <button type="button" class="category-option manage">{% include 'svg/gear.svg' %}<span>manage categories...</span></button>
+                </div>
+            </div>
+        </div>
+        <span class="tg-el-cap">.category-trigger.open + .category-menu = ONE fused box BY DESIGN (menu: no top border, overlaps trigger, same width) · (.category-option/.manage/divider)</span>
+    </div>
+    <div class="tg-el-row">
+        <div class="tag-popup"><span class="inline-tag">gallery</span><span class="inline-tag">qa</span></div>
+        <span class="tg-el-cap">.tag-popup (hover popup on tagged rows)</span>
+    </div>
+</section>

@@ -1,0 +1,123 @@
+{# the overlay itself: mounted through below_header INSIDE #chat-window, and
+   MOVED to the end of #chat-window by theme_gallery.js (id-lookup order,
+   see the alpine:init handler). position:absolute inset:0 -> same paint. #}
+<div class="tg-cover" x-data="{ init() { tgState.init() } }" x-init="init()" x-cloak>
+
+{# ---------- top bar, single view ----------
+   same layout idiom as the settings → appearance "Color Theme" row:
+   dropdown first (grouped, big), then the square mode buttons
+   (🌙 ☀️ Both), Split + close pushed to the far right. #}
+<div class="tg-bar" x-show="tgState.slots.length === 1">
+    <div class="tg-select-wrap">
+        <select class="tg-select" data-slot="0" :value="tgState.slots[0].family"
+                @change="tgState.setFamily($event.target.value)"
+                title="theme family">
+            {# NOTE: a <select>'s value only sticks once its <option>s
+               exist, and x-for builds them asynchronously. tgState.render()
+               re-syncs this select after every state change (see the JS). #}
+            <template x-for="g in tgState.groups()" :key="g.name">
+                <optgroup :label="g.name">
+                    <template x-for="t in g.themes" :key="t.name">
+                        <option :value="t.name" x-text="t.label"></option>
+                    </template>
+                </optgroup>
+            </template>
+        </select>
+    </div>
+
+    <div class="tg-mode-toggle">
+        <button type="button" class="tg-mode-btn" :class="{ 'active': tgState.slots[0].mode === 'dark' }"
+                :disabled="!tgState.currentSupports('dark')"
+                @click="tgState.setMode('dark')" title="dark mode">
+            {% include 'svg/moon.svg' %}
+        </button>
+        <button type="button" class="tg-mode-btn" :class="{ 'active': tgState.slots[0].mode === 'light' }"
+                :disabled="!tgState.currentSupports('light')"
+                @click="tgState.setMode('light')" title="light mode">
+            {% include 'svg/sun.svg' %}
+        </button>
+        {# "Both" only exists when the family really has two modes (and
+           only in single view: in split, each pane carries its own mode
+           buttons — a Both there would crowd the bar) #}
+        <button type="button" class="tg-mode-btn tg-both-btn" x-show="tgState.hasBoth() && tgState.slots.length === 1" x-cloak
+                @click="tgState.toggleBoth()" title="show dark and light side by side">Both</button>
+    </div>
+
+    <span class="tg-bar-right">
+        <button type="button" class="tg-split-btn"
+                @click="tgState.toggleSplit()" title="compare themes side by side">Split</button>
+        <button type="button" class="tg-close-btn" @click="tgState.closeOverlay()" title="close (esc)">✕ close</button>
+    </span>
+</div>
+
+{# ---------- top bar, split view ----------
+   no family dropdown here: in split every pane carries its own family
+   dropdown + mode buttons in its label strip. The bar only holds the
+   cross-pane actions. #}
+<div class="tg-bar" x-show="tgState.slots.length > 1" x-cloak>
+    <span class="tg-bar-caption">
+        comparing <strong x-text="tgState.slots.length"></strong> panes
+    </span>
+
+    <span class="tg-bar-right">
+        <button type="button" class="tg-split-btn" x-show="tgState.slots.length > 1"
+                @click="tgState.swap()" title="swap panes left ↔ right">⇄ swap</button>
+        <button type="button" class="tg-split-btn" :class="{ 'on': tgState.linked }"
+                @click="tgState.toggleLink()"
+                title="synced: scrolling and clicks are mirrored between the panes · dark/light stay per-pane">🔗 sync</button>
+        <button type="button" class="tg-split-btn" :class="{ 'on': tgState.diffOpen }"
+                @click="tgState.toggleDiff()"
+                :title="tgState.diffRawCount + ' variables defined differently (' + tgState.diffMissingCount + ' missing on one side) · ' + tgState.diffEffCount + ' render differently'">
+            Δ <span x-text="tgState.diffRawCount"></span>
+            <span x-show="tgState.diffMissingCount" x-cloak>· <span x-text="tgState.diffMissingCount"></span> missing</span>
+        </button>
+        <button type="button" class="tg-split-btn" @click="tgState.toggleSplit()"
+                title="back to a single preview">− split</button>
+        <button type="button" class="tg-close-btn" @click="tgState.closeOverlay()" title="close (esc)">✕ close</button>
+    </span>
+</div>
+
+{# ---------- the panes: theme_gallery.js fills this with 1..N .tg-pane ---------- #}
+<div class="tg-panes"></div>
+
+{# ---------- diff drawer (split only, toggled by the Δ button) ----------
+   per-variable comparison of the FIRST TWO panes:
+   · RAW columns  = what each theme JSON literally defines ("—" = the theme
+     leaves it unset, so base.json/undefined takes over → bug candidate)
+   · RENDERED     = the final value each pane actually paints (base included)
+   Only variables where something differs are listed. #}
+<div class="tg-drawer" x-show="tgState.diffOpen && tgState.slots.length > 1" x-cloak>
+    <div class="tg-drawer-head">
+        <span class="tg-drawer-title">
+            <span x-text="tgState.slots[0] && tgState.slots[0].family"></span>
+            · <span x-text="tgState.slots[0] && tgState.slots[0].mode"></span>
+            vs
+            <span x-text="tgState.slots[1] && tgState.slots[1].family"></span>
+            · <span x-text="tgState.slots[1] && tgState.slots[1].mode"></span>
+        </span>
+        <span class="tg-dim">
+            <span x-text="tgState.diffRawCount"></span> defined differently
+            · <span x-text="tgState.diffMissingCount"></span> missing on one side
+            · <span x-text="tgState.diffEffCount"></span> render differently
+        </span>
+        <button type="button" class="tg-release-btn" @click="tgState.diffOpen = false" title="close (esc)">✕</button>
+    </div>
+    <div class="tg-drawer-list">
+        <div class="tg-diff-row tg-diff-head">
+            <span>variable</span>
+            <span>raw A</span><span>raw B</span>
+            <span>rendered A</span><span>rendered B</span>
+        </div>
+        <template x-for="d in tgState.diffRaw" :key="d.name">
+            <div class="tg-diff-row" :class="{ 'missing': d.a === null || d.b === null }">
+                <span class="tg-diff-name" x-text="d.name"></span>
+                <span class="tg-diff-val"><span x-show="d.a !== null && String(d.a).match(/^(#[0-9a-fA-F]{3,8}|rgba?|hsla?|oklch|oklab|color-mix)/)" class="tg-chip" :style="'background:' + d.a"></span><span class="tg-diff-text" x-text="d.a === null ? '— (not defined)' : d.a"></span></span>
+                <span class="tg-diff-val"><span x-show="d.b !== null && String(d.b).match(/^(#[0-9a-fA-F]{3,8}|rgba?|hsla?|oklch|oklab|color-mix)/)" class="tg-chip" :style="'background:' + d.b"></span><span class="tg-diff-text" x-text="d.b === null ? '— (not defined)' : d.b"></span></span>
+                <span class="tg-diff-val"><span x-show="String(d.ea).match(/^(#[0-9a-fA-F]{3,8}|rgba?|hsla?|oklch|oklab|color-mix)/)" class="tg-chip" :style="'background:' + d.ea"></span><span class="tg-diff-text" x-text="d.ea"></span></span>
+                <span class="tg-diff-val"><span x-show="String(d.eb).match(/^(#[0-9a-fA-F]{3,8}|rgba?|hsla?|oklch|oklab|color-mix)/)" class="tg-chip" :style="'background:' + d.eb"></span><span class="tg-diff-text" x-text="d.eb"></span></span>
+            </div>
+        </template>
+    </div>
+</div>
+
+</div>

@@ -1,0 +1,82 @@
+{# ================= E2 form controls ================= #}
+<section class="tg-el-section">
+    <h3>Form controls</h3>
+    {# real inputs live in component scopes (no global input CSS) —
+       settings fields use .settings-modal .item .row (fields.html) #}
+    <div class="settings-modal modal">
+        <div class="item"><div class="row">
+            <label>Text setting</label>
+            <input type="text" value="fake value">
+            <span class="description">text input, settings scope</span>
+        </div></div>
+        <div class="item"><div class="row">
+            <label>Number setting</label>
+            <input type="number" value="15">
+        </div></div>
+        <div class="item"><div class="row">
+            <label>Range slider</label>
+            <input type="range" min="0" max="100" value="62">
+        </div></div>
+        <div class="item"><div class="row">
+            <label>Select setting</label>
+            <select><option>Option A</option><option selected>Option B</option><option>Option C</option></select>
+        </div></div>
+        <div class="item"><div class="row">
+            <label>Textarea setting</label>
+            <textarea rows="3">multi-line fake</textarea>
+        </div></div>
+        <div class="item"><div class="row">
+            <label>Disabled setting</label>
+            <input type="text" value="locked" disabled>
+        </div></div>
+    </div>
+    <div id="chat-list"><div class="chats"><div class="day-chats"><div class="item renaming"><div class="title-row"><div class="rename-container">
+        <input class="rename-input" type="text" value="renaming a chat…">
+        <button class="rename-action-btn save" title="Save">{% include 'svg/checkmark.svg' %}</button>
+        <button class="rename-action-btn cancel" title="Cancel">{% include 'svg/cross.svg' %}</button>
+    </div></div></div></div></div></div>
+    <div class="tg-el-cap">.settings-modal .item .row (fields.css) · .rename-container (sidebar.css) — no global input styles exist</div>
+    <div class="settings-modal modal">
+        {# REAL unsafe rows (user QA 2026-10-25: the toggles users actually
+           see are modules/channels cards — .unified-card.unsafe with
+           .toggle-on/.toggle-off classes, NOT the fields .item.unsafe
+           variant). Verified against the live settings capture. #}
+        <div class="unified-list">
+            <div class="unified-card">
+                <div class="info"><span type="button" class="btn">Web Search</span><p class="description">Text and image search over DuckDuckGo.</p></div>
+                <button type="button" class="toggle toggle-on"></button>
+            </div>
+            <div class="unified-card unsafe">
+                <div class="info"><span type="button" class="btn">Host Shell</span><p class="description">Lets your AI run shell commands with full access to your host system. EXTREMELY DANGEROUS! Enable at your own risk</p></div>
+                <button type="button" class="toggle toggle-on"></button>
+            </div>
+            <div class="unified-card disabled unsafe">
+                <div class="info"><span type="button" class="channel-name-btn">File Manager</span><p class="description">Gives your AI full access to your filesystem. CAUTION: Unsafe! Use at your own risk.</p></div>
+                <button type="button" class="toggle toggle-off"></button>
+            </div>
+        </div>
+        {# fields.html boolean variant: .item > DIV > (.toggle-row + .description) —
+           the inner div matters: .unsafe strips border/bg of DIRECT children #}
+        <div class="item"><div>
+            <div class="toggle-row">
+                <label>Toggle (off)</label>
+                <button class="toggle" type="button"></button>
+            </div>
+            <span class="description">Boolean setting row — fields.css (booleans are NOT checkboxes)</span>
+        </div></div>
+        <div class="item"><div>
+            <div class="toggle-row">
+                <label>Toggle (on)</label>
+                <button class="toggle active" type="button"></button>
+            </div>
+        </div></div>
+        <div class="item unsafe"><div>
+            <div class="toggle-row">
+                <label>.item.unsafe (fields variant, rare)</label>
+                <button class="toggle active" type="button"></button>
+            </div>
+            <span class="description">Same dashed .unsafe highlight, per-field form</span>
+        </div></div>
+    </div>
+    <div class="tg-el-cap">REAL unsafe toggle = .unified-card.unsafe (modules/channels tabs, .toggle-on/.toggle-off) · .item.unsafe = fields.html form variant — both highlighted by .settings-modal .unsafe (modal.css)</div>
+</section>
