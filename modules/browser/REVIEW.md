@@ -5,11 +5,23 @@
 **Status:** review only — nothing in the module or core was modified when this document was written.
 **Purpose:** this file is the working backlog. Items are ID'd (`B1`, `S1`, `R1`, `T1`, `P1`, …) so future sessions can say "do B1–B4 this session" without re-deriving anything.
 
+## Progress log
+
+Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to the live `user_modules/browser`, so edits through either path hit the same files. Commit messages carry the phase and the item IDs.
+
+| Phase | Status | Commit | Notes |
+|---|---|---|---|
+| 0 — repo hygiene | done | `ae9271c` (import rewrite) · `e57919b` (README) | `__pycache__` untracked + ignored (it had shipped in the first import; the clean rewrite removed it). Tests skeleton deferred to phase 5 — see below. |
+| 1 — settings & metadata | done | `3f55aed` | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
+| 2 … 8 | pending | — | see §9 |
+
+Not verified yet: phase 1's gate (settings panel after a restart) — the module was not restarted when this was written, and the tests skeleton is deferred until there is a runnable harness (phase 5), because shipping unexecuted tests is worse than shipping none.
+
 ---
 
 ## 0. How to use this document
 
-- **Work in packs, not in file order.** §9 sequences the items into six self-contained sessions, each ending in a shippable state.
+- **Work in phases, not in file order.** §9 sequences the items into nine phases (0–8), each ending in a shippable state with an explicit verification gate.
 - **Never change core files** for these fixes — the few core issues found are listed in §8.4 as upstream proposals, with the evidence needed to argue them.
 - Rules that must survive every refactor:
   - AI tools stay **directly** on the `Browser` class (`tool_loader` scans `type(module).__dict__`, no MRO — `core/tool_loader.py:166`).
@@ -366,30 +378,25 @@ Settings text:
 
 ---
 
-## 9. Suggested work packs (one session each)
+## 9. Execution order (nine phases, one session each)
 
-**Pack 1 — settings & metadata (safe, no behavior change)**
-B1 (types + `depends`/min/max) · `category = "web"` · B4 (status active flag, `ws_url` key) · B22 · B23 · §6 docstring pass · §7 wording/pluralisation.
-→ Shippable: the module's settings become reachable in the UI and its texts are consistent.
+Order is dependency-driven, not priority-driven: phases 7 (security) and 5/6 (lifecycle/restart) add or rename settings, so they must follow phase 1; policy refusals are only readable once phase 3 exists; and the restart logic must be fixed and tested (phase 6) **before** it is moved out of `module.py` (phase 8).
 
-**Pack 2 — connection & lifecycle robustness**
-B5 (+ ownership) · B7 · B15 (port-down wait, reap after kill) · B21 · B19 · R1 (private start/stop/flip helpers).
-→ Shippable: no orphaned browsers, no lost ownership, restart is deterministic.
+| Phase | Items | Gate | Notes |
+|---|---|---|---|
+| **0 — repo hygiene** | repo `.gitignore`/README, untrack `__pycache__` | `git show HEAD:modules/browser` has no `__pycache__`; repo clean | **done** |
+| **1 — settings & metadata** | B1 (+`depends`/`min`/`max`), `category="web"`, B4, B22, B23, §7 wording | restart → the three settings appear and persist; `status` flags exactly one tab active | **done** |
+| **2 — cheap tool correctness** | B12 `_normalize_url`, B13 cookies fallback, B16 count clamp, B17 `sid` hoist + quality guard, B20 `str(target)` | `new_tab("example.com")`, `console(0)`, `cookies()` on `about:blank`, `switch_tab(0)` | one call per fix |
+| **3 — error boundary** | R2: map `CDPError`/`TimeoutError`/`ConnectionError` → `self.result(..., success=False)` with hints | close a tab then `click` → readable message, no raw `-32601` | must precede phase 7 |
+| **4 — typing & refs** | B8 `type_text`, B18 per-tab refs + dialog session scoping | `contenteditable` fill; two tabs with different `@eN`; click after `switch_tab` | |
+| **5 — process lifecycle** | R1 private start/stop, B5 ownership across reload, B7 terminate on failed launch, B21 future leak, B15 port-down wait + reap; **process harness** in `tests/` | settings save with `close_browser_on_shutdown=false` → browser survives *and* `owned_process` stays true; bad binary → no stray Chrome; 10 restarts stable | tests start here (needs a browser) |
+| **6 — restart state** | B6 `active_index`, B14 radio groups, B19 detach after capture; **restart harness** | 5 tabs incl. a `chrome://` one + a radio-heavy form → restart twice → active tab and radios correct | must pass before phase 8 moves the code |
+| **7 — security & policy** | B2 fence + warnings, B3 URL policy, B9 ⟨verify⟩, B10 profile guard, B11 `unsafe`, S6/S7 decisions, §5.11 caps | blocked `navigate` → clear refusal; `snapshot` fenced | own review; behavior change |
+| **8 — refactor, docs, capability** | R3 restart module, R4 dead code, R5 imports, R8, B24 README, B25 reload caveat, §5.1–5.3 `wait`/`hover`/`select_option`, §7 a11y + popover anchoring | tests still green after the move | refactor last |
 
-**Pack 3 — tool correctness**
-B8 (type_text) · B12 (`_normalize_url`) · B16 (count) · B13 (cookies) · B17 (sid hoist, quality guard) · B14 (radio restore) · B18 (per-tab refs, dialog session) · B20 (str coercion).
-→ Shippable: the AI-facing surface stops producing misleading results.
+Optional fast mitigation if phase 7 is far away: one commit in phase 2 that only removes `file`/`data`/`chrome` from the `navigate` allow-list closes the local-file-read path without adding settings.
 
-**Pack 4 — safety & security**
-B2 (fence + warnings) · B3 (URL policy settings) · B9 ⟨verify⟩ · B10 (profile warning/guard) · B11 (`unsafe` decision) · S6/S7 decisions · §5.11 output caps.
-→ Separate, reviewed change; it alters behavior, so it should be its own commit and its own discussion.
-
-**Pack 5 — refactor & tests**
-R2 (error boundary) · R3 (restart module) · R4 (helpers, dead code) · R5 (imports) · R6 (`tests/` + move harnesses) · R8.
-→ Shippable: same behavior, much smaller `module.py`.
-
-**Pack 6 — docs & capability**
-B24 (README rewrite) · B25 (reload caveat/reload submodules) · §5 items 1–3 (`wait`, `hover`, `select_option`) · A11y + popover anchoring.
+Config facts that shape phase 7 (from `openlumara/config.yml`): `show_unsafe_settings: true` (flipping `unsafe` keeps the module visible here), `enable_admin_settings: true` (an `admin_only` route works locally, but would 403 the panel on public instances), `require_login: false`.
 
 ---
 
