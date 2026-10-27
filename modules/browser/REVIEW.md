@@ -15,7 +15,8 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 1 — settings & metadata | done | `3f55aed` · `183ecbd` · `9090537` (docs) | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
 | 2 — tool correctness | done | `3a26241` | B12/B13/B16/B17/B20 + `util.py` (URL normalisation, deque tailing); 22 unit tests; every item re-checked in a live browser on 2026-10-27 — evidence in §10. |
 | 2.5 — screenshot grid rework | **done + verified live** | `bbcccc3` · `cf47268` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` is a refusal threshold (clip does not bound Chrome's work — B27/B31), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. All §10 checks pass. |
-| 3 … 8 | pending | — | see §9 |
+| 3 — error boundary | done | `d3da68a` | `_guard_tools` wraps all 22 tools once: `CDPError` (-32001/-32601/-32602 hints), `TimeoutError`, `ConnectionError`, module `RuntimeError`/`OSError` → `success:false` with actionable text; programming errors still escape. Live check pending a restart — §10. |
+| 4 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
 
@@ -478,7 +479,7 @@ Order is dependency-driven, not priority-driven: phases 7 (security) and 5/6 (li
 | **1 — settings & metadata** | B1 (+`depends`/`min`/`max`), `category="web"`, B4, B22, B23, §7 wording | restart → the three settings appear and persist; `status` flags exactly one tab active | **done** |
 | **2 — cheap tool correctness** | B12 `_normalize_url`, B13 cookies fallback, B16 count clamp, B17 `sid` hoist + quality guard, B20 `str(target)` | `new_tab("example.com")`, `console(0)`, `cookies()` on `about:blank`, `switch_tab(0)` | one call per fix |
 | **2.5 — screenshot grid rework** | grid drawn on the PNG (`page.draw_grid`), `full_page_max_height` + `page_cut`, timeouts below the core budget (B27), grid ⇒ png | `full_page` on a 39k-px article returns with `page_cut`; grid labels are document coordinates; no DOM mutation | **done** (`bbcccc3`) |
-| **3 — error boundary** | R2: map `CDPError`/`TimeoutError`/`ConnectionError` → `self.result(..., success=False)` with hints | close a tab then `click` → readable message, no raw `-32601` | must precede phase 7 |
+| **3 — error boundary** | R2: map `CDPError`/`TimeoutError`/`ConnectionError` (+ deliberate `RuntimeError`/`OSError`) → `self.result(..., success=False)` with hints | `click('@e999')` → clean message (not "Error while executing tool"); a hung `evaluate` → timeout text | **done** (`d3da68a`); live check pending |
 | **4 — typing & refs** | B8 `type_text`, B18 per-tab refs + dialog session scoping, **B26** (stable tab order), **B29** (tag logs by tab/URL), **B30** (`evaluate` await handling/docstring) | `contenteditable` fill; two tabs with different `@eN`; click after `switch_tab`; `switch_tab(0)` resolves to the tab `list_tabs` showed | |
 | **5 — process lifecycle** | R1 private start/stop, B5 ownership across reload, B7 terminate on failed launch, B21 future leak, B15 port-down wait + reap; **process harness** in `tests/` | settings save with `close_browser_on_shutdown=false` → browser survives *and* `owned_process` stays true; bad binary → no stray Chrome; 10 restarts stable | tests start here (needs a browser) |
 | **6 — restart state** | B6 `active_index`, B14 radio groups, B19 detach after capture; **restart harness** | 5 tabs incl. a `chrome://` one + a radio-heavy form → restart twice → active tab and radios correct | must pass before phase 8 moves the code |
@@ -527,6 +528,15 @@ Grid rework (phase 2.5), checked live on 2026-10-27:
 Checked after the restart on 2026-10-27:
 
 - `screenshot(full_page=True)` on the 40,239 px article → **refused** with "The page is 40239 px tall; full-page captures are limited to 8000 px…". Real work ≈0.1 s: a `browser_status` control call in the same harness cost ~4.7 s of round-trip, so the wall-clock time is tool overhead, not the module. No screenshot, no stall.
+
+Phase 3 error boundary (needs one restart to load):
+
+- `click("@e999")` → expect `status: error` whose content is the module's own
+  "Unknown ref @e999. Take a fresh snapshot first…" (before: core wrapped it as
+  "Error while executing tool: …").
+- `evaluate("(async()=>{await new Promise(()=>{});})()")` → after ~10 s expect
+  "The browser did not answer in time…" instead of a bare core timeout.
+- A normal call right after either failure must still work (no state damage).
 - Short full-page (`example.com`, 1305 px) + grid → still succeeds with `grid.applied: true` and a byte-identical PNG to the earlier run (96,615 bytes).
 
 ### Real-site session (Wikipedia, 2026-10-27)
