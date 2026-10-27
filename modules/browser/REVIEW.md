@@ -28,6 +28,7 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 
 - **Work in phases, not in file order.** §9 sequences the items into nine phases (0–8), each ending in a shippable state with an explicit verification gate.
 - **Never change core files** for these fixes — the few core issues found are listed in §8.4 as upstream proposals, with the evidence needed to argue them.
+- **A restart (or a settings save) closes the module browser and resets session-only state** (`on_shutdown` — B5). The panel's headless toggle is session-only; only the `headless` setting persists (`headless: false` today, so relaunches are visible). Never assume tabs, the current tab or the mode survived: call `list_tabs`/`status` first, and **never test against tabs that are not actually open** (a stale `_current_target` answers `-32001`, see B32).
 - Rules that must survive every refactor:
   - AI tools stay **directly** on the `Browser` class (`tool_loader` scans `type(module).__dict__`, no MRO — `core/tool_loader.py:166`).
   - WebUI route handlers stay **private** (`_`-prefixed, `core/tool_loader.py:196`).
