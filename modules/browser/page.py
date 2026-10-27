@@ -4,8 +4,9 @@ Page/DOM operation helpers for the browser module (step-6 split of
 module.py; see README.md).
 
 Stateless helpers that operate on an attached tab: element refs, the
-accessibility-tree walker, screenshots (incl. the grid overlay), image
-dimension parsing, viewport metrics, and tab-state capture/restore
+accessibility-tree walker, screenshots (plus the grid annotation drawn onto
+the capture), image dimension parsing, viewport metrics, and tab-state
+capture/restore
 (restart headless<->visible). Every function receives what it needs
 explicitly (cdp client, session id, dirs, refs) — no module state.
 Dependency direction: module.py -> page.py -> cdp.py (constants only).
@@ -15,10 +16,12 @@ import asyncio
 import base64
 import json
 import os
+import struct
 import time
+import zlib
 from datetime import datetime
 
-from .cdp import SCREENSHOT_TIMEOUT
+from .cdp import CDP_CALL_TIMEOUT, SCREENSHOT_TIMEOUT
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -222,13 +225,15 @@ def normalize_grid(value):
 
 
 async def capture_screenshot(cdp_client, sid, screenshots_dir,
-                             full_page=False, fmt="png", quality=80):
+                             full_page=False, fmt="png", quality=80, clip=None):
     """Capture a screenshot; returns (absolute_path, bytes).
 
     Args:
         full_page: Capture the whole page instead of the viewport.
         fmt: 'png' or 'jpeg' (CDP-native encoding; no post-processing).
         quality: JPEG quality 0-100 (ignored for png).
+        clip: optional {x, y, width, height, scale} to capture only part of the
+              page (the module uses it to cap very tall full-page captures).
     """
     ext = "jpg" if fmt == "jpeg" else "png"
     params = {
@@ -236,6 +241,8 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
         "captureBeyondViewport": bool(full_page),
         "fromSurface": True,
     }
+    if clip:
+        params["clip"] = clip
     if fmt == "jpeg":
         params["quality"] = max(0, min(100, int(quality)))
     res = await cdp_client.cmd("Page.captureScreenshot", params, sid, timeout=SCREENSHOT_TIMEOUT)
@@ -259,7 +266,7 @@ async def viewport_metrics(cdp_client, sid):
                           "docW: Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0),"
                           "docH: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)})",
             "returnByValue": True,
-        }, sid, timeout=15.0)
+        }, sid, timeout=CDP_CALL_TIMEOUT)
         val = res.get("result", {}).get("value")
         if val:
             return json.loads(val)
@@ -272,7 +279,6 @@ def png_size(raw):
     """Parse PNG pixel dimensions from the IHDR chunk; (width, height) or None."""
     try:
         if raw[:8] == b"\x89PNG\r\n\x1a\n" and raw[12:16] == b"IHDR":
-            import struct
             w, h = struct.unpack(">II", raw[16:24])
             return w, h
     except Exception:
@@ -325,104 +331,203 @@ def image_size(raw, fmt):
 
 
 # ---------------------------------------------------------------------------
-# Grid overlay (in-page canvas)
+# Grid annotation (drawn onto the captured PNG, never into the page)
 # ---------------------------------------------------------------------------
+# 2026-10-27: replaces the in-page canvas overlay. That overlay refused tall
+# pages by design (canvas guard: >16000 px in either dimension), i.e. exactly
+# the full-page captures where a grid is most useful, and it mutated the page
+# the AI may inspect next. Drawing on the PNG instead has no size limit beyond
+# RAM and keeps the page untouched. Measured cost with the stdlib path below:
+# ~0.7 s for a 1272x1305 viewport capture, ~0.15 s per additional megapixel.
+#
+# Grid => PNG: 1 px lines survive PNG losslessly; JPEG would need a decoder.
+# `module.screenshot` refuses (grid + jpeg) rather than picking a format.
 
-# NOTE (2026-10-05): alternative to this in-page canvas overlay is to
-# post-process the captured image instead (grid drawn onto the PNG after
-# the capture). A pure-stdlib prototype lives at tmp/grid_proto.py
-# (decode/draw/re-encode: ~0.6s viewport, ~4s worst case; JPEG cannot be
-# re-encoded without a third-party lib; upside: zero DOM involvement and
-# grids could also be applied retroactively to already-saved screenshots).
-# Revisit if we ever want grids that never touch the page.
-async def inject_grid(cdp_client, sid, spacing, full_page=False, log=None):
+_GRID_RED = (224, 0, 0)
+
+# 3x5 bitmap glyphs for the label alphabet ("x=1234", "y=567")
+_FONT = {
+    "0": ("111", "101", "101", "101", "111"),
+    "1": ("010", "110", "010", "010", "111"),
+    "2": ("111", "001", "111", "100", "111"),
+    "3": ("111", "001", "111", "001", "111"),
+    "4": ("101", "101", "111", "001", "001"),
+    "5": ("111", "100", "111", "001", "111"),
+    "6": ("111", "100", "111", "101", "111"),
+    "7": ("111", "001", "010", "010", "010"),
+    "8": ("111", "101", "111", "101", "111"),
+    "9": ("111", "101", "111", "001", "111"),
+    "x": ("101", "101", "010", "101", "101"),
+    "y": ("101", "101", "010", "010", "010"),
+    "=": ("000", "111", "000", "111", "000"),
+}
+
+
+def decode_png(raw):
+    """PNG bytes -> (width, height, bpp, pixel bytearray).
+
+    Only what CDP emits is supported: 8-bit RGB or RGBA, non-interlaced.
+    Raises ValueError for anything else (the caller reports it as
+    "grid not drawn" instead of guessing).
     """
-    Inject a temporary labeled grid overlay (single canvas). Returns the
-    element id, or None on failure.
+    if raw[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    width = height = colortype = None
+    idat = []
+    pos = 8
+    while pos + 8 <= len(raw):
+        (length,) = struct.unpack(">I", raw[pos:pos + 4])
+        ctype = raw[pos + 4:pos + 8]
+        chunk = raw[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if ctype == b"IHDR":
+            width, height, depth, colortype, _comp, _filt, interlace = struct.unpack(
+                ">IIBBBBB", chunk)
+            if depth != 8 or interlace:
+                raise ValueError(f"unsupported PNG (depth {depth}, interlace {interlace})")
+        elif ctype == b"IDAT":
+            idat.append(chunk)
+        elif ctype == b"IEND":
+            break
+    if colortype not in (2, 6):
+        raise ValueError(f"unsupported PNG colour type {colortype}")
 
-    Viewport captures: fixed canvas over the viewport; lines land on
-    document-coordinate multiples of the spacing so they align with the
-    doc_x/doc_y hints regardless of scroll position.
-    Full-page captures: document-sized absolute canvas, corrected so its
-    origin lands exactly on the document origin even when body/ancestors
-    are positioned or transformed. Oversized documents (canvas limits)
-    are refused and reported as applied:false in the tool metadata.
-    Labels carry ABSOLUTE document coordinates and are clamped to the
-    actual grid span (x-labels repeat down tall pages so they stay
-    within reach).
-    """
-    js = (
-        "(function(){"
-        "var old=document.getElementById('ol-grid'); if(old) old.remove();"
-        "var sp=%d;"
-        "var full=%s;"  # true = doc-anchored absolute (full page); false = viewport-anchored fixed
-        "var de=document.documentElement;"
-        "var sx=window.scrollX, sy=window.scrollY;"
-        "var vw=innerWidth, vh=innerHeight;"
-        "var docW=Math.max(de.scrollWidth, document.body?document.body.scrollWidth:0);"
-        "var docH=Math.max(de.scrollHeight, document.body?document.body.scrollHeight:0);"
-        "var W=full?docW:vw, H=full?docH:vh;"
-        "var dpr=window.devicePixelRatio||1;"
-        "if(W<1||H<1||W*dpr>16000||H*dpr>16000||W*H*dpr*dpr>1.34e8) return 'too-big';"
-        "var c=document.createElement('canvas'); c.id='ol-grid';"
-        "c.style.cssText=(full?'position:absolute;':'position:fixed;')+'left:0;top:0;width:'+W+'px;height:'+H+'px;z-index:999999;pointer-events:none;';"
-        "(document.body||de).appendChild(c);"
-        # empirical anchoring: shift the canvas so its (0,0) lands exactly on
-        # the capture origin (viewport top-left for fixed, document (0,0) for
-        # absolute) even under positioned/transformed ancestors
-        "var cr=c.getBoundingClientRect();"
-        "c.style.left=(0-(cr.left+(full?sx:0)))+'px';"
-        "c.style.top=(0-(cr.top+(full?sy:0)))+'px';"
-        "c.width=Math.round(W*dpr); c.height=Math.round(H*dpr);"
-        "var ctx=c.getContext('2d'); ctx.scale(dpr,dpr);"
-        "ctx.lineWidth=1; ctx.strokeStyle='rgba(255,0,0,0.7)';"
-        "ctx.font='11px monospace'; ctx.textBaseline='top';"
-        "function vl(x){ctx.beginPath();ctx.moveTo(x+0.5,0);ctx.lineTo(x+0.5,H);ctx.stroke();}"
-        "function hl(y){ctx.beginPath();ctx.moveTo(0,y+0.5);ctx.lineTo(W,y+0.5);ctx.stroke();}"
-        "function lb(t,x,y){var w=ctx.measureText(t).width;"
-        "x=Math.max(2,Math.min(x,W-w-7)); y=Math.max(2,Math.min(y,H-15));"
-        "ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fillRect(x,y,w+5,13);"
-        "ctx.fillStyle='#c00'; ctx.fillText(t,x+2,y+1);}"
-        "if(!full){"
-        "var x0=(sp-(sx%%sp))%%sp;"
-        "for(var x=x0;x<=W;x+=sp){vl(x);lb('x='+Math.round(sx+x),x+3,3);}"
-        "var y0=(sp-(sy%%sp))%%sp;"
-        "for(var y=y0;y<=H;y+=sp){hl(y);lb('y='+Math.round(sy+y),3,y+3);}"
-        "}else{"
-        "for(var x2=0;x2<=W;x2+=sp){vl(x2);}"
-        "for(var y2=0;y2<=H;y2+=sp){hl(y2);}"
-        "for(var ly=0;ly<H;ly+=vh){for(var x3=0;x3<=W;x3+=sp){lb('x='+x3,x3+3,ly+3);}}"
-        "for(var y4=0;y4<=H;y4+=sp){lb('y='+y4,3,y4+3);}"
-        "}"
-        "return 'ok';"
-        "})()" % (int(spacing), "true" if full_page else "false")
-    )
-    try:
-        res = await cdp_client.cmd("Runtime.evaluate", {
-            "expression": js,
-            "returnByValue": True,
-        }, sid, timeout=15.0)
-        val = res.get("result", {}).get("value")
-        if val == "ok":
-            return "ol-grid"
-        if log:
-            log("browser", f"grid overlay not applied (reason: {val})")
-    except Exception:
-        pass
-    return None
+    bpp = 3 if colortype == 2 else 4
+    stride = width * bpp
+    filtered = zlib.decompress(b"".join(idat))
+    pixels = bytearray(height * stride)
+    prev = bytes(stride)
+    pos = 0
+    for y in range(height):
+        ftype = filtered[pos]
+        row = filtered[pos + 1:pos + 1 + stride]
+        pos += 1 + stride
+        if ftype == 1:                      # Sub
+            acc = bytearray(row)
+            for i in range(bpp, stride):
+                acc[i] = (acc[i] + acc[i - bpp]) & 255
+            row = bytes(acc)
+        elif ftype == 2:                    # Up
+            row = bytes([(a + b) & 255 for a, b in zip(row, prev)])
+        elif ftype == 3:                    # Average
+            acc = bytearray(row)
+            for i in range(stride):
+                left = acc[i - bpp] if i >= bpp else 0
+                acc[i] = (acc[i] + ((left + prev[i]) >> 1)) & 255
+            row = bytes(acc)
+        elif ftype == 4:                    # Paeth
+            acc = bytearray(row)
+            for i in range(stride):
+                a = acc[i - bpp] if i >= bpp else 0
+                b = prev[i]
+                c = prev[i - bpp] if i >= bpp else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pred = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                acc[i] = (acc[i] + pred) & 255
+            row = bytes(acc)
+        pixels[y * stride:(y + 1) * stride] = row
+        prev = row
+    return width, height, bpp, pixels
 
 
-async def remove_grid(cdp_client, sid, grid_id):
-    """Remove the injected grid overlay; best-effort."""
-    if not grid_id:
+def encode_png(width, height, bpp, pixels, level=6):
+    """pixel bytearray -> PNG bytes, all rows filter 0 (fast, valid)."""
+    stride = width * bpp
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        raw += pixels[y * stride:(y + 1) * stride]
+
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2 if bpp == 3 else 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(bytes(raw), level))
+            + chunk(b"IEND", b""))
+
+
+def _draw_label(pixels, width, height, bpp, text, x, y, scale):
+    """White-backed red bitmap label, clamped inside the image."""
+    stride = width * bpp
+    cell_w = (3 + 1) * scale
+    text_w = len(text) * cell_w
+    box_w, box_h = text_w + 2 * scale, 5 * scale + 2 * scale
+    x = max(0, min(x, width - box_w))
+    y = max(0, min(y, height - box_h))
+    if x < 0 or y < 0 or box_w > width:
         return
-    try:
-        await cdp_client.cmd("Runtime.evaluate", {
-            "expression": "var g=document.getElementById('" + grid_id + "'); if(g) g.remove();",
-            "returnByValue": True,
-        }, sid, timeout=15.0)
-    except Exception:
-        pass
+    white = bytes([255]) * (box_w * bpp)          # opaque white, alpha included
+    for row in range(y, y + box_h):
+        start = row * stride + x * bpp
+        pixels[start:start + box_w * bpp] = white
+    ink = bytes(_GRID_RED)
+    for char_index, char in enumerate(text):
+        glyph = _FONT.get(char)
+        if not glyph:
+            continue
+        cx = x + scale + char_index * cell_w
+        for gy, glyph_row in enumerate(glyph):
+            for gx, bit in enumerate(glyph_row):
+                if bit != "1":
+                    continue
+                for dy in range(scale):
+                    for dx in range(scale):
+                        px = cx + gx * scale + dx
+                        py = y + scale + gy * scale + dy
+                        if 0 <= px < width and 0 <= py < height:
+                            start = py * stride + px * bpp
+                            pixels[start:start + 3] = ink
+
+
+def draw_grid(raw, spacing, origin_x=0, origin_y=0, font_scale=2, label_every=1000):
+    """Draw a labeled coordinate grid onto a PNG capture; returns new PNG bytes.
+
+    Lines sit on multiples of `spacing` in *document* space, so the labels read
+    as document coordinates: `origin_x`/`origin_y` are the document position of
+    the image's top-left (exactly the `region` the screenshot tool reports).
+
+    Raises ValueError when the image cannot be decoded (caller reports
+    "grid not drawn" and keeps the plain capture).
+    """
+    width, height, bpp, pixels = decode_png(raw)
+    stride = width * bpp
+    spacing = max(4, int(spacing))
+
+    # image-space positions where document coordinates are multiples of spacing
+    x_start = (-int(origin_x)) % spacing
+    y_start = (-int(origin_y)) % spacing
+
+    column_ink = [bytes([_GRID_RED[c]]) for c in range(3)]
+    row_ink = bytes(_GRID_RED) * width
+
+    for x in range(x_start, width, spacing):
+        for channel in range(3):
+            start = x * bpp + channel
+            pixels[start::stride] = column_ink[channel] * height
+    for y in range(y_start, height, spacing):
+        row_start = y * stride
+        if bpp == 3:
+            pixels[row_start:row_start + stride] = row_ink
+        else:
+            # RGBA: write the three colour channels per pixel, leave alpha alone
+            for channel in range(3):
+                pixels[row_start + channel:row_start + stride:4] = \
+                    bytes([_GRID_RED[channel]]) * width
+
+    # labels: x= on top of each vertical line (repeated down tall captures),
+    # y= at the left edge of each horizontal line
+    for x in range(x_start, width, spacing):
+        text = f"x={origin_x + x}"
+        for ly in range(2, height, label_every):
+            _draw_label(pixels, width, height, bpp, text, x + 3, ly, font_scale)
+    for y in range(y_start, height, spacing):
+        _draw_label(pixels, width, height, bpp, f"y={origin_y + y}", 2, y + 3, font_scale)
+
+    return encode_png(width, height, bpp, pixels)
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +561,7 @@ async def capture_page_state(cdp_client, sid):
     try:
         res = await cdp_client.cmd("Runtime.evaluate", {
             "expression": js, "returnByValue": True,
-        }, sid, timeout=15.0)
+        }, sid, timeout=CDP_CALL_TIMEOUT)
         val = res.get("result", {}).get("value")
         if val:
             return json.loads(val)
@@ -494,7 +599,7 @@ async def restore_page_state(cdp_client, sid, state):
     try:
         await cdp_client.cmd("Runtime.evaluate", {
             "expression": js, "returnByValue": True,
-        }, sid, timeout=15.0)
+        }, sid, timeout=CDP_CALL_TIMEOUT)
         return True
     except Exception:
         return False
@@ -507,7 +612,7 @@ async def wait_page_ready(cdp_client, sid, timeout=10.0):
         try:
             res = await cdp_client.cmd("Runtime.evaluate", {
                 "expression": "document.readyState", "returnByValue": True,
-            }, sid, timeout=15.0)
+            }, sid, timeout=CDP_CALL_TIMEOUT)
             if res.get("result", {}).get("value") == "complete":
                 return True
         except Exception:

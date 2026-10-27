@@ -24,8 +24,13 @@ import core
 # ---------------------------------------------------------------------------
 
 DEFAULT_PORT = 9222
-CDP_CALL_TIMEOUT = 15.0        # per-command timeout (seconds)
-SCREENSHOT_TIMEOUT = 20.0
+
+# Per-command timeouts must stay UNDER core.tool_timeout (15 s in config.yml):
+# otherwise the core kills the whole tool call first and the module's own
+# friendly error never runs - the caller just sees "Tool timed out" (B27).
+# Keep room for the several commands one tool issues back to back.
+CDP_CALL_TIMEOUT = 10.0        # per-command timeout (seconds)
+SCREENSHOT_TIMEOUT = 10.0      # captureBeyondViewport on a tall page is slow
 MAX_MSG_SIZE = 64 * 1024 * 1024  # screenshots/AX trees can be big
 
 

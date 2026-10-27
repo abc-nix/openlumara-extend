@@ -19,7 +19,8 @@ File layout (step-6 split, 2026-10-07; contract in README.md):
 - cdp.py: transport & process layer (_CDP client, binary/port/profile
   discovery, launching, endpoint probing).
 - page.py: page/DOM helpers (AX-tree walker, element refs, screenshots,
-  grid overlay, metrics). Helpers are stateless: the class owns all state.
+  grid annotation drawn on the capture, metrics). Helpers are stateless: the
+  class owns all state.
 - util.py: pure helpers (URL normalisation for navigate/new_tab, tail slicing
   of the log deques) - stdlib only, unit-tested by tests/test_util.py.
 
@@ -147,6 +148,13 @@ class Browser(core.module.Module):
             "default": DEFAULT_SNAPSHOT_CHARS,
             "min": 500,
         },
+        "full_page_max_height": {
+            "type": "number",
+            "description": "Tallest area a full-page screenshot may capture, in pixels. Taller pages are cut at this height and the AI is told. Higher values make the capture slower, and a grid adds roughly half a second per megapixel.",
+            "default": 8000,
+            "min": 500,
+            "max": 12000,
+        },
         "save_full_snapshots": {
             "type": "boolean",
             "description": "Save every untruncated page snapshot to data/browser/snapshots/.",
@@ -269,6 +277,18 @@ class Browser(core.module.Module):
         if self._headless_override is not None:
             return self._headless_override
         return bool(self.config.get("headless", False))
+
+    def _full_page_max_height(self):
+        """Pixel height cap for full-page captures.
+
+        A whole article is ~40k px tall: capturing that alone blows the tool
+        budget (B27) and the grid used to refuse it. Capping keeps both fast
+        and honest - the result says how tall the page really was.
+        """
+        try:
+            return max(500, min(12000, int(self.config.get("full_page_max_height", 8000))))
+        except (TypeError, ValueError):
+            return 8000
 
     def _is_connected(self):
         """True if we have a live CDP connection and an attached tab."""
@@ -743,7 +763,7 @@ class Browser(core.module.Module):
         await self._ensure_connection()
         sid = self._current_session()
         limit = max_chars or int(self.config.get("snapshot_max_chars", default=15000))
-        ax = await self._cdp.cmd("Accessibility.getFullAXTree", {}, sid, timeout=20)
+        ax = await self._cdp.cmd("Accessibility.getFullAXTree", {}, sid, timeout=CDP_CALL_TIMEOUT)
         nodes = ax.get("nodes", [])
         if not nodes:
             return self.result("Accessibility tree is empty.", success=False)
@@ -923,17 +943,14 @@ class Browser(core.module.Module):
         """Takes a screenshot of the current tab (PNG/JPEG) and returns the path plus an inline image.
 
         Args:
-            full_page: Capture the whole page instead of the viewport.
+            full_page: Capture the whole page instead of the viewport. Taller pages are cut at the full_page_max_height setting and the result says so.
             include_image: Deliver the screenshot to the model as an image message.
-            grid: Labeled grid overlay. True = 100px spacing, int = custom px.
+            grid: Labeled grid drawn on the image. True = 100px spacing, int = custom px. Requires format='png'.
             format: 'png' (default) or 'jpeg'.
             quality: JPEG quality 0-100 (default 80).
         """
         await self._ensure_connection()
-        # hoisted once: re-resolving the session inside the finally block could
-        # raise "no tab attached" and mask the real screenshot error
         sid = self._current_session()
-        # normalize format
         fmt = "jpeg" if format in ("jpeg", "jpg") else ("png" if format == "png" else None)
         if fmt is None:
             return self.result(
@@ -943,39 +960,74 @@ class Browser(core.module.Module):
         except (TypeError, ValueError):
             quality = 80
         grid_spacing = page.normalize_grid(grid)
-        grid_id = None
+        if grid_spacing and fmt != "png":
+            # 1px lines do not survive JPEG, and decoding JPEG would need an
+            # imaging library: ask for png instead of silently changing format
+            return self.result(
+                "A grid needs a lossless capture: call again with format='png' "
+                "(or drop the grid).", success=False,
+            )
+
+        # metrics BEFORE the capture: they decide the full-page clip and the
+        # document origin the grid labels are relative to
+        metrics = await page.viewport_metrics(self._cdp, sid) or {}
+        doc_w = int(metrics.get("docW") or 0)
+        doc_h = int(metrics.get("docH") or 0)
+        max_h = self._full_page_max_height()
+        clip = None
+        page_cut = False
+        if full_page and doc_h > max_h:
+            page_cut = True
+            clip = {"x": 0, "y": 0, "width": max(doc_w, 1), "height": max_h, "scale": 1}
+        origin_x = 0 if full_page else int(metrics.get("scrollX") or 0)
+        origin_y = 0 if full_page else int(metrics.get("scrollY") or 0)
+
         try:
-            if grid_spacing:
-                grid_id = await page.inject_grid(self._cdp, sid,
-                                                 grid_spacing, full_page=full_page, log=self.log)
             path, raw = await page.capture_screenshot(
                 self._cdp, sid, self._screenshots_dir,
-                full_page=full_page, fmt=fmt, quality=quality)
-        finally:
-            await page.remove_grid(self._cdp, sid, grid_id)
-        metrics = await page.viewport_metrics(self._cdp, sid)
+                full_page=full_page, fmt=fmt, quality=quality, clip=clip)
+        except TimeoutError as e:
+            return self.result(
+                f"Capture timed out ({core.detail_error(e)}). The page may be too tall or busy - "
+                f"lower full_page_max_height (currently {max_h}) or capture the viewport instead.",
+                success=False,
+            )
+
+        # grid: drawn onto the PNG after the capture (no page mutation, no
+        # canvas size limit). The saved file is replaced by the annotated one.
+        grid_note = None
+        if grid_spacing:
+            try:
+                raw = page.draw_grid(raw, grid_spacing, origin_x, origin_y)
+                with open(path, "wb") as f:
+                    f.write(raw)
+            except Exception as e:
+                grid_note = f"grid not drawn: {core.detail_error(e)}"
+                self.log("browser", grid_note)
+
         px_w, px_h = page.image_size(raw, fmt)
-        if metrics:
-            if full_page:
-                region = {
-                    "x": 0, "y": 0,
-                    "width": int(metrics.get("docW") or metrics.get("innerWidth") or px_w or 0),
-                    "height": int(metrics.get("docH") or metrics.get("innerHeight") or px_h or 0),
-                }
-            else:
-                region = {
-                    "x": int(metrics.get("scrollX") or 0),
-                    "y": int(metrics.get("scrollY") or 0),
-                    "width": int(metrics.get("innerWidth") or px_w or 0),
-                    "height": int(metrics.get("innerHeight") or px_h or 0),
-                }
+        if full_page:
+            region = {
+                "x": 0, "y": 0,
+                "width": doc_w or px_w or 0,
+                "height": (min(doc_h, max_h) if doc_h else (px_h or 0)),
+            }
         else:
-            region = None
+            region = {
+                "x": origin_x, "y": origin_y,
+                "width": int(metrics.get("innerWidth") or px_w or 0),
+                "height": int(metrics.get("innerHeight") or px_h or 0),
+            }
+        region = {key: int(value or 0) for key, value in region.items()}
         # the tool result stays plain text (path + geometry): the image can't
         # travel in a `tool` message, so it is added to context as a user
         # message instead - the inference API only accepts images in user
         # turns. adding it directly avoids channel.send() inside a tool call,
         # which deadlocks the channel's stream chain.
+        hint = ("Screenshot image is attached. Coordinates: doc_x = shot_x + region.x, "
+                "doc_y = shot_y + region.y.")
+        if grid_spacing and not grid_note:
+            hint += " The grid labels are document coordinates."
         meta = {
             "path": path,
             "file": os.path.basename(path),
@@ -983,12 +1035,21 @@ class Browser(core.module.Module):
             "full_page": bool(full_page),
             "region": region,
             "format": fmt,
-            "hint": "Screenshot image is attached. Coordinates: doc_x = shot_x + region.x, doc_y = shot_y + region.y.",
+            "hint": hint,
         }
         if fmt == "jpeg":
             meta["quality"] = quality
         if grid_spacing:
-            meta["grid"] = {"spacing": grid_spacing, "applied": bool(grid_id)}
+            meta["grid"] = {"spacing": grid_spacing, "applied": grid_note is None}
+            if grid_note:
+                meta["grid"]["reason"] = grid_note
+        if page_cut:
+            meta["page_cut"] = {
+                "page_height": doc_h,
+                "captured_height": region["height"],
+                "note": ("the page is taller than full_page_max_height; raise that setting "
+                         "to capture more, or take viewport captures instead"),
+            }
 
         if include_image:
             mime = "image/jpeg" if fmt == "jpeg" else "image/png"
