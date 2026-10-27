@@ -71,6 +71,7 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B29 | Low–Med | Console/network entries carry no tab or URL, and the buffers survive navigation → logs from a previous page are attributed to the current one |
 | B30 | Low | `evaluate` rejects top-level `await` (Chrome: "await is only valid in async functions") although `awaitPromise` is on; the AI has to know to wrap in `(async () => …)()` |
 | B31 | Low | Capped full-page captures are refused, not cut: Chrome paints the whole page for `captureBeyondViewport` whatever `clip` says (measured), so the cheap way to a "top N px" capture is still unknown |
+| B32 | **Medium** | Stale tab session: a closed tab stays `_current_target`, `_ensure_connection` still reports connected, `_attach_target` reuses the dead session id → `-32001 Session with given id not found`, and every tab shows `current: false` |
 
 ---
 
@@ -274,6 +275,27 @@ Fix: store `url` (and `targetId`) on each entry, let the tools filter by the cur
 `Runtime.evaluate` has `awaitPromise: true`, but the expression body is a *script*, so `await new Promise(r => setTimeout(r, 2500)); …` fails with Chrome's SyntaxError ("await is only valid in async functions and the top level bodies of modules"). Wrapping in `(async () => { … })()` works and the promise is awaited correctly.
 
 Fix: either auto-wrap expressions that contain `await` in an async IIFE (and document it), or add the `wait` tool (§5.1) so the model never needs the trick. Today the only cost is a confusing SyntaxError on the first attempt.
+
+### B32 — Stale tab session (Medium, live 2026-10-27)
+
+After the user closed the tab the module was working in, every tool that needs a
+tab session failed with `-32001 Session with given id not found`, while
+`status`/`list_tabs` showed **all** tabs as `current: false`. Root cause chain:
+
+1. `_current_target` is never invalidated when a tab closes — `Target.setDiscoverTargets`
+   is enabled (`_ensure_connection`) but `Target.targetDestroyed` is not handled.
+2. `_ensure_connection` only tests the WebSocket (`_cdp.ws` alive) and returns
+   "connected", so it never re-selects a target.
+3. `_attach_target` returns early for any targetId already in `_attached`, so the
+   dead session id is reused indefinitely (`_current_session()` hands it out).
+
+Recovery today is manual (`switch_tab(<id from list_tabs>)`).
+
+Fix (phase 4): handle `Target.targetDestroyed` (drop `_attached[id]`, clear
+`_current_target` if it matches), validate `_current_target` against
+`Target.getTargets` in `_ensure_connection` and re-select when it is gone, and
+make `_current_session()` raise a *helpful* "the tab was closed — call list_tabs
+and switch_tab" instead of leaking the raw CDP error.
 
 ### B31 — Cheap capped full-page captures (open, measured 2026-10-27)
 
@@ -500,6 +522,7 @@ Grid rework (phase 2.5), checked live on 2026-10-27:
 - short full-page (`example.com`) with grid → ✔
 - `format="jpeg", grid=100` → refused with "a grid needs a lossless capture" ✔
 - `document.querySelectorAll('canvas')` stayed **0** before and after a gridded capture, and `#ol-grid` is gone from the codebase → no DOM mutation ✔
+- Headless mode (same day): `status` still reports `connected`/`owned_process` with the correct `active` tab, and switching headless<->visible restored all three tabs with new ids (phase 6's restore path, exercised incidentally). Viewport is **1280x713** (window 1280x800 minus chrome) and `region` follows it. Gridded capture: 23,241 pure-red pixels with every checked column/row fully covered; the same view **without** grid: **0** pure-red pixels ✔
 
 Checked after the restart on 2026-10-27:
 
