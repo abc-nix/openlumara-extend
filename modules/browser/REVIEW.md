@@ -136,6 +136,13 @@ Consequences:
 
 Only public signal that a real shutdown is in progress: `manager._prevent_double_shutdown` (private; `core/manager.py:36,183,368`). Options: guard with it and propose an upstream `manager.shutting_down` property; and don't clobber `_owned_proc` when the process is intentionally kept.
 
+**Confirmed 2026-10-27** by reading `core/manager.py:481 reload_module()`: it does **not** re-import the module — it calls `unregister_module_tools`, `on_shutdown`, `on_ready`, `register_module_tools` on the same instance. Therefore:
+
+- a settings save never picks up edited code (cp. B25) — only a full server restart re-imports;
+- yet a settings save still runs `on_shutdown`, so with `close_browser_on_shutdown=true` **every settings save kills the browser and its tabs** (e.g. changing `snapshot_max_chars`).
+
+Workflow consequence: every code change to this module costs a server restart *and* a browser relaunch, and the first browser tool call after a restart pays Chrome's startup (~1–3 s; it looked like "tool overhead" in an earlier timing test). The panel's headless toggle is a session-only override (`_headless_override`) and is lost on restart — to persist it, the `headless` **setting** must be saved.
+
 ### B6 — Restart restores the wrong active tab (Medium)
 
 `_capture_state` (`module.py:437-451`) sets `active_index` while enumerating **all page targets**, then skips non-http targets from `tabs`. `_restore_state` (`:481`) applies that index to the **filtered** `new_ids` with `min(idx, len-1)`.
