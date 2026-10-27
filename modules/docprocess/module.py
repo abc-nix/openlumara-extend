@@ -336,7 +336,7 @@ class DocProcess(core.module.Module):
         notable = [l for l in job["log"]
                    if any(k in l for k in ("tier", "SKIPPED", "WATCHDOG",
                                            "vlm usage", "cropbox", "raster plan", "audit",
-                                           "stylefix", "textfix"))]
+                                           "stylefix", "textfix", "extras"))]
         if notable:
             line += "\n" + "\n".join(notable[-5:])
         if job["include_content"]:

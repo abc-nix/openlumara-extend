@@ -162,6 +162,20 @@ def transform(markdown, ctx):
 
     lines = _normalise_title(lines)
 
+    # a heading whose second line came out as a lowercase bold run belongs to
+    # the same heading: "## La no ficción: qué es y cómo" + "**debemos evaluar**"
+    joined = []
+    for line in lines:
+        m = re.match(r"^\*\*([a-záéíóúüñ][^*]*)\*\*$", line.strip())
+        k = next((i for i in range(len(joined) - 1, -1, -1) if joined[i].strip()), None)
+        if (m and k is not None and joined[k].startswith("## ")
+                and not joined[k].rstrip().endswith((".", ":", "?", "!"))):
+            joined[k] = joined[k].rstrip() + " " + m.group(1).strip()
+            del joined[k + 1:]              # drop the blank lines between them
+            continue
+        joined.append(line)
+    lines = joined
+
     out = [_ARROW_LINE.sub("- → ", line) for line in lines]
 
     # squeeze the blank-line runs the removals leave behind

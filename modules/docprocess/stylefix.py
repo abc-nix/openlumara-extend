@@ -343,10 +343,18 @@ def honest_styles(data, log=lambda m: None, patch_italic=False):
             log(f"stylefix: nothing to patch (median ink {med:.4f})")
             return data
 
-        # 4. rewrite: same document, only the lying metadata changes
+        # 4. rewrite: same document, only the lying metadata changes.
+        # Keep the document information dictionary: pypdf writes its own
+        # Producer otherwise, which destroys the only cheap way to identify a
+        # publishing workflow (and would break series profiles that match on it).
         w = PdfWriter()
         for p in r.pages:
             w.add_page(p)
+        try:
+            if r.metadata:
+                w.add_metadata({str(k): str(v) for k, v in r.metadata.items() if v is not None})
+        except Exception as e:
+            log(f"stylefix: metadata could not be preserved ({e})")
         done, patched = set(), 0
         for i, n, declared, idnum, ratio in bold:
             if idnum in done:
