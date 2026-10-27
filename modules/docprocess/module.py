@@ -8,7 +8,7 @@ import time
 
 import core
 
-from . import pdfops, pipeline
+from . import pdfops, pipeline, stylefix, textfix
 from .htmlmd import html_tables_to_md
 
 # webui extension routes (@_ui_route -> /api/ext/docprocess/...). Guarded so
@@ -57,6 +57,14 @@ class DocProcess(core.module.Module):
         "force_ocr": {
             "type": "bool", "default": False,
             "description": "Ignore embedded text layer; OCR every page.",
+        },
+        "fix_text": {
+            "type": "bool", "default": True,
+            "description": "Repair converter text damage: space before punctuation left by emphasis runs, paragraphs cut at a style boundary, hyphenation breakage (word halves rejoined or split using the PDF's own text layer as proof) and list bullets glued to the previous item.",
+        },
+        "fix_styles": {
+            "type": "bool", "default": True,
+            "description": "Repair lying font metadata before extraction (InDesign PDFs embed bold/italic instances under the same name with FontWeight 400, so xberg prints them plain). Classifies each embedded program by its outlines (ink + slant) and relabels only those; needs a text layer with embedded fonts, so scans are skipped.",
         },
         "layout_tables": {
             "type": "bool", "default": True,
@@ -316,7 +324,8 @@ class DocProcess(core.module.Module):
                 f"quality={job['quality']:.2f} | {job['secs']:.1f}s | mode={job['mode']}")
         notable = [l for l in job["log"]
                    if any(k in l for k in ("tier", "SKIPPED", "WATCHDOG",
-                                           "vlm usage", "cropbox", "raster plan", "audit"))]
+                                           "vlm usage", "cropbox", "raster plan", "audit",
+                                           "stylefix", "textfix"))]
         if notable:
             line += "\n" + "\n".join(notable[-5:])
         if job["include_content"]:
@@ -349,6 +358,8 @@ class DocProcess(core.module.Module):
                 # still drawn larger than the viewport (cov<0.98 EXPECTED)
                 rows, ok = pdfops.audit_pdf(data, npages=3)
                 data = pdfops.normalize_cropbox(data, log=log)
+                if self.config.get("fix_styles", True):
+                    data = stylefix.honest_styles(data, log=log)
                 if not ok:
                     log(f"audit: structure check FAILED (first pages): {rows[:3]}")
                 elif self.config.get("debug"):
@@ -402,6 +413,10 @@ class DocProcess(core.module.Module):
             content = html_tables_to_md(
                 res["markdown"].strip(),
                 mode=str(self.config.get("html_tables") or "convert"))
+            if self.config.get("fix_text", True):
+                content = textfix.repair(content,
+                                         pdf_bytes=data if job["is_pdf"] else None,
+                                         log=log)
 
             os.makedirs(os.path.dirname(job["output"]) or ".", exist_ok=True)
             with open(job["output"], "w", encoding="utf-8") as f:
@@ -450,6 +465,8 @@ class DocProcess(core.module.Module):
             # audit RAW bytes (post-trim cov<0.98 is the expected trim state)
             rows, ok = pdfops.audit_pdf(file_data, npages=3)
             data = pdfops.normalize_cropbox(file_data, log=log)
+            if self.config.get("fix_styles", True):
+                data = stylefix.honest_styles(data, log=log)
             if not ok:
                 log(f"audit: structure check FAILED (first pages): {rows[:3]}")
             images, plan, res = None, None, None
@@ -483,6 +500,8 @@ class DocProcess(core.module.Module):
 
             content = html_tables_to_md(res["markdown"].strip(),
                                         str(self.config.get("html_tables") or "convert"))
+            if content and self.config.get("fix_text", True):
+                content = textfix.repair(content, pdf_bytes=data, log=log)
             if not content:
                 self.channel.log(self.name, f"'{filename}': extraction produced no content, using built-in extractor")
                 return None
