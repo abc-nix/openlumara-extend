@@ -1,0 +1,242 @@
+{# -- AI GENERATED CODE (Qwen3.8-Flash-Next) :: (2026-10-15, docprocess port of the xberg-reader v11.2 widget)
+   settings_page slot: inline upgrade for the docprocess VLM model field.
+   Mirrors the core template path modals/settings/index.html; the core slot
+   renders this macro once inside the settings modal. The script finds the
+   "Vlm Model" text row and replaces its look with a SINGLE combo: one
+   textbox whose attached popup list (custom, not <datalist>: browsers hide
+   the native arrow when the value matches an option) shows the models served
+   by the configured vlm_base_url. Filter toggle (vision/all) + refresh
+   button beside it. Data comes from the module route
+   /api/ext/docprocess/vlm_models. Writes go through the core settingsModal
+   updateSetting on the live Alpine object, so Save/Reset stay intact.
+   The core's own input for this field is hidden via extension CSS (its
+   value stays synced; x-if keeps it mounted). No core files modified. #}
+
+{% macro settings_page() %}
+<script>
+(() => {
+    if (window.__docprocessVlmHelpers) return;
+    window.__docprocessVlmHelpers = true;
+
+    const MODEL_LABEL = 'Vlm Model';
+    const BASE_LABEL = 'Vlm Base Url';
+    const LS_KEY = 'docprocess.vlmFilterVisionOnly';
+
+    const norm = (el) => (el ? (el.textContent || '').trim().replace(/\s+/g, ' ') : '');
+
+    function findModalComponent(el) {
+        while (el) {
+            for (const frame of (el._x_dataStack || [])) {
+                if (frame && typeof frame.updateSetting === 'function'
+                    && Object.prototype.hasOwnProperty.call(frame, 'activeModule')) {
+                    return frame;
+                }
+            }
+            el = el.parentElement;
+        }
+        return null;
+    }
+
+    function fieldRowByLabel(root, label) {
+        for (const lab of root.querySelectorAll('.row > label')) {
+            if (norm(lab) === label) return lab.closest('.row');
+        }
+        return null;
+    }
+
+    function getSettingObj(mod, row) {
+        let el = row;
+        while (el) {
+            for (const frame of (el._x_dataStack || [])) {
+                if (frame && frame.setting && typeof frame.setting === 'object'
+                    && typeof frame.setting.value === 'string'
+                    && norm(row.querySelector(':scope > label')) === frame.setting.title) {
+                    return frame.setting;
+                }
+            }
+            el = el.parentElement;
+        }
+        return null;
+    }
+
+    function enhance(modelRow, contentRoot) {
+        if (!modelRow || modelRow.__dpVlm) return;
+        modelRow.__dpVlm = true;
+
+        const mod = findModalComponent(modelRow);
+        const setting = mod ? getSettingObj(mod, modelRow) : null;
+        if (!setting) return;
+
+        const baseRow = fieldRowByLabel(contentRoot, BASE_LABEL);
+        const baseInput = baseRow ? baseRow.querySelector('input') : null;
+        const baseUrl = () => (baseInput && baseInput.value.trim()) || '';
+
+        let models = [];                       // [{id, vision, ctx, loaded}]
+        let filter = localStorage.getItem(LS_KEY) !== '0';
+        let lastError = '';
+        let fetchTries = 0;
+
+        // ---- one-box combo: input + attached popup list ----
+        const combo = document.createElement('div');
+        combo.className = 'dp-vlm-combo';
+        const box = document.createElement('div');
+        box.className = 'dp-vlm-box';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = setting.value || '';
+        input.placeholder = 'vision model id';
+        const caret = document.createElement('span');
+        caret.className = 'dp-vlm-caret';
+        caret.textContent = '\u25be';
+        const popup = document.createElement('div');
+        popup.className = 'dp-vlm-popup';
+        popup.hidden = true;
+        box.append(input, caret, popup);
+        const filterBtn = document.createElement('button');
+        filterBtn.type = 'button';
+        filterBtn.className = 'dp-vlm-filter';
+        const refreshBtn = document.createElement('button');
+        refreshBtn.type = 'button';
+        refreshBtn.className = 'dp-vlm-refresh';
+        refreshBtn.textContent = '\u21bb';
+        combo.append(box, filterBtn, refreshBtn);
+
+        const label = modelRow.querySelector(':scope > label');
+        label.insertAdjacentElement('afterend', combo);
+
+        const paintFilter = () => {
+            filterBtn.textContent = filter ? 'vision' : 'all';
+            filterBtn.classList.toggle('active', filter);
+            filterBtn.title = filter
+                ? 'Filter ON: only vision-capable models listed'
+                : 'Filter OFF: every model the API reports is listed';
+        };
+
+        const visible = () => models.filter((m) => !filter || m.vision);
+
+        function paintPopup() {
+            popup.textContent = '';
+            const q = input.value.trim().toLowerCase();
+            const items = visible().filter((m) => !q || m.id.toLowerCase().includes(q));
+            if (lastError) {
+                const err = document.createElement('div');
+                err.className = 'dp-vlm-status err';
+                err.textContent = 'list failed: ' + lastError + ' (check \u21bb tooltip)';
+                popup.appendChild(err);
+            }
+            if (!items.length && !lastError) {
+                const st = document.createElement('div');
+                st.className = 'dp-vlm-status';
+                st.textContent = models.length ? 'no match in this filter' : 'no models loaded \u00b7 press \u21bb';
+                popup.appendChild(st);
+            }
+            for (const m of items.slice(0, 60)) {
+                const li = document.createElement('div');
+                li.className = 'dp-vlm-item' + (m.id === input.value ? ' current' : '');
+                const name = document.createElement('span');
+                name.textContent = m.id;
+                li.appendChild(name);
+                const meta = document.createElement('span');
+                meta.className = 'meta';
+                meta.textContent = (m.vision ? '' : 'unverified \u00b7 ')
+                    + (m.ctx ? 'ctx ' + m.ctx : '') + (m.loaded ? ' \u00b7 loaded' : '');
+                li.appendChild(meta);
+                li.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    input.value = m.id;
+                    mod.updateSetting(setting, m.id);
+                    close();
+                });
+                popup.appendChild(li);
+            }
+        }
+
+        const open = () => {
+            paintPopup();
+            popup.hidden = false;
+            caret.classList.add('open');
+        };
+        const close = () => {
+            popup.hidden = true;
+            caret.classList.remove('open');
+        };
+
+        input.addEventListener('focus', open);
+        input.addEventListener('input', () => {
+            mod.updateSetting(setting, input.value);
+            if (popup.hidden) open(); else paintPopup();
+        });
+        input.addEventListener('blur', () => setTimeout(close, 150));
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { close(); input.blur(); }
+            if (e.key === 'Enter') close();
+        });
+        caret.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            input.focus();
+            open();
+        });
+
+        async function refresh(manual) {
+            refreshBtn.classList.add('busy');
+            refreshBtn.title = 'Reloading model list...';
+            lastError = '';
+            const url = '/api/ext/docprocess/vlm_models?_=' + Date.now();
+            try {
+                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                const payload = await res.json();
+                if (payload.success === false) {
+                    throw new Error(String(payload.data || ('HTTP ' + res.status)));
+                }
+                const g = payload.data.groups;
+                models = [];
+                for (const m of g.vision) models.push({ id: m.id, vision: true, ctx: m.ctx, loaded: m.loaded });
+                for (const m of g.unknown) models.push({ id: m.id, vision: false, ctx: m.ctx, loaded: m.loaded });
+                for (const m of g.text) models.push({ id: m.id, vision: false, ctx: m.ctx, loaded: m.loaded });
+                refreshBtn.title = models.length + ' models from ' + payload.data.url
+                    + ' (' + g.vision.length + ' vision)';
+            } catch (err) {
+                lastError = String(err && err.message || err);
+                refreshBtn.title = 'Reload failed: ' + lastError;
+                if (!manual && fetchTries < 3) {
+                    fetchTries += 1;
+                    setTimeout(refresh, 1500);
+                }
+            } finally {
+                refreshBtn.classList.remove('busy');
+                if (!popup.hidden) paintPopup();
+            }
+        }
+
+        filterBtn.addEventListener('click', () => {
+            filter = !filter;
+            localStorage.setItem(LS_KEY, filter ? '1' : '0');
+            paintFilter();
+            if (!popup.hidden) paintPopup();
+        });
+        refreshBtn.addEventListener('click', () => refresh(true));
+
+        // mirror core-side changes (Reset button) into the combo input
+        setInterval(() => {
+            const v = setting.value || '';
+            if (input.value !== v && document.contains(modelRow)) input.value = v;
+        }, 1500);
+
+        paintFilter();
+        refresh(false);
+    }
+
+    function scan() {
+        const content = document.querySelector('.settings-modal .content');
+        if (!content) return;
+        enhance(fieldRowByLabel(content, MODEL_LABEL), content);
+    }
+
+    // settings modal mounts/unmounts via Alpine x-if; catch the row
+    // appearing (observer + light poll; enhance() is idempotent per row)
+    new MutationObserver(() => scan()).observe(document.body, { childList: true, subtree: true });
+    setInterval(scan, 800);
+    scan();
+})();
+</script>
+{% endmacro %}

@@ -1,0 +1,130 @@
+/* docprocess: single-box VLM model combo grafted onto the settings page
+   (see webui/templates/modals/settings/index.html). Auto-served by the
+   webui extension system from /ext-assets/docprocess/css/. */
+
+/* hide the core's plain input on the Vlm Model row: the grafted combo IS
+   that field now (the core input stays mounted via x-if and stays synced;
+   this is presentation only, no core file touched). :has() = Chrome 105+/
+   Firefox 121+/Safari 15.4+; without support nothing hides (fallback). */
+.settings-modal .row:has(> .dp-vlm-combo) > input[type="text"] {
+    display: none;
+}
+
+/* ---- the combo ---- */
+.dp-vlm-combo {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+    margin: 4px 0 6px;
+}
+
+.dp-vlm-box {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+}
+
+.dp-vlm-box > input {
+    width: 100%;
+    padding-right: 26px;
+}
+
+.dp-vlm-caret {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary, #999);
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+}
+
+.dp-vlm-caret.open {
+    color: var(--accent, #00d4ff);
+}
+
+/* ---- popup list (attached to the box = one visual unit) ---- */
+.dp-vlm-popup {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 60;
+    max-height: 46vh;
+    overflow-y: auto;
+    background: var(--bg-secondary, #1e1e24);
+    border: 1px solid var(--border, #444);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    padding: 4px;
+}
+
+.dp-vlm-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: baseline;
+    padding: 6px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.dp-vlm-item:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.07));
+}
+
+.dp-vlm-item.current {
+    color: var(--accent, #00d4ff);
+}
+
+.dp-vlm-item .meta {
+    color: var(--text-secondary, #999);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.dp-vlm-status {
+    padding: 8px 9px;
+    font-size: 12px;
+    color: var(--text-secondary, #999);
+}
+
+.dp-vlm-status.err {
+    color: #e5484d;
+}
+
+/* ---- filter + refresh buttons ---- */
+.dp-vlm-combo button {
+    flex: 0 0 auto;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border, #444);
+    background: transparent;
+    color: var(--text-secondary, #999);   /* inactive = grey */
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+}
+
+.dp-vlm-combo button.dp-vlm-filter.active {
+    color: var(--accent, #00d4ff);        /* active = themed accent */
+    border-color: var(--accent, #00d4ff);
+    background: color-mix(in srgb, var(--accent, #00d4ff) 12%, transparent);
+}
+
+.dp-vlm-combo button.dp-vlm-refresh {
+    min-width: 32px;
+}
+
+.dp-vlm-combo button.dp-vlm-refresh.busy {
+    animation: dp-vlm-spin 1s linear infinite;
+    color: var(--accent, #00d4ff);
+}
+
+@keyframes dp-vlm-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
