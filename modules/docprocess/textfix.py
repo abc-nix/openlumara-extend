@@ -140,7 +140,10 @@ def _merge_split_paragraphs(text):
             # semicolon. A trailing ":" only merges into a lowercase
             # continuation - a colon followed by a capital usually announces a
             # list or a new paragraph, not a split sentence.
-            next_enum = bool(re.match(r"^(?:\(?[a-zA-Z0-9]{1,4}[).]\s|[-•·–—]\s|\d+\s)", ns))
+            # real enumerators only: "(a)", "b)", "1." / "2)" and bullets.
+            # NOT a short word plus a period - that is ordinary prose
+            # ("mano. Abrir los ojos...") and must not block a merge.
+            next_enum = bool(re.match(r"^(?:\(?[a-zA-Z]\)\s|\d+[.)]\s|[-•·–—]\s)", ns))
             if ps.endswith(":"):
                 prev_open = starts_cont
             elif ps.endswith((",", ";")):
