@@ -135,16 +135,23 @@ def _merge_split_paragraphs(text):
             ps = prev.rstrip()
             ns = blk.lstrip()
             starts_cont = bool(re.match(r"^(\*{1,3}[a-záéíóúüñ«“¿¡]|[a-záéíóúüñ«“¿¡])", ns))
-            # A paragraph never ends with a comma, semicolon or colon: that is
-            # proof of a page-break split whatever the next block starts with
-            # ("...Por cualquier caso," / "Sebastián sintió..."). A split after
-            # a plain letter is only merged when the next block obviously
-            # continues in lowercase.
-            prev_open = ps.endswith((",", ";", ":")) or (ps[-1:].isalpha() and starts_cont)
+            # A trailing "," or ";" is a page-break split unless the next block
+            # is itself a list item: element lists DO end with a comma or a
+            # semicolon. A trailing ":" only merges into a lowercase
+            # continuation - a colon followed by a capital usually announces a
+            # list or a new paragraph, not a split sentence.
+            next_enum = bool(re.match(r"^(?:\(?[a-zA-Z0-9]{1,4}[).]\s|[-•·–—]\s|\d+\s)", ns))
+            if ps.endswith(":"):
+                prev_open = starts_cont
+            elif ps.endswith((",", ";")):
+                prev_open = not next_enum
+            else:
+                prev_open = ps[-1:].isalpha() and starts_cont
             blocky = ("#", "|", ">")
             prev_blocky = (ps.startswith(blocky) or ps.startswith(("- ", "* "))) \
                 and not ps.startswith("- → ")
-            next_blocky = ns.startswith(blocky) or ns.startswith(("- ", "* ")) or ns.startswith("```")
+            next_blocky = (ns.startswith(blocky) or ns.startswith(("- ", "* "))
+                           or ns.startswith("```") or next_enum)
             if prev_open and ps and not prev_blocky and not next_blocky:
                 out[-1] = ps + " " + ns
                 merged += 1
