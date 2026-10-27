@@ -60,9 +60,11 @@ may inspect next.
 - `grid` requires `format="png"`: jpeg + grid is refused rather than silently
   changing the format.
 - Measured: **0.76 s** for a 1272x1305 capture, ~0.5 s per extra megapixel.
-- `full_page_max_height` (default 8000) clips tall pages before capture and the
-  result carries `page_cut` with the real page height (a whole Wikipedia
-  article is ~39k px, which used to exceed the 15 s tool budget).
+- `full_page_max_height` (default 8000): Chrome paints the **whole page** for
+  `captureBeyondViewport` regardless of any clip (measured 2026-10-27 — an 8k
+  clip on a 40k page still ran past 10 s), so a taller page is refused up front
+  with its real height instead of stalling into the 15 s tool budget. A whole
+  Wikipedia article is ~40k px.
 
 ## Tests
 

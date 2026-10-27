@@ -150,7 +150,7 @@ class Browser(core.module.Module):
         },
         "full_page_max_height": {
             "type": "number",
-            "description": "Tallest area a full-page screenshot may capture, in pixels. Taller pages are cut at this height and the AI is told. Higher values make the capture slower, and a grid adds roughly half a second per megapixel.",
+            "description": "Tallest page a full-page screenshot is taken of, in pixels. Chrome paints the whole page no matter how the capture is clipped, so taller pages are refused with their real height instead of stalling into a timeout. Raise it only for pages you know are light; a grid adds roughly half a second per megapixel.",
             "default": 8000,
             "min": 500,
             "max": 12000,
@@ -943,7 +943,7 @@ class Browser(core.module.Module):
         """Takes a screenshot of the current tab (PNG/JPEG) and returns the path plus an inline image.
 
         Args:
-            full_page: Capture the whole page instead of the viewport. Taller pages are cut at the full_page_max_height setting and the result says so.
+            full_page: Capture the whole page instead of the viewport. Pages taller than full_page_max_height are refused with their real height (Chrome paints the whole page regardless of clipping).
             include_image: Deliver the screenshot to the model as an image message.
             grid: Labeled grid drawn on the image. True = 100px spacing, int = custom px. Requires format='png'.
             format: 'png' (default) or 'jpeg'.
@@ -968,24 +968,30 @@ class Browser(core.module.Module):
                 "(or drop the grid).", success=False,
             )
 
-        # metrics BEFORE the capture: they decide the full-page clip and the
-        # document origin the grid labels are relative to
+        # metrics BEFORE the capture: they decide whether a full-page capture
+        # is feasible and give the document origin the grid labels use
         metrics = await page.viewport_metrics(self._cdp, sid) or {}
         doc_w = int(metrics.get("docW") or 0)
         doc_h = int(metrics.get("docH") or 0)
         max_h = self._full_page_max_height()
-        clip = None
-        page_cut = False
         if full_page and doc_h > max_h:
-            page_cut = True
-            clip = {"x": 0, "y": 0, "width": max(doc_w, 1), "height": max_h, "scale": 1}
+            # Chrome paints the WHOLE page for captureBeyondViewport no matter
+            # what `clip` says (measured 2026-10-27: an 8k clip on a 40k page
+            # still ran past 10s), so refuse up front instead of stalling into
+            # a timeout - and tell the caller the real height.
+            return self.result(
+                f"The page is {doc_h} px tall; full-page captures are limited to "
+                f"{max_h} px. Scroll and take viewport captures, or raise "
+                f"full_page_max_height (very tall pages can exceed the tool budget).",
+                success=False,
+            )
         origin_x = 0 if full_page else int(metrics.get("scrollX") or 0)
         origin_y = 0 if full_page else int(metrics.get("scrollY") or 0)
 
         try:
             path, raw = await page.capture_screenshot(
                 self._cdp, sid, self._screenshots_dir,
-                full_page=full_page, fmt=fmt, quality=quality, clip=clip)
+                full_page=full_page, fmt=fmt, quality=quality)
         except TimeoutError as e:
             return self.result(
                 f"Capture timed out ({core.detail_error(e)}). The page may be too tall or busy - "
@@ -1046,13 +1052,6 @@ class Browser(core.module.Module):
             meta["grid"] = {"spacing": grid_spacing, "applied": grid_note is None}
             if grid_note:
                 meta["grid"]["reason"] = grid_note
-        if page_cut:
-            meta["page_cut"] = {
-                "page_height": doc_h,
-                "captured_height": region["height"],
-                "note": ("the page is taller than full_page_max_height; raise that setting "
-                         "to capture more, or take viewport captures instead"),
-            }
 
         if include_image:
             mime = "image/jpeg" if fmt == "jpeg" else "image/png"

@@ -70,6 +70,7 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B28 | Low–Med | `get_images` returns every image (38 on one Wikipedia article, including 20 px icons and duplicate `src`) → context bloat |
 | B29 | Low–Med | Console/network entries carry no tab or URL, and the buffers survive navigation → logs from a previous page are attributed to the current one |
 | B30 | Low | `evaluate` rejects top-level `await` (Chrome: "await is only valid in async functions") although `awaitPromise` is on; the AI has to know to wrap in `(async () => …)()` |
+| B31 | Low | Capped full-page captures are refused, not cut: Chrome paints the whole page for `captureBeyondViewport` whatever `clip` says (measured), so the cheap way to a "top N px" capture is still unknown |
 
 ---
 
@@ -252,7 +253,9 @@ The module's own budget is backwards: `cdp.SCREENSHOT_TIMEOUT = 20.0` and `CDP_C
 
 Fix: keep every internal timeout **below** the core budget (e.g. 10–12 s for `captureScreenshot`), catch `asyncio.TimeoutError`/`TimeoutError` and return `success=False` with "the page is too tall for the tool budget — retry without full_page"; optionally read `Page.getLayoutMetrics` and clip to a sane maximum height. Verified good behaviour in the same test: the injected `#ol-grid` canvas is **not** left behind after the timeout (`document.getElementById('ol-grid')` → null), so the `finally` cleanup survives cancellation.
 
-**Resolved in phase 2.5 (`bbcccc3`)**: new `full_page_max_height` (default 8000) clips the capture via `Page.captureScreenshot.clip` and reports `page_cut{page_height, captured_height}`; `CDP_CALL_TIMEOUT`/`SCREENSHOT_TIMEOUT` are now 10 s (below the 15 s core budget) so the module's own `TimeoutError` path actually runs; a capture timeout now answers with "lower full_page_max_height … or capture the viewport instead". The grid no longer touches the page at all (see the design note in `README.md`).
+**Resolved in phase 2.5** (`CDP_CALL_TIMEOUT`/`SCREENSHOT_TIMEOUT` are now 10 s, below the 15 s core budget, so the module's own `TimeoutError` path actually runs; the grid no longer touches the page).
+
+**Correction after live testing (2026-10-27):** clipping does **not** bound the work. Chrome rasterises the entire page for `captureBeyondViewport` and crops afterwards — an 8000 px `clip` on a 40,239 px page still exceeded the 10 s capture timeout. So `full_page_max_height` is now a **refusal threshold**: a taller page is rejected up front with its real height and a suggestion to scroll + capture the viewport or raise the setting. No stall, no misleading `page_cut` that was never produced. (Cheap capped captures are still an open question — see B31.)
 
 ### B28 — `get_images` has no cap or filter (Low–Med, live 2026-10-27)
 
@@ -271,6 +274,22 @@ Fix: store `url` (and `targetId`) on each entry, let the tools filter by the cur
 `Runtime.evaluate` has `awaitPromise: true`, but the expression body is a *script*, so `await new Promise(r => setTimeout(r, 2500)); …` fails with Chrome's SyntaxError ("await is only valid in async functions and the top level bodies of modules"). Wrapping in `(async () => { … })()` works and the promise is awaited correctly.
 
 Fix: either auto-wrap expressions that contain `await` in an async IIFE (and document it), or add the `wait` tool (§5.1) so the model never needs the trick. Today the only cost is a confusing SyntaxError on the first attempt.
+
+### B31 — Cheap capped full-page captures (open, measured 2026-10-27)
+
+`Page.captureScreenshot(captureBeyondViewport=True)` rasterises the entire page
+and only then crops, so `clip` cannot bound the work: an 8000 px clip on a
+40,239 px page still exceeded the 10 s capture timeout. Current behaviour is to
+refuse up front with the real height (fast, honest, no screenshot).
+
+Candidate mechanism to test before adopting: `Emulation.setDeviceMetricsOverride`
+to `{width: docW, height: min(docH, cap), deviceScaleFactor: 1}`, then a plain
+viewport capture (no `captureBeyondViewport`), then clear the override. Expected
+to be O(1) frames instead of a 40k raster.
+
+Must be verified, not assumed: responsive reflow (breakpoints, sticky headers),
+lazy-loaded images, and the page being briefly resized while the AI could take
+a snapshot. If it holds, the refusal could become a real "cut at N px" capture.
 
 ---
 
@@ -474,8 +493,17 @@ Still outstanding:
 4. Settings save with `close_browser_on_shutdown=false` → is the browser still running *and* `owned_process` true? (B5)
 5. Panel with the sidebar expanded → where does the popover land? (§7 anchoring)
 6. Screenshot card whose file was pruned → does the "could not load the screenshot" row appear? (B23)
-7. Grid rework (phase 2.5): `screenshot(grid=100)` on a real page → grid drawn, labels in document coordinates, and `#ol-grid` can never appear (the overlay code is gone).
-8. `screenshot(full_page=True)` on the 39k-px article → returns well inside the 15 s budget with `page_cut` (8000) and `grid.applied: true`; `format="jpeg", grid=100` → refused with the "grid needs png" hint.
+
+Grid rework (phase 2.5), checked live on 2026-10-27:
+
+- viewport `screenshot(grid=100)` → `grid.applied: true`; the saved PNG is 1272x1305 (matches `region` and `file`), `(224,0,0)` at x=300, label ink at (305,5), page background elsewhere. ✔
+- short full-page (`example.com`) with grid → ✔
+- `format="jpeg", grid=100` → refused with "a grid needs a lossless capture" ✔
+- `document.querySelectorAll('canvas')` stayed **0** before and after a gridded capture, and `#ol-grid` is gone from the codebase → no DOM mutation ✔
+
+Still to check after the next restart (the running process still has the clip version):
+
+- `screenshot(full_page=True)` on the 40k-px article → must be **refused instantly** with the real height, not a 10 s timeout.
 
 ### Real-site session (Wikipedia, 2026-10-27)
 

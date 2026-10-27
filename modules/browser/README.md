@@ -78,8 +78,9 @@ core code, plus refactoring notes. (Added 2026-10-07.)
   and re-encodes it (all rows filter 0). Reasons: the canvas had a hard
   16000 px dimension guard (so it refused tall full-page captures) and it
   mutated the page the AI may inspect next. Grid ⇒ PNG; jpeg + grid is
-  refused. Full-page captures are clipped by `full_page_max_height`
-  (default 8000) and report `page_cut`.
+  refused. Full-page captures are only attempted when the page is at most
+  `full_page_max_height` (default 8000); taller pages are refused with their
+  real height, because Chrome paints the whole page regardless of a clip.
   Note: single-module-file is the upstream core convention (http module is
   also ~1500 lines) — this split is a local maintainability choice; to
   upstream, the three files can be concatenated back into module.py with

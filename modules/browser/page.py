@@ -225,15 +225,15 @@ def normalize_grid(value):
 
 
 async def capture_screenshot(cdp_client, sid, screenshots_dir,
-                             full_page=False, fmt="png", quality=80, clip=None):
+                             full_page=False, fmt="png", quality=80):
     """Capture a screenshot; returns (absolute_path, bytes).
 
     Args:
-        full_page: Capture the whole page instead of the viewport.
+        full_page: Capture the whole page instead of the viewport. Chrome
+              paints the entire page regardless of a `clip`, so callers must
+              check the page height first (module.screenshot does).
         fmt: 'png' or 'jpeg' (CDP-native encoding; no post-processing).
         quality: JPEG quality 0-100 (ignored for png).
-        clip: optional {x, y, width, height, scale} to capture only part of the
-              page (the module uses it to cap very tall full-page captures).
     """
     ext = "jpg" if fmt == "jpeg" else "png"
     params = {
@@ -241,8 +241,6 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
         "captureBeyondViewport": bool(full_page),
         "fromSurface": True,
     }
-    if clip:
-        params["clip"] = clip
     if fmt == "jpeg":
         params["quality"] = max(0, min(100, int(quality)))
     res = await cdp_client.cmd("Page.captureScreenshot", params, sid, timeout=SCREENSHOT_TIMEOUT)
