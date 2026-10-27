@@ -34,6 +34,7 @@ Setup (for the user):
 import core
 import asyncio
 import base64
+import functools
 import json
 import os
 from collections import deque
@@ -1309,3 +1310,70 @@ class Browser(core.module.Module):
         sid = self._current_session() if use_current_tab else None
         res = await self._cdp.cmd(method, params or {}, sid, timeout=CDP_CALL_TIMEOUT)
         return self.result(res)
+
+
+# ---------------------------------------------------------------------------
+# Tool error boundary
+# ---------------------------------------------------------------------------
+# Browser failures used to escape as exceptions, so the model saw core's raw
+# "Error while executing tool: -32601 '…' wasn't found" or a bare timeout.
+# Every @core.module.tool method is wrapped once, below the class, instead of
+# hand-wrapping 20+ methods - a tool added later is covered automatically. The
+# `_is_guarded` marker keeps this idempotent if the file is re-executed.
+#
+# Only browser-facing failures are converted: CDP rejections, timeouts, dropped
+# connections, and the module's own deliberate RuntimeErrors ("Unknown ref
+# @e9 …", "No tab is attached …"). Programming errors (TypeError, KeyError, …)
+# still escape to core, where they belong.
+
+def _error_result(self, tool_name, exc):
+    """Map a browser failure to an actionable tool result."""
+    # the log keeps the compact error (full traceback in --debug); the model
+    # gets the short, actionable text
+    self.log("browser", f"{tool_name}: {core.detail_error(exc)}")
+    text = str(exc) or exc.__class__.__name__
+
+    if isinstance(exc, CDPError):
+        if "-32001" in text or "Session with given id not found" in text:
+            text = (f"{text} - the tab this call addressed is gone (it was closed). "
+                    "Call list_tabs, then switch_tab with its id (or new_tab) before retrying.")
+        elif "-32601" in text:
+            text = f"Chrome does not support that command: {text}"
+        elif "-32602" in text:
+            text = f"Chrome rejected the parameters: {text}"
+        else:
+            text = f"The browser rejected the command: {text}"
+    elif isinstance(exc, TimeoutError):
+        text = (f"The browser did not answer in time ({text}). The page may be busy or very "
+                "large: retry, or use a narrower action (viewport instead of full_page, "
+                "smaller full_page_max_height).")
+    elif isinstance(exc, ConnectionError):
+        text = ("The browser connection was lost. Call open to reconnect (or new_tab); "
+                "if it keeps dropping, the browser may have crashed.")
+    # RuntimeError / OSError already carry a readable message
+
+    return self.result(text, success=False)
+
+
+def _guarded(tool):
+    """Async wrapper that turns browser failures into tool errors."""
+    @functools.wraps(tool)
+    async def wrapper(self, *args, **kwargs):
+        try:
+            return await tool(self, *args, **kwargs)
+        except (CDPError, TimeoutError, ConnectionError, RuntimeError, OSError) as exc:
+            return _error_result(self, tool.__name__, exc)
+    wrapper._is_guarded = True
+    return wrapper
+
+
+def _guard_tools(cls):
+    """Wrap every @core.module.tool method of `cls` exactly once."""
+    for name, attr in list(vars(cls).items()):
+        if (callable(attr) and getattr(attr, "_is_tool", False)
+                and not getattr(attr, "_is_guarded", False)):
+            setattr(cls, name, _guarded(attr))
+
+
+# every AI tool on the class goes through the boundary above
+_guard_tools(Browser)

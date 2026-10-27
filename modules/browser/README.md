@@ -81,6 +81,13 @@ core code, plus refactoring notes. (Added 2026-10-07.)
   refused. Full-page captures are only attempted when the page is at most
   `full_page_max_height` (default 8000); taller pages are refused with their
   real height, because Chrome paints the whole page regardless of a clip.
+- Error boundary APPLIED 2026-10-27 (phase 3): `_guard_tools(Browser)` at the
+  bottom of `module.py` wraps every `@core.module.tool` exactly once (marker
+  `_is_guarded`) and turns browser-facing failures — `CDPError`, `TimeoutError`,
+  `ConnectionError`, and the module's deliberate `RuntimeError`s/`OSError`s —
+  into `self.result(..., success=False)` with actionable text. Programming
+  errors (TypeError, KeyError, …) still escape to core. A tool added later is
+  covered automatically as long as it keeps `@core.module.tool`.
   Note: single-module-file is the upstream core convention (http module is
   also ~1500 lines) — this split is a local maintainability choice; to
   upstream, the three files can be concatenated back into module.py with
