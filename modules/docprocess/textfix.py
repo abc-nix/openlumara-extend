@@ -132,11 +132,21 @@ def _merge_split_paragraphs(text):
     for blk in blocks:
         if out:
             prev = out[-1]
-            starts_cont = bool(re.match(r"^(\*{1,3}[a-záéíóúüñ]|[a-záéíóúüñ])", blk.strip()))
-            prev_open = bool(prev) and prev.rstrip()[-1:].isalpha()
-            prev_blocky = prev.lstrip().startswith(("#", "-", "* ", "|", ">")) and not prev.lstrip().startswith("- →")
-            if starts_cont and prev_open and not prev_blocky:
-                out[-1] = prev.rstrip() + " " + blk.lstrip()
+            ps = prev.rstrip()
+            ns = blk.lstrip()
+            starts_cont = bool(re.match(r"^(\*{1,3}[a-záéíóúüñ«“¿¡]|[a-záéíóúüñ«“¿¡])", ns))
+            # A paragraph never ends with a comma, semicolon or colon: that is
+            # proof of a page-break split whatever the next block starts with
+            # ("...Por cualquier caso," / "Sebastián sintió..."). A split after
+            # a plain letter is only merged when the next block obviously
+            # continues in lowercase.
+            prev_open = ps.endswith((",", ";", ":")) or (ps[-1:].isalpha() and starts_cont)
+            blocky = ("#", "|", ">")
+            prev_blocky = (ps.startswith(blocky) or ps.startswith(("- ", "* "))) \
+                and not ps.startswith("- → ")
+            next_blocky = ns.startswith(blocky) or ns.startswith(("- ", "* ")) or ns.startswith("```")
+            if prev_open and ps and not prev_blocky and not next_blocky:
+                out[-1] = ps + " " + ns
                 merged += 1
                 continue
         out.append(blk)
