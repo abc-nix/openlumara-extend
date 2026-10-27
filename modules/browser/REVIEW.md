@@ -65,6 +65,10 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B24 | Low | README/doc rot (5 routes not 4, dead `modals/`, dead harness paths, wrong config-setter claim) |
 | B25 | Low | `cdp.py`/`page.py` edits are not picked up by a module reload |
 | B26 | Low–Med | Tab index order is unstable: `list_page_targets` sorts "attached first", which stops meaning anything once several tabs are attached, so `switch_tab(0)` can hit a different tab than `list_tabs` showed |
+| B27 | **Medium** | `screenshot(full_page=True)` on a long page exceeds the 15 s core tool timeout; the module's 20 s `SCREENSHOT_TIMEOUT` can never fire, so the failure is a bare "Tool timed out after 15.0s" |
+| B28 | Low–Med | `get_images` returns every image (38 on one Wikipedia article, including 20 px icons and duplicate `src`) → context bloat |
+| B29 | Low–Med | Console/network entries carry no tab or URL, and the buffers survive navigation → logs from a previous page are attributed to the current one |
+| B30 | Low | `evaluate` rejects top-level `await` (Chrome: "await is only valid in async functions") although `awaitPromise` is on; the AI has to know to wrap in `(async () => …)()` |
 
 ---
 
@@ -237,6 +241,32 @@ Live consequence: after `switch_tab(0)` reported success, `status()` showed a di
 
 Fix options: drop the `attached` sort and use a stable order (`Target.getTargets` order, or sort by targetId), and let `status`/`list_tabs`/`switch_tab` share that one order. Document it in `switch_tab` ("index in list_tabs order"). Candidate for phase 4 (tab/refs work) rather than a separate phase.
 
+### B27 — Full-page capture vs. the core tool timeout (Medium, live 2026-10-27)
+
+On a long article (`en.wikipedia.org/wiki/Alan_Turing`) `screenshot(full_page=True)` never returns: the core kills the tool at `core.tool_timeout` (15 in `config.yml`) and the model only sees **"Tool timed out after 15.0s"**. Viewport captures on the same page take well under a second.
+
+The module's own budget is backwards: `cdp.SCREENSHOT_TIMEOUT = 20.0` and `CDP_CALL_TIMEOUT = 15.0` are both ≥ the core timeout, so the module's own `TimeoutError` handling can never run. That also means a cancelled capture skips the friendly error path.
+
+Fix: keep every internal timeout **below** the core budget (e.g. 10–12 s for `captureScreenshot`), catch `asyncio.TimeoutError`/`TimeoutError` and return `success=False` with "the page is too tall for the tool budget — retry without full_page"; optionally read `Page.getLayoutMetrics` and clip to a sane maximum height. Verified good behaviour in the same test: the injected `#ol-grid` canvas is **not** left behind after the timeout (`document.getElementById('ol-grid')` → null), so the `finally` cleanup survives cancellation.
+
+### B28 — `get_images` has no cap or filter (Low–Med, live 2026-10-27)
+
+One query returned 38 entries (≈2.5 KB of URLs) for a single article: decorative 20 px icons, the same `src` twice (`Symbol_category_class.svg`, `OOjs_UI_icon_edit-ltr-progressive.svg`), and long `?utm_*` query strings. The AI rarely needs the logos, and a data: URL would be far worse.
+
+Fix: skip images smaller than ~48 px (`naturalWidth`/`naturalHeight`), dedupe by `src`, cap the count (e.g. 50) and truncate long URLs like `MAX_URL_LEN` already does for network entries.
+
+### B29 — Logs are browser-wide and never reset (Low–Med, live 2026-10-27)
+
+After navigating from `example.com` to Wikipedia, `console(10)` still returned five `phase2 probe` entries logged on the *old* page — nothing marks which tab or URL produced an entry, so the model can report another page's errors as the current page's. Same for `network_requests`.
+
+Fix: store `url` (and `targetId`) on each entry, let the tools filter by the current target (or at least label the tab), and clear/annotate the buffers on navigation.
+
+### B30 — `evaluate` and top-level `await` (Low, live 2026-10-27)
+
+`Runtime.evaluate` has `awaitPromise: true`, but the expression body is a *script*, so `await new Promise(r => setTimeout(r, 2500)); …` fails with Chrome's SyntaxError ("await is only valid in async functions and the top level bodies of modules"). Wrapping in `(async () => { … })()` works and the promise is awaited correctly.
+
+Fix: either auto-wrap expressions that contain `await` in an async IIFE (and document it), or add the `wait` tool (§5.1) so the model never needs the trick. Today the only cost is a confusing SyntaxError on the first attempt.
+
 ---
 
 ## 3. Security summary
@@ -282,6 +312,8 @@ Fix options: drop the `attached` sort and use a stable order (`Target.getTargets
 10. **Response bodies** in the network log (`Network.getResponseBody`).
 11. **Output caps everywhere** — `evaluate`, `get_images` (data URLs), `console` text per entry (a page can log megabytes).
 12. **Cache the DOM root** — `page.resolve_target` re-runs `DOM.getDocument(depth=-1, pierce=True)` per selector (`page.py:160-168`); cache per document/loaderId.
+13. **Snapshot noise filter** (B27-era live sample) — drop unnamed `generic` nodes and `InlineTextBox` children that merely echo their `StaticText` parent. On the Wikipedia sample most lines were empty `generic:` or duplicated text; filtering them is a large context win with no loss of refs.
+14. **Label logs with their tab/URL** (B29) and **cap `get_images`** (B28, 38 entries on one article) — both are pure context hygiene.
 
 ---
 
@@ -436,6 +468,19 @@ Still outstanding:
 4. Settings save with `close_browser_on_shutdown=false` → is the browser still running *and* `owned_process` true? (B5)
 5. Panel with the sidebar expanded → where does the popover land? (§7 anchoring)
 6. Screenshot card whose file was pruned → does the "could not load the screenshot" row appear? (B23)
+
+### Real-site session (Wikipedia, 2026-10-27)
+
+Passed on a site with real cookies and real traffic:
+
+- `cookies()` **without a domain** returned six Wikipedia cookies with values, domains and expiry — the exact branch B13 changed, so the honest-failure path and the working path are both verified.
+- `network_requests(5)` showed method/url/status/duration on live traffic (including a `202` beacon POST and one request still pending with `status: null` — the documented in-flight case).
+- `type_text("#searchInput", …)` + `press("enter")` navigated to the article (CSS-selector path, clearing, and the Enter `text` payload all work).
+- `click("@e12")` scrolled to the section and set `#Early_life_and_education` — the box-model → mouse-event path lands correctly on a scrolled page.
+- `snapshot(max_chars=2500)` truncated, wrote the full tree to `data/browser/snapshots/`, and refs stayed usable after truncation.
+- Viewport `screenshot(grid=100)` → `grid.applied: true`, 528 KB PNG; no leftover `#ol-grid` afterwards.
+
+Failed / new findings: full-page capture (B27), `get_images` volume (B28), unattributed logs (B29), `evaluate` + top-level await (B30), snapshot noise (§5.13).
 
 ---
 
