@@ -1005,18 +1005,21 @@ class Browser(core.module.Module):
                 grid_note = f"grid not drawn: {core.detail_error(e)}"
                 self.log("browser", grid_note)
 
+        # region describes the IMAGE that was actually written: the parsed
+        # dimensions win over the pre-capture metrics, so clipping and Chrome
+        # rounding cannot make the hint drift from the pixels
         px_w, px_h = page.image_size(raw, fmt)
         if full_page:
             region = {
                 "x": 0, "y": 0,
-                "width": doc_w or px_w or 0,
-                "height": (min(doc_h, max_h) if doc_h else (px_h or 0)),
+                "width": px_w or doc_w or 0,
+                "height": px_h or (min(doc_h, max_h) if doc_h else 0),
             }
         else:
             region = {
                 "x": origin_x, "y": origin_y,
-                "width": int(metrics.get("innerWidth") or px_w or 0),
-                "height": int(metrics.get("innerHeight") or px_h or 0),
+                "width": px_w or int(metrics.get("innerWidth") or 0),
+                "height": px_h or int(metrics.get("innerHeight") or 0),
             }
         region = {key: int(value or 0) for key, value in region.items()}
         # the tool result stays plain text (path + geometry): the image can't
