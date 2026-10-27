@@ -13,7 +13,8 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 |---|---|---|---|
 | 0 — repo hygiene | done | `ae9271c` (import rewrite) · `e57919b` (README) | `__pycache__` untracked + ignored (it had shipped in the first import; the clean rewrite removed it). `modules/browser/tests/` added: 12 pure-stdlib tests for `page.py`, all green. |
 | 1 — settings & metadata | done | `3f55aed` · `183ecbd` · `9090537` (docs) | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
-| 2 … 8 | pending | — | see §9 |
+| 2 — tool correctness | done | `3a26241` | B12/B13/B16/B17/B20 + `util.py` (URL normalisation, deque tailing); 22 unit tests; every item re-checked in a live browser on 2026-10-27 — evidence in §10. |
+| 3 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
 
@@ -63,6 +64,7 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B23 | Low | `_route_ui_shot` failures are silent in the UI |
 | B24 | Low | README/doc rot (5 routes not 4, dead `modals/`, dead harness paths, wrong config-setter claim) |
 | B25 | Low | `cdp.py`/`page.py` edits are not picked up by a module reload |
+| B26 | Low–Med | Tab index order is unstable: `list_page_targets` sorts "attached first", which stops meaning anything once several tabs are attached, so `switch_tab(0)` can hit a different tab than `list_tabs` showed |
 
 ---
 
@@ -226,6 +228,14 @@ Fix: replace the sleep with "poll until the CDP port stops answering (timeout 3�
 ### B25 — Submodules not reloaded (Low)
 
 `core/modules.py:import_entry()` only does `importlib.reload(module.py)`; `from . import cdp, page` returns the **cached** submodules. So edits to `cdp.py`/`page.py` survive a settings-save reload silently as old code. Either `importlib.reload(page); importlib.reload(cdp)` in `on_ready` (note `CDPError` identity changes) or document "cdp.py/page.py changes need a server restart" in README.
+
+### B26 — Tab index order is unstable (Low–Med, found by live testing 2026-10-27)
+
+`page.list_page_targets` does `pages.sort(key=lambda t: 0 if t.get("attached") else 1)` — a stand-in for "active tab first". Once the module has attached to several tabs (and `_capture_state` attaches to *all* of them), every tab sorts as attached and the order falls back to whatever `Target.getTargets` returns, which shifts as tabs are created/closed.
+
+Live consequence: after `switch_tab(0)` reported success, `status()` showed a different tab as current than the index implied at call time, because the list had been re-sorted between the two calls. The int coercion (B20) is fixed; the *meaning* of an index is still a moving target.
+
+Fix options: drop the `attached` sort and use a stable order (`Target.getTargets` order, or sort by targetId), and let `status`/`list_tabs`/`switch_tab` share that one order. Document it in `switch_tab` ("index in list_tabs order"). Candidate for phase 4 (tab/refs work) rather than a separate phase.
 
 ---
 
@@ -402,15 +412,30 @@ Config facts that shape phase 7 (from `openlumara/config.yml`): `show_unsafe_set
 
 ---
 
-## 10. Runtime verification still outstanding
+## 10. Runtime verification
+
+Checked live in the module's own browser session on 2026-10-27 (after a restart):
+
+| Check | Result |
+|---|---|
+| `new_tab("example.com")` (B12) | **was** `about:blank` → **now** `https://example.com/` |
+| `new_tab("//example.com")` (B12) | `https://example.com/` |
+| `new_tab("")` (B12) | `about:blank` |
+| `console(count=0)` with 5 buffered entries (B16) | **was** the whole buffer → **now** "No console output recorded."; `count=3` still returns the last three |
+| `cookies()` on `about:blank` (B13) | **was** a silent `[]` → **now** an explicit "not an http(s) page" error; `cookies(domain=...)` still works |
+| `switch_tab(0)` / `close_tab(0)` with a bare integer (B20) | **was** `'int' object has no attribute 'isdigit'` → **now** both succeed |
+| `screenshot(format="jpeg", quality="80")` (B17) | succeeds; the reported `region` (1272×1305) matches the JPEG header exactly |
+| `status()` `active` flag (B4) | exactly one tab active, even with four tabs open |
+| module launched after a server restart, `owned_process: true`, fresh ws id | process lifecycle as documented |
+
+Still outstanding:
 
 1. Launch once **without** `--remote-allow-origins=*` — does the CDP WebSocket connect? (B9)
 2. Watch the logs for ~2 minutes with `heartbeat=30`: any `CDP reader stopped` / reconnect churn? (B9)
-3. Restart the browser with several tabs incl. a `chrome://` tab — does the active tab survive? (B6)
+3. Restart the browser with several tabs incl. a `chrome://` tab — does the active tab survive, and is it the same one? (B6, B26)
 4. Settings save with `close_browser_on_shutdown=false` → is the browser still running *and* `owned_process` true? (B5)
-5. `new_tab("example.com")` → lands on `https://example.com` after B12.
-6. Panel with the sidebar expanded → where does the popover land? (§7 anchoring)
-7. `screenshot(quality="80")` and `switch_tab(0)` → confirm the exact error text before/after Pack 3.
+5. Panel with the sidebar expanded → where does the popover land? (§7 anchoring)
+6. Screenshot card whose file was pruned → does the "could not load the screenshot" row appear? (B23)
 
 ---
 
