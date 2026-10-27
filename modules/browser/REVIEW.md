@@ -15,7 +15,7 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 1 — settings & metadata | done | `3f55aed` · `183ecbd` · `9090537` (docs) | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
 | 2 — tool correctness | done | `3a26241` | B12/B13/B16/B17/B20 + `util.py` (URL normalisation, deque tailing); 22 unit tests; every item re-checked in a live browser on 2026-10-27 — evidence in §10. |
 | 2.5 — screenshot grid rework | **done + verified live** | `bbcccc3` · `cf47268` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` is a refusal threshold (clip does not bound Chrome's work — B27/B31), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. All §10 checks pass. |
-| 3 — error boundary | done | `d3da68a` | `_guard_tools` wraps all 22 tools once: `CDPError` (-32001/-32601/-32602 hints), `TimeoutError`, `ConnectionError`, module `RuntimeError`/`OSError` → `success:false` with actionable text; programming errors still escape. Live check pending a restart — §10. |
+| 3 — error boundary | **done + verified live** | `d3da68a` · `7cf78e8` | `_guard_tools` wraps all 22 tools once: `CDPError` (-32001/-32601/-32602 hints), `TimeoutError`, `ConnectionError`, module `RuntimeError`/`OSError` → `success:false` with actionable text; programming errors still escape. §10 checks pass. |
 | 4 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
@@ -529,14 +529,17 @@ Checked after the restart on 2026-10-27:
 
 - `screenshot(full_page=True)` on the 40,239 px article → **refused** with "The page is 40239 px tall; full-page captures are limited to 8000 px…". Real work ≈0.1 s: a `browser_status` control call in the same harness cost ~4.7 s of round-trip, so the wall-clock time is tool overhead, not the module. No screenshot, no stall.
 
-Phase 3 error boundary (needs one restart to load):
+Phase 3 error boundary, verified live on 2026-10-27:
 
-- `click("@e999")` → expect `status: error` whose content is the module's own
-  "Unknown ref @e999. Take a fresh snapshot first…" (before: core wrapped it as
-  "Error while executing tool: …").
-- `evaluate("(async()=>{await new Promise(()=>{});})()")` → after ~10 s expect
-  "The browser did not answer in time…" instead of a bare core timeout.
-- A normal call right after either failure must still work (no state damage).
+- `click("@e999")` → `status: error`, content "Unknown ref @e999. Take a fresh
+  snapshot first (refs change as the page changes)." — core no longer prefixes
+  "Error while executing tool:" ✔
+- `evaluate("(async()=>{await new Promise(()=>{});})()")` → after 10 s:
+  "The browser did not answer in time (CDP command 'Runtime.evaluate' timed out
+  after 10.0s). The page may be busy or very large: retry, or use a narrower
+  action (viewport instead of full_page, smaller full_page_max_height)." ✔
+- Immediately after both failures `status`, `navigate` and `snapshot` all
+  succeed → the session and the CDP client are undamaged ✔
 - Short full-page (`example.com`, 1305 px) + grid → still succeeds with `grid.applied: true` and a byte-identical PNG to the earlier run (96,615 bytes).
 
 ### Real-site session (Wikipedia, 2026-10-27)
