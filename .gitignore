@@ -5,3 +5,9 @@ __pycache__/
 *.log
 .DS_Store
 .module_cache.json
+
+# docprocess series profiles: quirks of one publisher/series, NOT part of the
+# public module. Files already committed stay tracked; new ones are ignored.
+# When publishing the module, drop these files with:
+#   git rm -r --cached modules/docprocess/extras
+modules/docprocess/extras/

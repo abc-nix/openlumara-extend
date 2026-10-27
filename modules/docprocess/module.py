@@ -9,6 +9,13 @@ import time
 import core
 
 from . import pdfops, pipeline, stylefix, textfix
+
+# Series-specific profiles live in ./extras/, which is NOT part of the public
+# module: if the folder is missing the import fails and nothing happens.
+try:
+    from . import extras as _extras
+except Exception:                                   # pragma: no cover
+    _extras = None
 from .htmlmd import html_tables_to_md
 
 # webui extension routes (@_ui_route -> /api/ext/docprocess/...). Guarded so
@@ -57,6 +64,10 @@ class DocProcess(core.module.Module):
         "force_ocr": {
             "type": "bool", "default": False,
             "description": "Ignore embedded text layer; OCR every page.",
+        },
+        "extras": {
+            "type": "bool", "default": True,
+            "description": "Load document-series profiles from the optional ./extras/ package (quirks of a specific publisher that cannot be generalised, e.g. coloured citation blocks or cover pages). Absent or disabled = the module behaves as the generic converter.",
         },
         "fix_text": {
             "type": "bool", "default": True,
@@ -417,6 +428,7 @@ class DocProcess(core.module.Module):
                 content = textfix.repair(content,
                                          pdf_bytes=data if job["is_pdf"] else None,
                                          log=log)
+            content = self._apply_extras(content, data, job["is_pdf"], log)
 
             os.makedirs(os.path.dirname(job["output"]) or ".", exist_ok=True)
             with open(job["output"], "w", encoding="utf-8") as f:
@@ -502,6 +514,8 @@ class DocProcess(core.module.Module):
                                         str(self.config.get("html_tables") or "convert"))
             if content and self.config.get("fix_text", True):
                 content = textfix.repair(content, pdf_bytes=data, log=log)
+            if content:
+                content = self._apply_extras(content, data, True, log)
             if not content:
                 self.channel.log(self.name, f"'{filename}': extraction produced no content, using built-in extractor")
                 return None
@@ -517,6 +531,29 @@ class DocProcess(core.module.Module):
     # -------------------------
     #   INTERNALS
     # -------------------------
+
+    def _extras_profiles(self, log):
+        """Profiles from ./extras/, loaded once per process.
+
+        Empty list when the folder is absent (public module) or disabled."""
+        if _extras is None or not self.config.get("extras", True):
+            return []
+        cached = getattr(self, "_profile_cache", None)
+        if cached is None:
+            cached = _extras.load(log=log)
+            self._profile_cache = cached
+        return cached
+
+    def _apply_extras(self, content, data, is_pdf, log):
+        """Let series profiles reshape the markdown. Never raises."""
+        profiles = self._extras_profiles(log)
+        if not profiles or not is_pdf:
+            return content
+        info = _extras.document_info(data)
+        if info is None:
+            return content
+        ctx = dict(info, pdf_bytes=data, config=self.config)
+        return _extras.apply("post", content, ctx, log=log, profiles=profiles)
 
     def _resolve_vlm_config(self):
         """vlm settings -> pipeline dict, or None when the tier is off.
