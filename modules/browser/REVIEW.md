@@ -14,7 +14,7 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 0 — repo hygiene | done | `ae9271c` (import rewrite) · `e57919b` (README) | `__pycache__` untracked + ignored (it had shipped in the first import; the clean rewrite removed it). `modules/browser/tests/` added: 12 pure-stdlib tests for `page.py`, all green. |
 | 1 — settings & metadata | done | `3f55aed` · `183ecbd` · `9090537` (docs) | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
 | 2 — tool correctness | done | `3a26241` | B12/B13/B16/B17/B20 + `util.py` (URL normalisation, deque tailing); 22 unit tests; every item re-checked in a live browser on 2026-10-27 — evidence in §10. |
-| 2.5 — screenshot grid rework | done | `bbcccc3` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` clip + `page_cut` (B27), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. Live check pending a restart — §10. |
+| 2.5 — screenshot grid rework | **done + verified live** | `bbcccc3` · `cf47268` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` is a refusal threshold (clip does not bound Chrome's work — B27/B31), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. All §10 checks pass. |
 | 3 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
@@ -501,9 +501,10 @@ Grid rework (phase 2.5), checked live on 2026-10-27:
 - `format="jpeg", grid=100` → refused with "a grid needs a lossless capture" ✔
 - `document.querySelectorAll('canvas')` stayed **0** before and after a gridded capture, and `#ol-grid` is gone from the codebase → no DOM mutation ✔
 
-Still to check after the next restart (the running process still has the clip version):
+Checked after the restart on 2026-10-27:
 
-- `screenshot(full_page=True)` on the 40k-px article → must be **refused instantly** with the real height, not a 10 s timeout.
+- `screenshot(full_page=True)` on the 40,239 px article → **refused** with "The page is 40239 px tall; full-page captures are limited to 8000 px…". Real work ≈0.1 s: a `browser_status` control call in the same harness cost ~4.7 s of round-trip, so the wall-clock time is tool overhead, not the module. No screenshot, no stall.
+- Short full-page (`example.com`, 1305 px) + grid → still succeeds with `grid.applied: true` and a byte-identical PNG to the earlier run (96,615 bytes).
 
 ### Real-site session (Wikipedia, 2026-10-27)
 
