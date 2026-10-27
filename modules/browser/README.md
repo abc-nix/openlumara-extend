@@ -72,6 +72,14 @@ core code, plus refactoring notes. (Added 2026-10-07.)
   `openlumara-extend` root). They deliberately avoid importing `module.py`:
   the page helpers are loaded with `core`/`aiohttp` stubbed, `util.py` is
   loaded straight from the file. Add a case here for every bug fixed.
+- Grid rework APPLIED 2026-10-27 (phase 2.5): `page.inject_grid`/`remove_grid`
+  (an in-page `<canvas>`, `#ol-grid`) were replaced by `page.draw_grid`, which
+  decodes the captured PNG with `zlib`, draws 1 px lines + 3x5 bitmap labels,
+  and re-encodes it (all rows filter 0). Reasons: the canvas had a hard
+  16000 px dimension guard (so it refused tall full-page captures) and it
+  mutated the page the AI may inspect next. Grid ⇒ PNG; jpeg + grid is
+  refused. Full-page captures are clipped by `full_page_max_height`
+  (default 8000) and report `page_cut`.
   Note: single-module-file is the upstream core convention (http module is
   also ~1500 lines) — this split is a local maintainability choice; to
   upstream, the three files can be concatenated back into module.py with

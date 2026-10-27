@@ -47,6 +47,23 @@ no sync step). Consequences:
 | `browser` | Chrome/Chromium over CDP. Open backlog in `modules/browser/REVIEW.md` (items B1–B25, phases in §9). |
 | `theme_gallery` | WebUI theme browser; see `BUGS.md` / `ELEMENTS.md` next to it. |
 
+## Screenshot grid (browser module)
+
+The grid is drawn **onto the captured PNG** (`page.draw_grid`), never into the
+page. The old in-page canvas overlay needed a full-size canvas, which the
+browser refuses past 16000 px per dimension — exactly the tall full-page
+captures where a grid is most useful — and it briefly mutated the page the AI
+may inspect next.
+
+- Lines sit on document-coordinate multiples of the spacing; labels read as
+  document coordinates and the origin is the `region` the tool reports.
+- `grid` requires `format="png"`: jpeg + grid is refused rather than silently
+  changing the format.
+- Measured: **0.76 s** for a 1272x1305 capture, ~0.5 s per extra megapixel.
+- `full_page_max_height` (default 8000) clips tall pages before capture and the
+  result carries `page_cut` with the real page height (a whole Wikipedia
+  article is ~39k px, which used to exceed the 15 s tool budget).
+
 ## Tests
 
 The stateless helpers in `page.py` have a pure-stdlib suite: it stubs `core`

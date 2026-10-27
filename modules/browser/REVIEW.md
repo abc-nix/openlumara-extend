@@ -14,6 +14,7 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 0 — repo hygiene | done | `ae9271c` (import rewrite) · `e57919b` (README) | `__pycache__` untracked + ignored (it had shipped in the first import; the clean rewrite removed it). `modules/browser/tests/` added: 12 pure-stdlib tests for `page.py`, all green. |
 | 1 — settings & metadata | done | `3f55aed` · `183ecbd` · `9090537` (docs) | B1 (types + `depends`/`min`/`max`), `category = "web"`, B4 (`active`, `ws_url`), B22, B23, §7 wording, plus text warnings on `user_data_dir` and `auto_accept_dialogs`. |
 | 2 — tool correctness | done | `3a26241` | B12/B13/B16/B17/B20 + `util.py` (URL normalisation, deque tailing); 22 unit tests; every item re-checked in a live browser on 2026-10-27 — evidence in §10. |
+| 2.5 — screenshot grid rework | done | `bbcccc3` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` clip + `page_cut` (B27), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. Live check pending a restart — §10. |
 | 3 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
@@ -196,6 +197,8 @@ Fix: replace the sleep with "poll until the CDP port stops answering (timeout 3�
 
 `module.py:925-931`: `finally: await page.remove_grid(self._cdp, self._current_session(), grid_id)` re-evaluates `_current_session()` even when `grid_id is None`; if the tab vanished mid-capture the resulting "No tab is attached" replaces the real error. Hoist `sid` once. Also `int(quality)` in `meta` and in `page.capture_screenshot` is unguarded → a string arg raises a raw `ValueError`.
 
+Both fixed in phase 2 (`3a26241`); the `finally`/`remove_grid` half became **obsolete** in phase 2.5, which removed the in-page overlay entirely.
+
 ### B18 — Cross-tab leakage (Low)
 
 - `_refs` is global (`module.py:180`, `:723`): snapshot on tab A → `switch_tab` → `click('@e3')` resolves a backendNodeId from another document. Store refs per `targetId`, or clear on tab switch, and say so in the `click` docstring.
@@ -248,6 +251,8 @@ On a long article (`en.wikipedia.org/wiki/Alan_Turing`) `screenshot(full_page=Tr
 The module's own budget is backwards: `cdp.SCREENSHOT_TIMEOUT = 20.0` and `CDP_CALL_TIMEOUT = 15.0` are both ≥ the core timeout, so the module's own `TimeoutError` handling can never run. That also means a cancelled capture skips the friendly error path.
 
 Fix: keep every internal timeout **below** the core budget (e.g. 10–12 s for `captureScreenshot`), catch `asyncio.TimeoutError`/`TimeoutError` and return `success=False` with "the page is too tall for the tool budget — retry without full_page"; optionally read `Page.getLayoutMetrics` and clip to a sane maximum height. Verified good behaviour in the same test: the injected `#ol-grid` canvas is **not** left behind after the timeout (`document.getElementById('ol-grid')` → null), so the `finally` cleanup survives cancellation.
+
+**Resolved in phase 2.5 (`bbcccc3`)**: new `full_page_max_height` (default 8000) clips the capture via `Page.captureScreenshot.clip` and reports `page_cut{page_height, captured_height}`; `CDP_CALL_TIMEOUT`/`SCREENSHOT_TIMEOUT` are now 10 s (below the 15 s core budget) so the module's own `TimeoutError` path actually runs; a capture timeout now answers with "lower full_page_max_height … or capture the viewport instead". The grid no longer touches the page at all (see the design note in `README.md`).
 
 ### B28 — `get_images` has no cap or filter (Low–Med, live 2026-10-27)
 
@@ -431,7 +436,8 @@ Order is dependency-driven, not priority-driven: phases 7 (security) and 5/6 (li
 | **0 — repo hygiene** | repo `.gitignore`/README, untrack `__pycache__` | `git show HEAD:modules/browser` has no `__pycache__`; repo clean | **done** |
 | **1 — settings & metadata** | B1 (+`depends`/`min`/`max`), `category="web"`, B4, B22, B23, §7 wording | restart → the three settings appear and persist; `status` flags exactly one tab active | **done** |
 | **2 — cheap tool correctness** | B12 `_normalize_url`, B13 cookies fallback, B16 count clamp, B17 `sid` hoist + quality guard, B20 `str(target)` | `new_tab("example.com")`, `console(0)`, `cookies()` on `about:blank`, `switch_tab(0)` | one call per fix |
-| **3 — error boundary** | R2: map `CDPError`/`TimeoutError`/`ConnectionError` → `self.result(..., success=False)` with hints; **B27** (internal timeouts below the core budget, friendly full-page-capture failure) | close a tab then `click` → readable message, no raw `-32601`; `full_page` on a long article → clear error, not "Tool timed out" | must precede phase 7 |
+| **2.5 — screenshot grid rework** | grid drawn on the PNG (`page.draw_grid`), `full_page_max_height` + `page_cut`, timeouts below the core budget (B27), grid ⇒ png | `full_page` on a 39k-px article returns with `page_cut`; grid labels are document coordinates; no DOM mutation | **done** (`bbcccc3`) |
+| **3 — error boundary** | R2: map `CDPError`/`TimeoutError`/`ConnectionError` → `self.result(..., success=False)` with hints | close a tab then `click` → readable message, no raw `-32601` | must precede phase 7 |
 | **4 — typing & refs** | B8 `type_text`, B18 per-tab refs + dialog session scoping, **B26** (stable tab order), **B29** (tag logs by tab/URL), **B30** (`evaluate` await handling/docstring) | `contenteditable` fill; two tabs with different `@eN`; click after `switch_tab`; `switch_tab(0)` resolves to the tab `list_tabs` showed | |
 | **5 — process lifecycle** | R1 private start/stop, B5 ownership across reload, B7 terminate on failed launch, B21 future leak, B15 port-down wait + reap; **process harness** in `tests/` | settings save with `close_browser_on_shutdown=false` → browser survives *and* `owned_process` stays true; bad binary → no stray Chrome; 10 restarts stable | tests start here (needs a browser) |
 | **6 — restart state** | B6 `active_index`, B14 radio groups, B19 detach after capture; **restart harness** | 5 tabs incl. a `chrome://` one + a radio-heavy form → restart twice → active tab and radios correct | must pass before phase 8 moves the code |
@@ -468,6 +474,8 @@ Still outstanding:
 4. Settings save with `close_browser_on_shutdown=false` → is the browser still running *and* `owned_process` true? (B5)
 5. Panel with the sidebar expanded → where does the popover land? (§7 anchoring)
 6. Screenshot card whose file was pruned → does the "could not load the screenshot" row appear? (B23)
+7. Grid rework (phase 2.5): `screenshot(grid=100)` on a real page → grid drawn, labels in document coordinates, and `#ol-grid` can never appear (the overlay code is gone).
+8. `screenshot(full_page=True)` on the 39k-px article → returns well inside the 15 s budget with `page_cut` (8000) and `grid.applied: true`; `format="jpeg", grid=100` → refused with the "grid needs png" hint.
 
 ### Real-site session (Wikipedia, 2026-10-27)
 
