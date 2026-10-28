@@ -134,7 +134,7 @@ def _merge_split_paragraphs(text):
             prev = out[-1]
             ps = prev.rstrip()
             ns = blk.lstrip()
-            starts_cont = bool(re.match(r"^(\*{1,3}[a-záéíóúüñ«“¿¡]|[a-záéíóúüñ«“¿¡])", ns))
+            starts_cont = bool(re.match(r"^(\*{1,3}[a-záéíóúüñ«“\"¿¡]|[a-záéíóúüñ«“\"¿¡])", ns))
             # A trailing "," or ";" is a page-break split unless the next block
             # is itself a list item: element lists DO end with a comma or a
             # semicolon. A trailing ":" only merges into a lowercase
@@ -143,6 +143,9 @@ def _merge_split_paragraphs(text):
             # real enumerators only: "(a)", "b)", "1." / "2)" and bullets.
             # NOT a short word plus a period - that is ordinary prose
             # ("mano. Abrir los ojos...") and must not block a merge.
+            # A straight quote is a continuation too: this pass runs BEFORE
+            # _typographic_quotes, so a split in front of a quoted sentence
+            # still carries " and would otherwise stay unmerged forever.
             next_enum = bool(re.match(r"^(?:\(?[a-zA-Z]\)\s|\d+[.)]\s|[-•·–—]\s)", ns))
             if ps.endswith(":"):
                 prev_open = starts_cont
