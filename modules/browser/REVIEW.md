@@ -21,7 +21,8 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 2.8 — one deadline for every tool call | done, **needs restart** | `615678a` | B37 finished rather than repeated: `_guarded` opens one `Budget` per call (`util.CALL_BUDGET`, a ContextVar) and `cdp.cmd` resolves `timeout=None` from it, so the private 10 s signature default is gone for all 22 tools; navigate's 12 s load cap, the launch wait (20 × 0.5 s) and page.py's session helpers now share the same deadline; `util.tool_budget` shrinks the reserve at small totals (the old `max(1.0, total-0.5)` equalled the call at ≤1.5 s). 61 tests. |
 | 2.9 — metrics from CDP + area cap (B38) | done, **needs restart** | `d620741` | `viewport_metrics` = `Page.getLayoutMetrics` (protocol units: `css*` are CSS px, deprecated `contentSize`/`layoutViewport` are device px, so `contentSize` *is* the capture raster); `full_page_max_pixels` (Mpx, default 25, **no** upper clamp) replaces the 8000 px height cap whose own max was 12000; `draw_grid(scale=)` keeps labels in document coordinates on HiDPI. 72 tests. |
 | 2.10 — timeout text (B40) | done, **needs restart** | `ea7d08a` | Text names the total that bound the call, offers capture advice only from `screenshot`, rounds the number; `navigate` omits `note` when the load event arrived and says when the budget — not `wait_seconds` — cut the wait; the webui status route reports `_headless_actual()`, which falls back to the launch-time mode instead of the current setting. 75 tests. |
-| 4 … 8 | pending | — | see §9 |
+| 2.11 — number text (B40, part 2) | done, **needs restart** | `6eb5ab5` | Live check caught the first text naming `budget.total` (14.5 s) while the setting says 15.0 s — the B40 mismatch again at a smaller scale. `timeout_text` takes `core.tool_timeout`; the screenshot messages quote the setting too. |
+| 4 … 8 | pending | — | see §9 (§2 B43 open: `full_page` hang) |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
 
@@ -84,10 +85,11 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B31 | Low | Capped full-page captures are refused, not cut: Chrome paints the whole page for `captureBeyondViewport` whatever `clip` says (measured), so the cheap way to a "top N px" capture is still unknown |
 | B32 | **Medium** | Stale tab session: a closed tab stays `_current_target`, `_ensure_connection` still reports connected, `_attach_target` reuses the dead session id → `-32001 Session with given id not found`, and every tab shows `current: false` — **fixed 2.7** |
 | B33 | Low–Med | Nothing reported the *running* browser's headless mode: the panel value comes from the **setting**, which only predicts the next launch and says nothing about an external browser or a session that ended — the trap behind a wrong "it was headless" claim (**fixed 2.7**) |
-| B37 | **Medium** | Timeouts hardcoded (10 s) against a limit that lives in config: `core.tool_timeout` is 15 here but **30 by default** (`core/config.py:41`), so B27 silently returns if the config drops below 10, and legitimate work is cut at 10 s on a default install. No per-tool deadline: a tool issuing two commands can spend 20 s against a 15 s budget |
-| B38 | Medium | `viewport_metrics` swallows every exception and returns `None` → the `full_page_max_height` guard **fails open** on a 40k-px page; metrics are CSS px compared against a device-px image (`devicePixelRatio` read, never used); `doc_w` is read but never capped |
-| B39 | Medium | `draw_grid` cost is unbounded and un-timed (pure CPU after the CDP reply): measured ~0.85 s/Mpx on real captures → ~13 s at the permitted 12000 px, i.e. a guaranteed tool timeout *after* the work succeeded |
-| B40 | Low | The shared timeout message claims the number was "the time left in this tool call" — false when a command's own ceiling bound it (live: `Page.navigate` at 10.0 s with 14.5 s left); it also pushes capture-specific advice into navigate/evaluate errors and prints an unrounded float |
+| B37 | **Medium** | Timeouts hardcoded (10 s) against a limit that lives in config: `core.tool_timeout` is 15 here but **30 by default** (`core/config.py:41`), so B27 silently returns if the config drops below 10, and legitimate work is cut at 10 s on a default install. No per-tool deadline: a tool issuing two commands can spend 20 s against a 15 s budget — **fixed 2.8** (`615678a`: one deadline per call in `_guarded`, `cdp.cmd` default; verified live: a `click` under a blocked main thread now answers at 14.5 s instead of 10.0 s) |
+| B38 | Medium | `viewport_metrics` swallows every exception and returns `None` → the `full_page_max_height` guard **fails open** on a 40k-px page; metrics are CSS px compared against a device-px image (`devicePixelRatio` read, never used); `doc_w` is read but never capped — **fixed 2.9** (`d620741`: `Page.getLayoutMetrics`, area cap in Mpx) |
+| B39 | Medium | `draw_grid` cost is unbounded and un-timed (pure CPU after the CDP reply): measured ~0.85 s/Mpx on real captures → ~13 s at the permitted 12000 px, i.e. a guaranteed tool timeout *after* the work succeeded — **fixed 2.6** (`6944586`: `grid_fits` gates it on the measured cost) |
+| B40 | Low | The shared timeout message claims the number was "the time left in this tool call" — false when a command's own ceiling bound it (live: `Page.navigate` at 10.0 s with 14.5 s left); it also pushes capture-specific advice into navigate/evaluate errors and prints an unrounded float — **fixed 2.10** (`ea7d08a`, `6eb5ab5`: names `core.tool_timeout`, capture advice only from `screenshot`) |
+| B43 | **Medium** | `full_page` capture can hang until the call times out on a tab that navigated to a URL it had already rendered (live 2026-10-29: example.com in the startup tab hung on 3 attempts, ~14.5 s each; the *same* URL worked in a fresh tab and in the same tab after F5). Mechanism unidentified — see §10 |
 
 ---
 
@@ -671,6 +673,25 @@ Static and harness evidence only: these commits are **not yet loaded** by the ru
 | `Page.getLayoutMetrics` units | taken from the protocol reference (this install has `allow_raw_cdp` off, so the command was not sent): *"Deprecated size of scrollable area. Is in DP. Use cssContentSize instead."* |
 
 **Gates still open** (need a restart first): a `click`/`type_text` on a page whose main thread is blocked must answer at ~14.5 s with the module's text (it used to die at 10 s); `full_page` on the 8079 px page must now be attempted instead of refused, and on the 40415 px article must quote Mpx; after raising `core.tool_timeout` to 30, the same tools must actually get 30 s — the check that "one number" is now real.
+
+### Same round, live (2026-10-29 after restart, `tool_timeout` = 15.0)
+
+| Check | Result |
+|---|---|
+| `navigate("https://example.com")` | `{"url": …, "loaded": true}` — **no `note` key** (B40 shape fix) ✔ |
+| `click` under a blocked main thread (`evaluate` arms a 20 s `while` loop, then `click("#firstHeading")`) | **`CDP command 'DOM.getDocument' timed out after 14.5s`** — the private 10 s ceiling is gone, and the text names the limit that bound it. (It quoted the *budget* 14.5 as "in total"; fixed in `6eb5ab5`, which now names `core.tool_timeout`. **Not yet loaded** — needs another restart.) ✔ / partial |
+| `full_page` on the 40415 px article | refused in ~0.1 s: *"The page is 1257x40415 px (50.8 Mpx); full-page captures are limited to 25 Mpx…"* — `contentSize` (device px) read through CDP ✔ |
+| `full_page` on about:blank / example.org | captured (7.6 KB / 75.7 KB), `region` = 1272×1305 ✔ |
+| scrolled viewport capture, `grid=100` | `region.y = 2000`, `grid.applied: true`, hint unchanged at dpr 1 — the new origin/`scale` maths does not regress the normal case ✔ |
+| `status()` | `headless: false`, `tool_timeout: 15.0`, one tab, `owned_process: true` ✔ |
+
+**New defect B43, found in the same run — `full_page` can hang.** On the tab that existed at browser start (`chrome://newtab`), `navigate("https://example.com")` followed by `full_page` timed out at 14.5 s **three times** (png, png, jpeg), while in the *same* tab immediately afterwards `about:blank` and `example.org` captured full-page in well under a second, and `full_page` on the 40415 px article was refused normally (i.e. the command itself is reachable). Discriminations done:
+
+- fresh tab created **at** `https://example.com` (`new_tab`) → full-page capture **succeeds** (75,714 B);
+- the original tab, navigate → example.com → `F5` → **succeeds**;
+- so it is neither the URL alone, nor the tab alone, nor the page size (example.com's document height equals the viewport, 1305 px).
+
+That excludes the "cost grows with pixels" explanation the height cap was built on, but **not enough data to name the mechanism**. The first attempt hung before any timeout existed, so "a capture left in flight by an earlier failure" cannot explain it — a compositor/paint state tied to this document instance can. Do not ship a mitigation (reload-before-capture is the only one the evidence even hints at) until it is reproduced from a cold start with the tab freshly loaded.
 
 ### Real-site session (Wikipedia, 2026-10-27)
 
