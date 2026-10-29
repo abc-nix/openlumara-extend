@@ -756,6 +756,16 @@ Failed / new findings: full-page capture (B27), `get_images` volume (B28), unatt
 
 ---
 
+### WebUI rail dot (12:44-12:53)
+
+Three bugs in a row, each visible only in the running UI:
+
+1. **Stale until clicked** - `startPolling()` ran from `openPanel()`, `refresh()` stopped the interval when the popover closed, and nothing fetched at startup, so the dot showed whatever it saw last.
+2. **Polling on the raw object** - `Alpine.store('browserPanel', BROWSER_PANEL)` subscribes to a Proxy; the interval's arrow function captured `this` = the raw object, so every `this.status = ...` bypassed the Proxy. Measured: `polling:true`, `inflight:false`, `status.connected:true` in the console, dot still "checking..". One click (through the Proxy) made it correct until the next change.
+3. Fixed by resolving the Proxy per write (`browserPanelStore()`) and polling always (3 s, paused when the tab is hidden, no overlapping requests).
+
+Live, in this order: green after `open` (no click), grey "closed" after `close`, orange "running, not connected" after a server restart with `close_browser_on_shutdown=false`, then green again after one attach - alongside `owned_process: true` and the same Chrome pid (13519) before and after the restart.
+
 ## 11. Notes for future sessions
 
 - The module folder has no `tests/`; the earlier harnesses are gone. Don't cite them as existing coverage (B24).
