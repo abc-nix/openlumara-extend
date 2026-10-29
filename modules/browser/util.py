@@ -8,6 +8,7 @@ Kept out of page.py (DOM/screenshot work) so they need no core/aiohttp stubs and
 can be tested directly - see tests/test_util.py.
 """
 
+import contextvars
 import time
 import urllib.parse
 
@@ -87,6 +88,41 @@ class Budget:
     def spent(self):
         """Seconds used so far (for logs/messages)."""
         return max(0.0, self.total - self.left())
+
+
+# Budget of the tool call that is running right now (set by module._guarded).
+# A ContextVar, not an attribute on the module: the module object is shared by
+# every caller, and two tool calls running at the same time must not see each
+# other's deadline.
+CALL_BUDGET = contextvars.ContextVar("browser_call_budget", default=None)
+
+
+def tool_budget(total, reserve=0.5):
+    """Deadline for one tool call, from the framework's `total` seconds.
+
+    A slice of `total` is held back so the module answers *before* core's own
+    timer fires: core starts counting before the tool body runs and the answer
+    still has to travel back. The slice shrinks with very small totals
+    (`min(reserve, total * 0.2)`) so the budget is always shorter than the
+    call, even if someone sets tool_timeout to one second.
+    """
+    total = max(1.0, float(total))
+    return Budget(total - min(float(reserve), total * 0.2))
+
+
+def resolve_timeout(timeout, budget=None, fallback=10.0):
+    """The deadline for one CDP command.
+
+    An explicit `timeout` always wins - a caller that passes one means it.
+    Without one the command gets what is left of the running tool call, so
+    the framework's number stays the only limit a caller can hit; `fallback`
+    is for calls made outside a tool call (webui routes, tests).
+    """
+    if timeout is None:
+        timeout = budget.left() if budget is not None else fallback
+    # never hand a command a timeout of zero: wait_for would raise at once
+    # with a message that reads like a bug rather than an exhausted budget
+    return max(0.1, float(timeout))
 
 
 def grid_fits(width, height, seconds_left):

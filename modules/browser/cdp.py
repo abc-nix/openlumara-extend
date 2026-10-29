@@ -14,10 +14,13 @@ import asyncio
 import json
 import os
 import shutil
+import time
 
 import aiohttp
 
 import core
+
+from .util import CALL_BUDGET, resolve_timeout
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -25,17 +28,14 @@ import core
 
 DEFAULT_PORT = 9222
 
-# These are CEILINGS for the cheap commands, not the caller's timeout. The real
-# bound is core.tool_timeout (config.yml -> Settings > Core > Tool Timeout):
-# the framework cancels a tool call that runs past it and the model then sees a
-# bare "Tool timed out after Ns" with no hint (B27). module.Budget takes that
-# number once per tool call and hands every command what is left of it, so the
-# module answers first and names the setting the caller can raise.
-CDP_CALL_TIMEOUT = 10.0        # ceiling for cheap commands (status, tabs, logs)
-SCREENSHOT_TIMEOUT = 10.0      # fallback only: page.capture_screenshot's default
-                               # when a caller passes no budget. The screenshot
-                               # tool always passes one, so a capture gets the
-                               # whole remaining budget, not this number.
+# Fallback deadline for calls made outside a tool call (webui routes, tests).
+# Inside a tool call the deadline is whatever is left of core.tool_timeout
+# (config.yml -> Settings > Core > Tool Timeout): the framework cancels a call
+# that runs past it and the model then sees a bare "Tool timed out after Ns"
+# with no hint (B27). module._guarded takes that number once per tool call
+# (util.CALL_BUDGET) and every command gets what is left, so the framework's
+# number is the only timeout a caller can hit - and the one they can raise.
+CDP_CALL_TIMEOUT = 10.0
 MAX_MSG_SIZE = 64 * 1024 * 1024  # screenshots/AX trees can be big
 
 
@@ -105,10 +105,16 @@ class CDPClient:
                     fut.set_exception(ConnectionError("CDP connection closed"))
             self._pending.clear()
 
-    async def cmd(self, method, params=None, session_id=None, timeout=CDP_CALL_TIMEOUT):
-        """Send a CDP command and await its result. Raises on error/timeout."""
+    async def cmd(self, method, params=None, session_id=None, timeout=None):
+        """Send a CDP command and await its result. Raises on error/timeout.
+
+        `timeout=None` means what is left of the running tool call's budget
+        (module._guarded sets it); CDP_CALL_TIMEOUT is only the fallback for
+        calls made outside a tool call.
+        """
         if self.ws is None or self.ws.closed:
             raise ConnectionError("Not connected to the browser")
+        timeout = resolve_timeout(timeout, CALL_BUDGET.get(), CDP_CALL_TIMEOUT)
         self._id += 1
         mid = self._id
         msg = {"id": mid, "method": method, "params": params or {}}
@@ -122,7 +128,8 @@ class CDPClient:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
             self._pending.pop(mid, None)
-            raise TimeoutError(f"CDP command '{method}' timed out after {timeout}s")
+            # one decimal: 14.499991990000126s reads like a floating-point bug
+            raise TimeoutError(f"CDP command '{method}' timed out after {timeout:.1f}s")
 
     async def close(self):
         if self.ws and not self.ws.closed:
@@ -180,8 +187,12 @@ def find_binary(config):
     )
 
 
-async def probe(http, port, tries=1, delay=0.5):
-    """Return /json/version dict if a CDP endpoint is up, else None."""
+async def probe(http, port, tries=1, delay=0.5, deadline=None):
+    """Return /json/version dict if a CDP endpoint is up, else None.
+
+    `deadline` (time.monotonic()) caps the whole wait, so a launch that never
+    comes up answers inside the tool call instead of at core's timer.
+    """
     url = f"http://127.0.0.1:{port}/json/version"
     for _ in range(tries):
         try:
@@ -190,11 +201,13 @@ async def probe(http, port, tries=1, delay=0.5):
                     return await resp.json()
         except Exception:
             pass
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         await asyncio.sleep(delay)
     return None
 
 
-async def launch_browser(config, log, http, headless=None):
+async def launch_browser(config, log, http, headless=None, deadline=None):
     """Launch the browser process and wait for its CDP endpoint.
 
     headless=None -> follow the config setting; an explicit bool overrides
@@ -222,8 +235,15 @@ async def launch_browser(config, log, http, headless=None):
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    info = await probe(http, port, tries=20, delay=0.5)
+    info = await probe(http, port, tries=20, delay=0.5, deadline=deadline)
     if info is None:
+        if deadline is not None and time.monotonic() >= deadline:
+            # the tool call's own budget cut the wait short: say so, and let
+            # the error boundary name the setting to raise
+            raise TimeoutError(
+                "Chrome did not expose a CDP endpoint before the time for "
+                "this tool call ran out"
+            )
         raise RuntimeError(
             "Browser launched but the CDP endpoint never came up. "
             f"Check for errors (port {port}, profile {profile})."

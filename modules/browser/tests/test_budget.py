@@ -69,6 +69,65 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(util.Budget("4").total, 4.0)
 
 
+class ToolBudgetTests(unittest.TestCase):
+    def test_budget_is_always_shorter_than_the_call(self):
+        # the reserve exists so the module answers before core's timer fires;
+        # it must hold at the low end too, where a fixed 0.5 s could equal or
+        # swallow the whole call
+        for total in (1.0, 2.0, 5.0, 15.0, 60.0):
+            self.assertLess(util.tool_budget(total).total, total)
+
+    def test_default_install_reserves_half_a_second(self):
+        self.assertAlmostEqual(util.tool_budget(15).total, 14.5)
+
+    def test_reserve_shrinks_with_small_totals(self):
+        self.assertAlmostEqual(util.tool_budget(1).total, 0.8)   # min(0.5, 1*0.2)
+        self.assertAlmostEqual(util.tool_budget(2).total, 1.6)   # min(0.5, 2*0.2)
+
+
+class ResolveTimeoutTests(unittest.TestCase):
+    def test_explicit_timeout_wins(self):
+        self.assertEqual(util.resolve_timeout(3.0, util.Budget(60)), 3.0)
+
+    def test_none_takes_what_the_tool_call_has_left(self):
+        self.assertAlmostEqual(util.resolve_timeout(None, util.Budget(10)), 10,
+                               delta=0.2)
+
+    def test_none_without_a_budget_uses_the_fallback(self):
+        self.assertEqual(util.resolve_timeout(None, None, 7.0), 7.0)
+
+    def test_exhausted_budget_still_gives_a_usable_timeout(self):
+        # never hand wait_for a 0: it raises at once with a message that looks
+        # like a bug instead of an exhausted budget
+        b = util.Budget(0.01)
+        time.sleep(0.05)
+        self.assertEqual(util.resolve_timeout(None, b), 0.1)
+
+
+class CallBudgetContextTests(unittest.TestCase):
+    def test_no_budget_outside_a_tool_call(self):
+        self.assertIsNone(util.CALL_BUDGET.get())
+
+    def test_concurrent_calls_do_not_share_a_deadline(self):
+        import asyncio
+
+        async def worker(total, out):
+            token = util.CALL_BUDGET.set(util.Budget(total))
+            try:
+                await asyncio.sleep(0)
+                out.append(util.CALL_BUDGET.get().total)
+            finally:
+                util.CALL_BUDGET.reset(token)
+
+        out = []
+
+        async def main():
+            await asyncio.gather(worker(1, out), worker(9, out))
+
+        asyncio.run(main())
+        self.assertEqual(sorted(out), [1.0, 9.0])
+
+
 class GridFitsTests(unittest.TestCase):
     def test_small_image_with_time_left_fits(self):
         fits, need = util.grid_fits(1272, 1305, 14.5)

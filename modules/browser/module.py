@@ -37,6 +37,7 @@ import base64
 import functools
 import json
 import os
+import time
 from collections import deque
 from datetime import datetime
 
@@ -50,10 +51,10 @@ import aiohttp
 import channels.webui.api as webui
 
 from . import cdp, page
-from .cdp import CDPClient, CDPError, CDP_CALL_TIMEOUT, DEFAULT_PORT
+from .cdp import CDPClient, CDPError, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
-from .util import (normalize_url, tail_entries, Budget, grid_fits,
-                   drop_target, headless_from_product)
+from .util import (normalize_url, tail_entries, grid_fits, tool_budget,
+                   CALL_BUDGET, drop_target, headless_from_product)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -267,9 +268,13 @@ class Browser(core.module.Module):
         return await cdp.probe(self._http, self._port(), tries=tries, delay=delay)
 
     async def _launch_browser(self):
+        # waiting for the endpoint is part of the tool call: bound by what is
+        # left of the budget, not by cdp's own 20 x 0.5 s
+        budget = self._budget()
         proc, info = await cdp.launch_browser(
             self.config, self.log, self._http,
             headless=self._headless_override,
+            deadline=time.monotonic() + budget.left(),
         )
         self._owned_proc = proc
         return info
@@ -318,15 +323,24 @@ class Browser(core.module.Module):
             return 10.0
 
     def _budget(self):
-        """Deadline for one tool call; see util.Budget.
+        """Deadline for the tool call that is running; see util.Budget.
 
-        Deliberately 0.5 s shorter than core.tool_timeout - core's timer starts
-        before our body runs, so an equal budget would lose the race and the
-        caller would get core's unhelpful "Tool timed out after Ns" instead of
-        a message that names the setting to raise. The reserve also covers
-        writing the file and formatting the result.
+        _guarded opens it at tool entry (so the deadline covers Chrome launch
+        and every pre-CDP step, and every command shares one clock). Tools
+        invoked directly - the webui routes - get a fresh one here.
         """
-        return Budget(max(1.0, self._tool_timeout() - 0.5))
+        budget = CALL_BUDGET.get()
+        return budget if budget is not None else self._new_budget()
+
+    def _new_budget(self):
+        """One deadline per tool call: core.tool_timeout minus a small reserve.
+
+        The reserve is what lets this module answer first - core starts its
+        timer before our body runs and the answer still has to travel back -
+        and it shrinks with very small timeouts (util.tool_budget), so the
+        budget is always shorter than the call it belongs to.
+        """
+        return tool_budget(self._tool_timeout())
 
     def _is_connected(self):
         """True if we have a live CDP connection and an attached tab."""
@@ -814,16 +828,15 @@ class Browser(core.module.Module):
         except (TypeError, ValueError):
             wait = 8
         self._load_event.clear()
-        res = await self._cdp.cmd("Page.navigate", {"url": url}, sid,
-                                  timeout=budget.cap(CDP_CALL_TIMEOUT))
+        res = await self._cdp.cmd("Page.navigate", {"url": url}, sid)
         if res.get("errorText"):
             return self.result(f"Navigation failed: {res['errorText']}", success=False)
         loaded = True
         try:
-            # the load wait shares the budget: a 10s command followed by a 12s
-            # wait would outlast core.tool_timeout and be killed mid-wait
+            # the load wait shares the same deadline: it can only use the time
+            # the command above did not, never a number of its own
             await asyncio.wait_for(self._load_event.wait(),
-                                   timeout=min(wait, 12, budget.left()))
+                                   timeout=min(wait, budget.left()))
         except asyncio.TimeoutError:
             loaded = False
         return self.result({
@@ -839,14 +852,12 @@ class Browser(core.module.Module):
         Args:
             max_chars: Max characters to return inline (default: snapshot_max_chars setting).
         """
-        budget = self._budget()
         await self._ensure_connection()
         sid = self._current_session()
         limit = max_chars or int(self.config.get("snapshot_max_chars", default=15000))
         # one big command on a long page: bounded by the tool call, not by a
         # module-private number
-        ax = await self._cdp.cmd("Accessibility.getFullAXTree", {}, sid,
-                                 timeout=budget.left())
+        ax = await self._cdp.cmd("Accessibility.getFullAXTree", {}, sid)
         nodes = ax.get("nodes", [])
         if not nodes:
             return self.result("Accessibility tree is empty.", success=False)
@@ -1056,8 +1067,7 @@ class Browser(core.module.Module):
 
         # metrics BEFORE the capture: they decide whether a full-page capture
         # is feasible and give the document origin the grid labels use
-        metrics = await page.viewport_metrics(
-            self._cdp, sid, timeout=budget.cap(CDP_CALL_TIMEOUT)) or {}
+        metrics = await page.viewport_metrics(self._cdp, sid) or {}
         doc_w = int(metrics.get("docW") or 0)
         doc_h = int(metrics.get("docH") or 0)
         max_h = self._full_page_max_height()
@@ -1087,12 +1097,12 @@ class Browser(core.module.Module):
         origin_y = 0 if full_page else int(metrics.get("scrollY") or 0)
 
         try:
+            # no timeout of its own: the capture gets all the time this tool
+            # call has left (cmd resolves the budget), so the caller waits
+            # exactly core.tool_timeout
             path, raw = await page.capture_screenshot(
                 self._cdp, sid, self._screenshots_dir,
-                full_page=full_page, fmt=fmt, quality=quality,
-                # no ceiling of its own: a capture gets all the time this tool
-                # call has left, so the caller waits exactly core.tool_timeout
-                timeout=budget.left())
+                full_page=full_page, fmt=fmt, quality=quality)
         except TimeoutError as e:
             self.log("browser", f"screenshot: {core.detail_error(e)}")
             return self.result(
@@ -1198,7 +1208,6 @@ class Browser(core.module.Module):
         Args:
             expression: JavaScript expression to evaluate (e.g. 'document.title').
         """
-        budget = self._budget()
         await self._ensure_connection()
         sid = self._current_session()
         # one command: it gets the whole call, so a slow script is bounded by
@@ -1208,7 +1217,7 @@ class Browser(core.module.Module):
             "awaitPromise": True,
             "returnByValue": True,
             "userGesture": True,
-        }, sid, timeout=budget.left())
+        }, sid)
         if res.get("exceptionDetails"):
             exc = res["exceptionDetails"].get("exception", {})
             return self.result(
@@ -1427,7 +1436,7 @@ class Browser(core.module.Module):
             )
         await self._ensure_connection()
         sid = self._current_session() if use_current_tab else None
-        res = await self._cdp.cmd(method, params or {}, sid, timeout=CDP_CALL_TIMEOUT)
+        res = await self._cdp.cmd(method, params or {}, sid)
         return self.result(res)
 
 
@@ -1478,13 +1487,23 @@ def _error_result(self, tool_name, exc):
 
 
 def _guarded(tool):
-    """Async wrapper that turns browser failures into tool errors."""
+    """Async wrapper that opens the call's budget and turns failures into tool errors.
+
+    The budget lives here, not in each tool: one deadline per call, taken
+    before the body runs (so it covers Chrome launch), published through
+    util.CALL_BUDGET so every CDP command - including the ones in page.py -
+    gets what is left of it. A tool added later is bounded automatically.
+    """
     @functools.wraps(tool)
     async def wrapper(self, *args, **kwargs):
+        token = CALL_BUDGET.set(self._new_budget())
         try:
-            return await tool(self, *args, **kwargs)
-        except (CDPError, TimeoutError, ConnectionError, RuntimeError, OSError) as exc:
-            return _error_result(self, tool.__name__, exc)
+            try:
+                return await tool(self, *args, **kwargs)
+            except (CDPError, TimeoutError, ConnectionError, RuntimeError, OSError) as exc:
+                return _error_result(self, tool.__name__, exc)
+        finally:
+            CALL_BUDGET.reset(token)
     wrapper._is_guarded = True
     return wrapper
 

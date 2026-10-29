@@ -21,7 +21,6 @@ import time
 import zlib
 from datetime import datetime
 
-from .cdp import CDP_CALL_TIMEOUT, SCREENSHOT_TIMEOUT
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -234,9 +233,8 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
               check the page height first (module.screenshot does).
         fmt: 'png' or 'jpeg' (CDP-native encoding; no post-processing).
         quality: JPEG quality 0-100 (ignored for png).
-        timeout: seconds for the capture command. Callers pass the time left in
-              their tool-call budget; SCREENSHOT_TIMEOUT is only the fallback
-              for calls made without one.
+        timeout: seconds for the capture command; None means whatever is left
+              of the running tool call's budget (cdp.cmd resolves it).
     """
     ext = "jpg" if fmt == "jpeg" else "png"
     params = {
@@ -246,8 +244,6 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
     }
     if fmt == "jpeg":
         params["quality"] = max(0, min(100, int(quality)))
-    if timeout is None:
-        timeout = SCREENSHOT_TIMEOUT
     res = await cdp_client.cmd("Page.captureScreenshot", params, sid, timeout=timeout)
     raw = base64.b64decode(res.get("data", ""))
     if not raw:
@@ -264,8 +260,6 @@ async def viewport_metrics(cdp_client, sid, timeout=None):
     Returns None when the read fails, so the caller cannot tell a huge page
     from an unreadable one - see the note in module.screenshot.
     """
-    if timeout is None:
-        timeout = CDP_CALL_TIMEOUT
     try:
         res = await cdp_client.cmd("Runtime.evaluate", {
             "expression": "JSON.stringify({"
@@ -570,7 +564,7 @@ async def capture_page_state(cdp_client, sid):
     try:
         res = await cdp_client.cmd("Runtime.evaluate", {
             "expression": js, "returnByValue": True,
-        }, sid, timeout=CDP_CALL_TIMEOUT)
+        }, sid)
         val = res.get("result", {}).get("value")
         if val:
             return json.loads(val)
@@ -608,7 +602,7 @@ async def restore_page_state(cdp_client, sid, state):
     try:
         await cdp_client.cmd("Runtime.evaluate", {
             "expression": js, "returnByValue": True,
-        }, sid, timeout=CDP_CALL_TIMEOUT)
+        }, sid)
         return True
     except Exception:
         return False
@@ -621,7 +615,7 @@ async def wait_page_ready(cdp_client, sid, timeout=10.0):
         try:
             res = await cdp_client.cmd("Runtime.evaluate", {
                 "expression": "document.readyState", "returnByValue": True,
-            }, sid, timeout=CDP_CALL_TIMEOUT)
+            }, sid)
             if res.get("result", {}).get("value") == "complete":
                 return True
         except Exception:
