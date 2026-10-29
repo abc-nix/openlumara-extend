@@ -195,6 +195,31 @@ def timeout_text(text, limit, capture=False):
     return out
 
 
+def rejected_top_level_await(details):
+    """Did Chrome reject the expression because of a top-level `await` (B30)?
+
+    `Runtime.evaluate` runs the string as a script, where `await` is a syntax
+    error no matter that `awaitPromise` is on. The answer is a SyntaxError
+    whose text names await, which is what separates it from every other
+    exception the page can throw.
+    """
+    if not details:
+        return False
+    text = (str(details.get("text", ""))
+            + str((details.get("exception") or {}).get("description", "")))
+    return "SyntaxError" in text and "await" in text
+
+
+def wrap_await(expression):
+    """Wrap an expression so a top-level `await` becomes legal (B30).
+
+    Kept as `return (<expression>)` so an expression keeps its value. The
+    newline matters: it stops a trailing `//` comment from swallowing the
+    closing bracket.
+    """
+    return "(async () => { return (" + str(expression) + "\n); })()"
+
+
 def headless_from_product(product):
     """Was `product` (CDP /json/version "Browser") running headless?
 

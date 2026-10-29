@@ -55,7 +55,8 @@ from .cdp import CDPClient, CDPError, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
 from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
-                   headless_from_product, timeout_text)
+                   headless_from_product, timeout_text, rejected_top_level_await,
+                   wrap_await)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -191,9 +192,13 @@ class Browser(core.module.Module):
         self._owned_proc = None
         self._current_target = None
         self._attached = {}          # targetId -> sessionId
-        self._refs = {}              # "@e1" -> backendDOMNodeId (from last snapshot)
+        # B18: refs belong to a tab's snapshot, not to the module: a snapshot
+        # of tab B used to wipe tab A's refs, so "@e1" after switch_tab could
+        # point at a node id taken from the other document.
+        self._refs_by_tab = {}       # targetId -> {"@e1": backendDOMNodeId}
         self._console_log = deque(maxlen=500)
         self._network_log = deque(maxlen=500)
+        self._target_url = {}        # targetId -> last known URL (B29)
         # requestId -> the in-flight entry dict inside _network_log, so
         # responseReceived/loadingFinished/loadingFailed can annotate it
         self._net_pending = {}
@@ -365,6 +370,31 @@ class Browser(core.module.Module):
         """
         return tool_budget(self._tool_timeout())
 
+    def _tab_refs(self):
+        """Refs from the last snapshot of the tab being driven (B18).
+
+        Empty for a tab that was never snapshotted *or* whose document has
+        since changed; `resolve_target` then answers "Unknown ref …, take a
+        fresh snapshot first", which is the honest answer in both cases.
+        """
+        return self._refs_by_tab.get(self._current_target, {})
+
+    def _target_of_session(self, sid):
+        """targetId for a CDP session id, or None (B29).
+
+        CDP events name the session, never the tab: the reverse lookup is the
+        only way an entry can say which tab it came from.
+        """
+        for tid, session in self._attached.items():
+            if session == sid:
+                return tid
+        return None
+
+    def _page_of_session(self, sid):
+        """The URL that tab is on, as last reported by Chrome (None if unknown)."""
+        tid = self._target_of_session(sid)
+        return self._target_url.get(tid) if tid else None
+
     def _is_connected(self):
         """True if we have a live CDP connection and an attached tab."""
         return bool(self._cdp and self._cdp.ws and not self._cdp.ws.closed
@@ -398,7 +428,7 @@ class Browser(core.module.Module):
             # a fresh connection invalidates any previous tab sessions
             self._attached = {}
             self._current_target = None
-            self._refs = {}
+            self._refs_by_tab.clear()
             self._net_pending.clear()
             self._cdp = CDPClient(
                 self._http, info["webSocketDebuggerUrl"],
@@ -429,7 +459,7 @@ class Browser(core.module.Module):
             res = await self._cdp.cmd("Target.createTarget", {"url": "about:blank"})
             tid = res["targetId"]
         else:
-            tid = targets[0]["targetId"]  # list is ordered, active first
+            tid = targets[0]["targetId"]  # CDP order: the tab that came first
         await self._attach_target(tid)
         self._current_target = tid
 
@@ -454,19 +484,43 @@ class Browser(core.module.Module):
         params = data.get("params", {}) or {}
         sid = data.get("sessionId")
 
+        if method in ("Target.targetCreated", "Target.targetInfoChanged"):
+            # B29: events carry a sessionId, not an URL. Track the URL each tab
+            # is on so a log entry can say which page it came from instead of
+            # inheriting whatever the current tab shows now.
+            info = params.get("targetInfo", {}) or {}
+            tid = info.get("targetId")
+            if tid and info.get("type") == "page":
+                url = str(info.get("url", ""))
+                self._target_url[tid] = (url[:MAX_URL_LEN - 3] + "..."
+                                         if len(url) > MAX_URL_LEN else url)
+            return
         if method in ("Target.targetDestroyed", "Target.targetCrashed"):
             # B32: a closed tab has to stop being _current_target and lose its
             # session id, or every later call addresses a dead session
             tid = params.get("targetId")
+            self._target_url.pop(tid, None)
             keep = drop_target(self._attached, self._current_target, tid)
+            self._refs_by_tab.pop(tid, None)   # refs belonged to that document
             if keep != self._current_target:
-                self._refs = {}          # refs belonged to that document
                 self._pending_dialog = None
                 self._load_event.clear()
             self._current_target = keep
             return
         if method == "Page.loadEventFired" and sid == self._attached.get(self._current_target):
             self._load_event.set()
+        elif method == "Page.frameNavigated":
+            # B18/B41: a new document invalidates that tab's refs. Kept, they
+            # would resolve to backend node ids of a document that is gone -
+            # the same numbers, a different element, no error at all.
+            frame = params.get("frame", {}) or {}
+            tid = self._target_of_session(sid)
+            if tid and not frame.get("parentId"):
+                self._refs_by_tab.pop(tid, None)
+                url = str(frame.get("url") or "")
+                if url:
+                    self._target_url[tid] = (url[:MAX_URL_LEN - 3] + "..."
+                                             if len(url) > MAX_URL_LEN else url)
         elif method == "Runtime.consoleAPICalled":
             args = params.get("args", [])
             text = " ".join(
@@ -476,6 +530,8 @@ class Browser(core.module.Module):
                 "type": params.get("type", "log"),
                 "text": text,
                 "timestamp": params.get("timestamp"),
+                "tab": self._target_of_session(sid),
+                "page": self._page_of_session(sid),
             })
         elif method == "Runtime.exceptionThrown":
             details = params.get("exceptionDetails", {})
@@ -485,6 +541,8 @@ class Browser(core.module.Module):
                 "type": "exception",
                 "text": str(text),
                 "timestamp": details.get("timestamp"),
+                "tab": self._target_of_session(sid),
+                "page": self._page_of_session(sid),
             })
         elif method == "Log.entryAdded":
             entry = params.get("entry", {})
@@ -492,6 +550,10 @@ class Browser(core.module.Module):
                 "type": entry.get("level", "log"),
                 "text": entry.get("text", ""),
                 "timestamp": entry.get("timestamp"),
+                "tab": self._target_of_session(sid),
+                # a log entry names its own source document; fall back to the
+                # tab's last known URL when it does not
+                "page": entry.get("url") or self._page_of_session(sid),
             })
         elif method == "Network.requestWillBeSent":
             if self.config.get("enable_network_monitoring", False):
@@ -504,6 +566,8 @@ class Browser(core.module.Module):
                     "url": url,
                     "timestamp": params.get("timestamp"),
                     "status": None,  # annotated by the events below
+                    "tab": self._target_of_session(sid),
+                    "page": self._page_of_session(sid),
                 }
                 self._network_log.append(entry)
                 rid = params.get("requestId")
@@ -893,7 +957,7 @@ class Browser(core.module.Module):
             return self.result("Accessibility tree is empty.", success=False)
 
         lines, refs = page.walk_ax_tree(nodes)
-        self._refs = refs
+        self._refs_by_tab[self._current_target] = refs
 
         title, current_url = "", ""
         try:
@@ -938,7 +1002,7 @@ class Browser(core.module.Module):
         """
         await self._ensure_connection()
         sid = self._current_session()
-        handle = await page.resolve_target(self._cdp, sid, self._refs, target)
+        handle = await page.resolve_target(self._cdp, sid, self._tab_refs(), target)
         try:
             await self._cdp.cmd("DOM.scrollIntoViewIfNeeded", handle, sid)
         except Exception:
@@ -976,15 +1040,23 @@ class Browser(core.module.Module):
         """
         await self._ensure_connection()
         sid = self._current_session()
-        handle = await page.resolve_target(self._cdp, sid, self._refs, target)
+        handle = await page.resolve_target(self._cdp, sid, self._tab_refs(), target)
         object_id = await page.resolve_object_id(self._cdp, handle, sid)
         if not object_id:
             return self.result(f"Could not resolve element '{target}'.", success=False)
+        # B8: contenteditable elements have no select() (measured: typing "bye"
+        # into "hello" produced "byehello" - nothing was cleared and the text
+        # went in at the old caret). Select the contents with a range instead,
+        # so the Backspace below deletes the selection.
         await page.call_on(
             self._cdp,
             object_id,
             "function(){ this.scrollIntoView({block:'center'}); this.focus();"
-            " if (typeof this.select === 'function') { this.select(); } }",
+            " if (typeof this.select === 'function') { this.select(); return; }"
+            " if (this.isContentEditable) {"
+            "   var r = document.createRange(); r.selectNodeContents(this);"
+            "   var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+            " } }",
             sid,
         )
         # clear selected content
@@ -1273,12 +1345,18 @@ class Browser(core.module.Module):
         sid = self._current_session()
         # one command: it gets the whole call, so a slow script is bounded by
         # core.tool_timeout and nothing else
-        res = await self._cdp.cmd("Runtime.evaluate", {
+        params = {
             "expression": expression,
             "awaitPromise": True,
             "returnByValue": True,
             "userGesture": True,
-        }, sid)
+        }
+        res = await self._cdp.cmd("Runtime.evaluate", params, sid)
+        if rejected_top_level_await(res.get("exceptionDetails")):
+            # B30: a script can't use `await` at its top level. Same call,
+            # wrapped once - the caller should not have to know to wrap it.
+            params["expression"] = wrap_await(expression)
+            res = await self._cdp.cmd("Runtime.evaluate", params, sid)
         if res.get("exceptionDetails"):
             exc = res["exceptionDetails"].get("exception", {})
             return self.result(
@@ -1294,6 +1372,10 @@ class Browser(core.module.Module):
     async def console(self, count: int = 20, clear: bool = False):
         """Returns recent console messages, errors, and uncaught exceptions from all tabs.
 
+        Each entry carries `tab` (the tab id from list_tabs) and `page` (the URL
+        that tab was on when the entry was produced) - entries are not
+        re-attributed to whatever the current tab shows later.
+
         Args:
             count: How many of the most recent entries to return (0 = none).
             clear: Clear the buffer after reading.
@@ -1306,7 +1388,7 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def network_requests(self, count: int = 20, clear: bool = False):
-        """Returns recent network requests (method + URL + status). Requires enable_network_monitoring.
+        """Returns recent network requests (method + URL + status). Requires enable_network_monitoring. Each entry carries `tab` (tab id) and `page` (the URL that tab was on when the request was made).
 
         Args:
             count: How many of the most recent entries to return (0 = none).
