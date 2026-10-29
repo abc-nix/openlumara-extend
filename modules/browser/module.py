@@ -1377,10 +1377,6 @@ class Browser(core.module.Module):
     async def console(self, count: int = 20, clear: bool = False):
         """Returns recent console messages, errors, and uncaught exceptions from all tabs.
 
-        Each entry carries `tab` (the tab id from list_tabs) and `page` (the URL
-        that tab was on when the entry was produced) - entries are not
-        re-attributed to whatever the current tab shows later.
-
         Args:
             count: How many of the most recent entries to return (0 = none).
             clear: Clear the buffer after reading.
@@ -1393,7 +1389,7 @@ class Browser(core.module.Module):
 
     @core.module.tool
     async def network_requests(self, count: int = 20, clear: bool = False):
-        """Returns recent network requests (method + URL + status). Requires enable_network_monitoring. Each entry carries `tab` (tab id) and `page` (the URL that tab was on when the request was made).
+        """Returns recent network requests (method + URL + status). Requires enable_network_monitoring.
 
         Args:
             count: How many of the most recent entries to return (0 = none).
