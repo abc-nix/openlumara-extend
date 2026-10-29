@@ -20,6 +20,48 @@ def _load(name):
 util = _load("_browser_util")
 
 
+class HeadlessFromProductTests(unittest.TestCase):
+    def test_chrome_is_visible(self):
+        self.assertFalse(util.headless_from_product("Chrome/131.0.6778.85"))
+
+    def test_headless_chrome_is_headless(self):
+        self.assertTrue(util.headless_from_product("HeadlessChrome/131.0.6778.85"))
+
+    def test_unknown_when_no_string(self):
+        for value in (None, "", "   "):
+            self.assertIsNone(util.headless_from_product(value))
+
+    def test_only_a_product_name_starting_with_headless_counts(self):
+        # the check looks at the product name before the "/", not at any
+        # substring of it
+        self.assertFalse(util.headless_from_product("SomeHeadlessFork/1.0"))
+        self.assertTrue(util.headless_from_product("HeadlessFork/1.0"))
+
+
+class DropTargetTests(unittest.TestCase):
+    def test_current_tab_dying_clears_the_current_target(self):
+        attached = {"A": "sid-a", "B": "sid-b"}
+        self.assertEqual(util.drop_target(attached, "A", "A"), None)
+        self.assertNotIn("A", attached)
+        self.assertIn("B", attached)
+
+    def test_other_tab_dying_keeps_the_current_target(self):
+        attached = {"A": "sid-a", "B": "sid-b"}
+        self.assertEqual(util.drop_target(attached, "A", "B"), "A")
+        self.assertNotIn("B", attached)
+        self.assertEqual(attached["A"], "sid-a")
+
+    def test_unknown_id_is_harmless(self):
+        attached = {"A": "sid-a"}
+        self.assertEqual(util.drop_target(attached, "A", "Z"), "A")
+        self.assertEqual(len(attached), 1)
+
+    def test_no_target_id_changes_nothing(self):
+        attached = {"A": "sid-a"}
+        self.assertEqual(util.drop_target(attached, "A", None), "A")
+        self.assertEqual(len(attached), 1)
+
+
 class NormalizeUrlTests(unittest.TestCase):
     def test_empty(self):
         for value in ("", "   ", None):

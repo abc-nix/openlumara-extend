@@ -52,7 +52,8 @@ import channels.webui.api as webui
 from . import cdp, page
 from .cdp import CDPClient, CDPError, CDP_CALL_TIMEOUT, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
-from .util import normalize_url, tail_entries, Budget, grid_fits
+from .util import (normalize_url, tail_entries, Budget, grid_fits,
+                   drop_target, headless_from_product)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -279,6 +280,18 @@ class Browser(core.module.Module):
             return self._headless_override
         return bool(self.config.get("headless", False))
 
+    def _headless_actual(self):
+        """Headless mode of the browser that is actually running (B33).
+
+        The setting only predicts the next launch and says nothing about a
+        browser we merely attached to, so ask the browser itself: /json/version
+        reports "HeadlessChrome/x" vs "Chrome/x". None means genuinely unknown.
+        """
+        actual = headless_from_product((self._browser_info or {}).get("Browser"))
+        if actual is None and self._owned_proc is not None:
+            return self._effective_headless()   # we launched it, we know the mode
+        return actual
+
     def _full_page_max_height(self):
         """Pixel height cap for full-page captures.
 
@@ -323,6 +336,12 @@ class Browser(core.module.Module):
     async def _ensure_connection(self):
         """Make sure we have a live CDP connection + an attached tab."""
         if self._is_connected():
+            if self._current_target in self._attached:
+                return True
+            # B32: the tab we were driving died while the connection stayed up.
+            # Keep the connection and pick another live tab - never hand out
+            # the dead session id, which would answer -32001 on every call.
+            await self._select_default_target()
             return True
         async with self._lock:
             if self._is_connected():
@@ -355,9 +374,16 @@ class Browser(core.module.Module):
 
     def _current_session(self):
         sid = self._attached.get(self._current_target)
-        if sid is None:
-            raise RuntimeError("No tab is attached. Call new_tab or navigate first.")
-        return sid
+        if sid is not None:
+            return sid
+        if self._current_target:
+            # we still name a target but its session is gone: the tab was
+            # closed or crashed. Say so instead of letting CDP answer -32001
+            raise RuntimeError(
+                "The tab this call addressed is gone (closed or crashed). Call "
+                "list_tabs and switch_tab to one that is still open, or new_tab."
+            )
+        raise RuntimeError("No tab is attached. Call new_tab or navigate first.")
 
     async def _select_default_target(self):
         """Attach to the active page tab, or create one if none exist."""
@@ -391,6 +417,17 @@ class Browser(core.module.Module):
         params = data.get("params", {}) or {}
         sid = data.get("sessionId")
 
+        if method in ("Target.targetDestroyed", "Target.targetCrashed"):
+            # B32: a closed tab has to stop being _current_target and lose its
+            # session id, or every later call addresses a dead session
+            tid = params.get("targetId")
+            keep = drop_target(self._attached, self._current_target, tid)
+            if keep != self._current_target:
+                self._refs = {}          # refs belonged to that document
+                self._pending_dialog = None
+                self._load_event.clear()
+            self._current_target = keep
+            return
         if method == "Page.loadEventFired" and sid == self._attached.get(self._current_target):
             self._load_event.set()
         elif method == "Runtime.consoleAPICalled":
@@ -609,6 +646,11 @@ class Browser(core.module.Module):
         return self.result({
             "connected": True,
             "owned_process": self._owned_proc is not None,
+            # what the running browser really is (not what the setting says),
+            # and the one timeout every tool call shares - the number to raise
+            # when a capture says it ran out of time
+            "headless": self._headless_actual(),
+            "tool_timeout": self._tool_timeout(),
             "current_tab": current,
             "tabs": [
                 # `active` is OUR current tab, not CDP's targetInfo.attached
@@ -763,16 +805,25 @@ class Browser(core.module.Module):
             url: The URL to navigate to (e.g. https://example.com).
             wait_seconds: Seconds to wait for the page load event.
         """
+        budget = self._budget()
         await self._ensure_connection()
         url = normalize_url(url)
         sid = self._current_session()
+        try:
+            wait = max(0, int(wait_seconds))
+        except (TypeError, ValueError):
+            wait = 8
         self._load_event.clear()
-        res = await self._cdp.cmd("Page.navigate", {"url": url}, sid, timeout=CDP_CALL_TIMEOUT)
+        res = await self._cdp.cmd("Page.navigate", {"url": url}, sid,
+                                  timeout=budget.cap(CDP_CALL_TIMEOUT))
         if res.get("errorText"):
             return self.result(f"Navigation failed: {res['errorText']}", success=False)
         loaded = True
         try:
-            await asyncio.wait_for(self._load_event.wait(), timeout=min(wait_seconds, 12))
+            # the load wait shares the budget: a 10s command followed by a 12s
+            # wait would outlast core.tool_timeout and be killed mid-wait
+            await asyncio.wait_for(self._load_event.wait(),
+                                   timeout=min(wait, 12, budget.left()))
         except asyncio.TimeoutError:
             loaded = False
         return self.result({
@@ -788,10 +839,14 @@ class Browser(core.module.Module):
         Args:
             max_chars: Max characters to return inline (default: snapshot_max_chars setting).
         """
+        budget = self._budget()
         await self._ensure_connection()
         sid = self._current_session()
         limit = max_chars or int(self.config.get("snapshot_max_chars", default=15000))
-        ax = await self._cdp.cmd("Accessibility.getFullAXTree", {}, sid, timeout=CDP_CALL_TIMEOUT)
+        # one big command on a long page: bounded by the tool call, not by a
+        # module-private number
+        ax = await self._cdp.cmd("Accessibility.getFullAXTree", {}, sid,
+                                 timeout=budget.left())
         nodes = ax.get("nodes", [])
         if not nodes:
             return self.result("Accessibility tree is empty.", success=False)
@@ -971,7 +1026,7 @@ class Browser(core.module.Module):
         """Takes a screenshot of the current tab (PNG/JPEG) and returns the path plus an inline image.
 
         Args:
-            full_page: Capture the whole page instead of the viewport. Pages taller than full_page_max_height are refused with their real height (Chrome paints the whole page regardless of clipping). Captures get the full per-tool timeout (core.tool_timeout) and nothing more.
+            full_page: Capture the whole page instead of the viewport. Pages taller than full_page_max_height are refused with their real height (Chrome paints the whole page regardless of clipping).
             include_image: Deliver the screenshot to the model as an image message.
             grid: Labeled grid drawn on the image. True = 100px spacing, int = custom px. Requires format='png'.
             format: 'png' (default) or 'jpeg'.
@@ -1143,14 +1198,17 @@ class Browser(core.module.Module):
         Args:
             expression: JavaScript expression to evaluate (e.g. 'document.title').
         """
+        budget = self._budget()
         await self._ensure_connection()
         sid = self._current_session()
+        # one command: it gets the whole call, so a slow script is bounded by
+        # core.tool_timeout and nothing else
         res = await self._cdp.cmd("Runtime.evaluate", {
             "expression": expression,
             "awaitPromise": True,
             "returnByValue": True,
             "userGesture": True,
-        }, sid, timeout=CDP_CALL_TIMEOUT)
+        }, sid, timeout=budget.left())
         if res.get("exceptionDetails"):
             exc = res["exceptionDetails"].get("exception", {})
             return self.result(

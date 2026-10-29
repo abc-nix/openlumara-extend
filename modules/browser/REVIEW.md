@@ -16,7 +16,8 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 2 — tool correctness | done | `3a26241` | B12/B13/B16/B17/B20 + `util.py` (URL normalisation, deque tailing); 22 unit tests; every item re-checked in a live browser on 2026-10-27 — evidence in §10. |
 | 2.5 — screenshot grid rework | **done + verified live** | `bbcccc3` · `cf47268` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` is a refusal threshold (clip does not bound Chrome's work — B27/B31), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. All §10 checks pass. |
 | 3 — error boundary | **done + verified live** | `d3da68a` · `7cf78e8` | `_guard_tools` wraps all 22 tools once: `CDPError` (-32001/-32601/-32602 hints), `TimeoutError`, `ConnectionError`, module `RuntimeError`/`OSError` → `success:false` with actionable text; programming errors still escape. §10 checks pass. |
-| 2.6 — tool-call budget | **implemented, live check pending** | (this commit) | B37 (budget inherited from `core.tool_timeout`), B39 (grid annotation gated on its measured cost), B38 partial (full-page refused when metrics are unreadable). `util.Budget` + `util.grid_fits`, 44 tests. Needs a server restart to load. |
+| 2.6 — tool-call budget | done + live smoke-checked | `6944586` | B37 (budget inherited from `core.tool_timeout`), B39 (grid gated on its measured cost), B38 partial (full-page refused when metrics are unreadable). `util.Budget` + `util.grid_fits`, 44 tests. |
+| 2.7 — budget everywhere + stale tab | **implemented, live check pending** | (this commit) | Budget also in `navigate` (was the worst overshooter: 10 s + 12 s wait vs a 15 s ceiling), `evaluate`, `snapshot`; B32 fixed (destroyed/crashed tab handling); B33 fixed (`status()` reports the *running* browser's mode from its product string, plus `tool_timeout`); `wait_seconds` coerced like other args; better `_current_session()` error. 52 tests; import-through-stub check: 22 tools, 22 guarded, signatures intact. **Needs a restart to load.** |
 | 4 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
@@ -78,7 +79,8 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B29 | Low–Med | Console/network entries carry no tab or URL, and the buffers survive navigation → logs from a previous page are attributed to the current one |
 | B30 | Low | `evaluate` rejects top-level `await` (Chrome: "await is only valid in async functions") although `awaitPromise` is on; the AI has to know to wrap in `(async () => …)()` |
 | B31 | Low | Capped full-page captures are refused, not cut: Chrome paints the whole page for `captureBeyondViewport` whatever `clip` says (measured), so the cheap way to a "top N px" capture is still unknown |
-| B32 | **Medium** | Stale tab session: a closed tab stays `_current_target`, `_ensure_connection` still reports connected, `_attach_target` reuses the dead session id → `-32001 Session with given id not found`, and every tab shows `current: false` |
+| B32 | **Medium** | Stale tab session: a closed tab stays `_current_target`, `_ensure_connection` still reports connected, `_attach_target` reuses the dead session id → `-32001 Session with given id not found`, and every tab shows `current: false` — **fixed 2.7** |
+| B33 | Low–Med | Nothing reported the *running* browser's headless mode: the panel value comes from the **setting**, which only predicts the next launch and says nothing about an external browser or a session that ended — the trap behind a wrong "it was headless" claim (**fixed 2.7**) |
 | B37 | **Medium** | Timeouts hardcoded (10 s) against a limit that lives in config: `core.tool_timeout` is 15 here but **30 by default** (`core/config.py:41`), so B27 silently returns if the config drops below 10, and legitimate work is cut at 10 s on a default install. No per-tool deadline: a tool issuing two commands can spend 20 s against a 15 s budget |
 | B38 | Medium | `viewport_metrics` swallows every exception and returns `None` → the `full_page_max_height` guard **fails open** on a 40k-px page; metrics are CSS px compared against a device-px image (`devicePixelRatio` read, never used); `doc_w` is read but never capped |
 | B39 | Medium | `draw_grid` cost is unbounded and un-timed (pure CPU after the CDP reply): measured ~0.85 s/Mpx on real captures → ~13 s at the permitted 12000 px, i.e. a guaranteed tool timeout *after* the work succeeded |
@@ -313,6 +315,21 @@ Fix (phase 4): handle `Target.targetDestroyed` (drop `_attached[id]`, clear
 `Target.getTargets` in `_ensure_connection` and re-select when it is gone, and
 make `_current_session()` raise a *helpful* "the tab was closed — call list_tabs
 and switch_tab" instead of leaking the raw CDP error.
+
+**Fixed in 2.7**, three parts: `_on_cdp_event` now handles `Target.targetDestroyed`
+*and* `targetCrashed` through the pure helper `util.drop_target` (drops the session id
+so a later attach gets a fresh one, clears `_current_target` when it was the current tab,
+and with it `_refs`/`_pending_dialog`/`_load_event`); `_ensure_connection` treats
+"`_current_target` is no longer in `_attached`" as needing a re-select while keeping the
+connection up; `_current_session()` raises "The tab this call addressed is gone (closed
+or crashed) — call list_tabs and switch_tab…".
+
+Deliberate deviation: re-selection is driven by **local state plus the event**, not by a
+`Target.getTargets` probe on every call — no extra round-trip per tool call. Residual
+gap, stated plainly: if the destroyed event is missed (it fired while the reader task was
+down), `_attached` still holds the dead id and the first call still answers `-32001` —
+now with the recovery instruction attached (phase 3's `-32001` branch) rather than the
+raw code. `<verify>` how often that path is actually reachable.
 
 ### B31 — Cheap capped full-page captures (open, measured 2026-10-27)
 
@@ -560,7 +577,7 @@ Order is dependency-driven, not priority-driven: phases 7 (security) and 5/6 (li
 | **2 — cheap tool correctness** | B12 `_normalize_url`, B13 cookies fallback, B16 count clamp, B17 `sid` hoist + quality guard, B20 `str(target)` | `new_tab("example.com")`, `console(0)`, `cookies()` on `about:blank`, `switch_tab(0)` | one call per fix |
 | **2.5 — screenshot grid rework** | grid drawn on the PNG (`page.draw_grid`), `full_page_max_height` + `page_cut`, timeouts below the core budget (B27), grid ⇒ png | `full_page` on a 39k-px article returns with `page_cut`; grid labels are document coordinates; no DOM mutation | **done** (`bbcccc3`) |
 | **3 — error boundary** | R2: map `CDPError`/`TimeoutError`/`ConnectionError` (+ deliberate `RuntimeError`/`OSError`) → `self.result(..., success=False)` with hints | `click('@e999')` → clean message (not "Error while executing tool"); a hung `evaluate` → timeout text | **done** (`d3da68a`); live check pending |
-| **4 — typing & refs** | B8 `type_text`, B18 per-tab refs + dialog session scoping, **B26** (stable tab order), **B29** (tag logs by tab/URL), **B30** (`evaluate` await handling/docstring), **B32** (stale tab session — see §2, never got scheduled), **B38** (`Page.getLayoutMetrics` + width guard) | `contenteditable` fill; two tabs with different `@eN`; click after `switch_tab`; `switch_tab(0)` resolves to the tab `list_tabs` showed | |
+| **4 — typing & refs** | B8 `type_text`, B18 per-tab refs + dialog session scoping, **B26** (stable tab order), **B29** (tag logs by tab/URL), **B30** (`evaluate` await handling/docstring), **B38** (`Page.getLayoutMetrics` + width guard) | `contenteditable` fill; two tabs with different `@eN`; click after `switch_tab`; `switch_tab(0)` resolves to the tab `list_tabs` showed | |
 | **5 — process lifecycle** | R1 private start/stop, B5 ownership across reload, B7 terminate on failed launch, B21 future leak, B15 port-down wait + reap; **process harness** in `tests/` | settings save with `close_browser_on_shutdown=false` → browser survives *and* `owned_process` stays true; bad binary → no stray Chrome; 10 restarts stable | tests start here (needs a browser) |
 | **6 — restart state** | B6 `active_index`, B14 radio groups, B19 detach after capture; **restart harness** | 5 tabs incl. a `chrome://` one + a radio-heavy form → restart twice → active tab and radios correct | must pass before phase 8 moves the code |
 | **7 — security & policy** | B2 fence + warnings, B3 URL policy, B9 ⟨verify⟩, B10 profile guard, B11 `unsafe`, S6/S7 decisions, **B28** (`get_images` caps/filter), §5.11 caps | blocked `navigate` → clear refusal; `snapshot` fenced; `get_images` on an article returns tens, not 38+ | own review; behavior change |
@@ -642,5 +659,7 @@ Failed / new findings: full-page capture (B27), `get_images` volume (B28), unatt
 - The module folder has no `tests/`; the earlier harnesses are gone. Don't cite them as existing coverage (B24).
 - `tmp/` is the right place for throwaway scripts; `REVIEW.md`, `tests/`, and `NOTES.md` belong in the module folder.
 - Anything touching `cdp.py`/`page.py` needs a **server restart** to take effect (B25), not a settings save.
+- **`restart` is a webui route, not an AI tool** (`_route_ui_restart`). `core.tool_timeout` bounds *tool calls only*, so the headless flip is not covered by `util.Budget` — do not "fix" it by adding a tool budget there. Its own wall-clock behaviour (close + 0.5 s sleep + relaunch probe + per-tab restore) is a panel-UX question, separate from B37.
+- **Tool docstrings carry no internal mechanics** (user rule, 2026-10-29): a sentence like "captures get the full per-tool timeout and nothing more" explains nothing about how to use the tool and was removed. Behavioural detail belongs in the runtime `note`/`hint`/error text. The exception is `ssh`, which *does* name `core.tool_timeout` because it exposes its own competing `command_timeout` setting and the model must know which wins.
 - `python3 -m unittest discover -s modules/browser/tests -v` from the `openlumara-extend` root runs the pure-helper suite (stubs `core`/`aiohttp`; safe anywhere). Add cases here for every bug fixed, and put the browser-driven harnesses (phases 5–6) next to it.
 - Keep the three invariants from §0 in mind when moving tools around; the tool loader does not walk the MRO for tools, only for routes.

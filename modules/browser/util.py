@@ -102,3 +102,31 @@ def grid_fits(width, height, seconds_left):
         return False, 0.0
     need = pixels / 1e6 * GRID_COST_S_PER_MPX
     return need <= max(0.0, float(seconds_left)), need
+
+
+def headless_from_product(product):
+    """Was `product` (CDP /json/version "Browser") running headless?
+
+    Chrome reports "HeadlessChrome/120.0…" in headless mode and "Chrome/120.0…"
+    otherwise, so the running browser states its own mode. The `headless`
+    setting only predicts what the *next launch* would use and says nothing at
+    all about a browser we merely attached to - trust the string when we have
+    it, return None when we don't.
+    """
+    text = str(product or "").strip()
+    if not text:
+        return None
+    return text.split("/")[0].lower().startswith("headless")
+
+
+def drop_target(attached, current_target, target_id):
+    """Forget a tab that died (Target.targetDestroyed / targetCrashed).
+
+    Drops its session id so a later attach creates a fresh one instead of
+    reusing a dead sessionId (which answers -32001 forever). Returns the
+    current target to keep: None when the current tab was the one that died.
+    """
+    if not target_id:
+        return current_target
+    attached.pop(target_id, None)
+    return None if current_target == target_id else current_target
