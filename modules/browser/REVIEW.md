@@ -734,6 +734,8 @@ Not live-tested, and why: **dialog scoping** would need `auto_accept_dialogs` of
 
 **Still owed live** (both need the user, not a tool): the **module reload** that originally lost ownership (B5's actual event — the adoption code is verified against a real file, but on_ready being called by a reload is not), and one **panel Restart** (B15's port-down wait is only on that route; the stop half is verified above).
 
+**B5, the real event (12:20, `close_browser_on_shutdown=false`):** with the browser allowed to survive, stopping and starting the server left **the same Chrome (pid 7116, started 12:17:26)** running across a *new* server process (7580, 12:19:54); `status` reported `owned_process: true` — adopted from the pid file — and `close()` then killed that adopted pid and removed the file. That is the exact bug B5 described, end to end, including the `/proc` check deciding it was safe to signal. Also learned on the way: a module reload calls `on_shutdown`, so with the setting at its default it closes the browser and the reload cannot lose ownership at all; the bug only appears when the browser is meant to outlive the module.
+
 ### Real-site session (Wikipedia, 2026-10-27)
 
 Passed on a site with real cookies and real traffic:
