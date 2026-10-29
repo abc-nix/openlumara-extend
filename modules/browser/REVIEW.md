@@ -23,8 +23,9 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 2.10 — timeout text (B40) | done + **verified live** (11:23, fresh process) | `ea7d08a` | Text names the total that bound the call, offers capture advice only from `screenshot`, rounds the number; `navigate` omits `note` when the load event arrived and says when the budget — not `wait_seconds` — cut the wait; the webui status route reports `_headless_actual()`, which falls back to the launch-time mode instead of the current setting. 75 tests. |
 | 2.11 — number text (B40, part 2) | done + **verified live** (11:23) | `6eb5ab5` | Live check caught the first text naming `budget.total` (14.5 s) while the setting says 15.0 s — the B40 mismatch again at a smaller scale. `timeout_text` takes `core.tool_timeout`; the screenshot messages quote the setting too. |
 | 2.12 — bound a stalled full-page capture (B43) | done, live for the normal path | `68792ff` | Full-page capture gets half the call, falls back to a viewport capture with a note naming the stalled full-page attempt; both failing means the tab is stalled. Normal `full_page` (example.com) still succeeds with the half window. The stall itself is still intermittent and unnamed — the fix bounds its cost, it does not claim to cure it. |
-| 4 — typing & refs | B8, B18, B26, B29, B30 done, **needs restart** | `ba53929` · `55e0457` · `ba1ba8f` | Refs per tab and dropped on main-frame navigation (the unnumbered item, folded in), one dialog per tab, logs tagged with tab + page, top-level `await` retried wrapped, stable tab order, contenteditable cleared via a Range. New `tests/test_module_events.py` loads module.py through core/aiohttp/webui stubs. 96 tests. Live checks pending (`switch_tab` order with 3 tabs, two-tab refs, "bye" into contenteditable). |
-| 4 rest … 8 | pending | — | see §9 (§2 B43 open: `full_page` stall) |
+| 4 — typing & refs | B8, B18, B26, B29, B30 done + **verified live** (11:5x) | `ba53929` · `55e0457` · `ba1ba8f` | Refs per tab and dropped on main-frame navigation (the unnumbered item, folded in), one dialog per tab, logs tagged with tab + page, top-level `await` retried wrapped, stable tab order, contenteditable cleared via a Range. New `tests/test_module_events.py` loads module.py through core/aiohttp/webui stubs. 96 tests. Live checks pending (`switch_tab` order with 3 tabs, two-tab refs, "bye" into contenteditable). |
+| 5 — process lifecycle | done, **needs restart** | `662ae8a` · `8e7fbfb` · `accc508` | B21 (a command owns its pending entry), B7 (a launch that never comes up is killed, with a real process-harness test), B5 (pid file + `/proc` verification, adopted in `on_ready`), B15 (wait for the port to go quiet, then abort instead of attaching), R1 partial (`_stop_owned` is the one stop path; the route→tool coupling remains). 105 tests. Live checks owed: pid file matches the Chrome pid, ownership survives a module reload, kill-then-relaunch rewrites it, and one panel restart. |
+| 6 … 8 | pending | — | see §9 (§2 B43 open: `full_page` stall) |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
 
@@ -58,9 +59,9 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B2 | **High** | No untrusted-content fencing for page content (injection channel) |
 | B3 | **High** | Browser bypasses the HTTP module's network policy; allows `file:`/LAN/localhost |
 | B4 | **Medium** | `status()` reports `active` from `targetInfo.attached` → wrong |
-| B5 | **Medium** | `_owned_proc` reset unconditionally → ownership lost on module reload |
+| B5 | **Medium** | `_owned_proc` reset unconditionally → ownership lost on module reload — **fixed phase 5** (`accc508`: pid file + /proc verification, adopted in on_ready) |
 | B6 | **Medium** | `_capture_state` `active_index` mixes target-space and tab-space indices |
-| B7 | **Medium** | `launch_browser` orphans the spawned process when the CDP port never opens |
+| B7 | **Medium** | `launch_browser` orphans the spawned process when the CDP port never opens — **fixed phase 5** (`8e7fbfb`: stop_process before raising; harness test) |
 | B8 | **Medium** | `type_text` does not clear `contenteditable` (docstring claims it does) — **fixed phase 4** (`55e0457`); confirmed live first: typing "bye" into "hello" produced "byehello" |
 | B9 | **Medium** | `--remote-allow-origins=*` probably unnecessary, widens CDP exposure ⟨verify⟩ |
 | B10 | **Medium** | `user_data_dir` pointing at a real profile = credential exposure, under-signposted |
@@ -68,13 +69,13 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B12 | **Low–Med** | `new_tab` does not normalise URLs (unlike `navigate`) |
 | B13 | **Low–Med** | `cookies()` silently queries `https://example.com/` |
 | B14 | **Low–Med** | Radio-group restore is order-dependent for id-less inputs |
-| B15 | **Low–Med** | Restart relaunch can attach to a dying/foreign browser |
+| B15 | **Low–Med** | Restart relaunch can attach to a dying/foreign browser — **fixed phase 5** (`accc508`: wait for the port to go quiet, abort instead of attaching) |
 | B16 | Low | `count=0` returns the whole console/network buffer |
 | B17 | Low | `screenshot()` `finally` can mask the real error; `int(quality)` unguarded |
 | B18 | Low | Cross-tab: `_refs` global, `_pending_dialog` cleared by any tab's dialog — **fixed phase 4** (`55e0457` refs per tab + refs dropped on main-frame navigation, `ba1ba8f` dialog per tab) |
 | B19 | Low | Tab/session bookkeeping leaks (`_capture_state` never detaches) |
 | B20 | Low | `switch_tab(0)` with an int → `AttributeError` (core does not coerce args) |
-| B21 | Low | `CDPClient.cmd` leaks the pending future if `send_json` raises |
+| B21 | Low | `CDPClient.cmd` leaks the pending future if `send_json` raises — **fixed phase 5** (`662ae8a`: the command owns its entry, finally) |
 | B22 | Low | Duplicate `.display-error` row for the screenshot tool card |
 | B23 | Low | `_route_ui_shot` failures are silent in the UI |
 | B24 | Low | README/doc rot (5 routes not 4, dead `modals/`, dead harness paths, wrong config-setter claim) |
@@ -439,7 +440,7 @@ skipped with an explicit reason. The annotated PNG is also ~27% larger
 
 ## 4. Refactoring
 
-- **R1 — Decouple the UI routes from the AI tools.** `_route_ui_open/_close/_restart` call `self.open()` / `self.close()` (`:621`, `:628`, `:659`) and rely on the forwarder unwrapping `self.result()`. Introduce private `_start_browser()` / `_stop_browser()` / `_flip_headless()` used by both the tool and the route; tools stay thin, the UI stops depending on tool semantics/timeouts.
+- **R1 — Decouple the UI routes from the AI tools.** *(phase 5: the stop half is done — `_stop_owned` is the single path used by `close`, `on_shutdown` and the restart route; the routes still call the tools, and `_start`/`_flip_headless` are unchanged.)* `_route_ui_open/_close/_restart` call `self.open()` / `self.close()` (`:621`, `:628`, `:659`) and rely on the forwarder unwrapping `self.result()`. Introduce private `_start_browser()` / `_stop_browser()` / `_flip_headless()` used by both the tool and the route; tools stay thin, the UI stops depending on tool semantics/timeouts.
 - **R2 — One error boundary for all tools.** CDP/connection failures escape as exceptions; core renders them as `"Error while executing tool: -32601 'X' wasn't found"` (`core/toolcalls.py:249`). Peer convention (`user_modules/ssh`) is `self.result(f"Error …: {e}{hint}", success=False)`. A small wrapper mapping `CDPError` / `TimeoutError` / `ConnectionError` → actionable text ("tab closed — call new_tab", "browser unreachable — call open") fixes ~20 tools at once.
 - **R3 — Extract restart state logic.** `_capture_state` + `_restore_state` (`:428-500`, ~120 lines) are page/state logic, not lifecycle → `restart.py` (or `page.py`), exactly like the earlier cdp/page split, and the most worthwhile thing to unit-test.
 - **R4 — De-duplicate helpers.** `_normalize_url()` (B12); one "attach target + enable domains" helper that also supports enabling `Network` on live sessions; hoist `_current_session()` once per tool; **delete dead code** `_profile_dir()` and `_find_binary()` (`:234-241`, never called).
