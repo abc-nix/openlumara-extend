@@ -20,9 +20,10 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 2.7 — budget everywhere + stale tab | done + **verified live** (2026-10-29) | `52f99ad` | Budget also in `navigate` (was the worst overshooter: 10 s + 12 s wait vs a 15 s ceiling), `evaluate`, `snapshot`; B32 fixed (destroyed/crashed tab handling); B33 fixed (`status()` reports the *running* browser's mode from its product string, plus `tool_timeout`); `wait_seconds` coerced like other args; better `_current_session()` error. 52 tests; import-through-stub check: 22 tools, 22 guarded, signatures intact. **Needs a restart to load.** |
 | 2.8 — one deadline for every tool call | done, **needs restart** | `615678a` | B37 finished rather than repeated: `_guarded` opens one `Budget` per call (`util.CALL_BUDGET`, a ContextVar) and `cdp.cmd` resolves `timeout=None` from it, so the private 10 s signature default is gone for all 22 tools; navigate's 12 s load cap, the launch wait (20 × 0.5 s) and page.py's session helpers now share the same deadline; `util.tool_budget` shrinks the reserve at small totals (the old `max(1.0, total-0.5)` equalled the call at ≤1.5 s). 61 tests. |
 | 2.9 — metrics from CDP + area cap (B38) | done, **needs restart** | `d620741` | `viewport_metrics` = `Page.getLayoutMetrics` (protocol units: `css*` are CSS px, deprecated `contentSize`/`layoutViewport` are device px, so `contentSize` *is* the capture raster); `full_page_max_pixels` (Mpx, default 25, **no** upper clamp) replaces the 8000 px height cap whose own max was 12000; `draw_grid(scale=)` keeps labels in document coordinates on HiDPI. 72 tests. |
-| 2.10 — timeout text (B40) | done, **needs restart** | `ea7d08a` | Text names the total that bound the call, offers capture advice only from `screenshot`, rounds the number; `navigate` omits `note` when the load event arrived and says when the budget — not `wait_seconds` — cut the wait; the webui status route reports `_headless_actual()`, which falls back to the launch-time mode instead of the current setting. 75 tests. |
-| 2.11 — number text (B40, part 2) | done, **needs restart** | `6eb5ab5` | Live check caught the first text naming `budget.total` (14.5 s) while the setting says 15.0 s — the B40 mismatch again at a smaller scale. `timeout_text` takes `core.tool_timeout`; the screenshot messages quote the setting too. |
-| 4 … 8 | pending | — | see §9 (§2 B43 open: `full_page` hang) |
+| 2.10 — timeout text (B40) | done + **verified live** (11:23, fresh process) | `ea7d08a` | Text names the total that bound the call, offers capture advice only from `screenshot`, rounds the number; `navigate` omits `note` when the load event arrived and says when the budget — not `wait_seconds` — cut the wait; the webui status route reports `_headless_actual()`, which falls back to the launch-time mode instead of the current setting. 75 tests. |
+| 2.11 — number text (B40, part 2) | done + **verified live** (11:23) | `6eb5ab5` | Live check caught the first text naming `budget.total` (14.5 s) while the setting says 15.0 s — the B40 mismatch again at a smaller scale. `timeout_text` takes `core.tool_timeout`; the screenshot messages quote the setting too. |
+| 2.12 — bound a stalled full-page capture (B43) | done, live for the normal path | `68792ff` | Full-page capture gets half the call, falls back to a viewport capture with a note naming the stalled full-page attempt; both failing means the tab is stalled. Normal `full_page` (example.com) still succeeds with the half window. The stall itself is still intermittent and unnamed — the fix bounds its cost, it does not claim to cure it. |
+| 4 … 8 | pending | — | see §9 (§2 B43 open: `full_page` stall) |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
 
@@ -693,6 +694,16 @@ Static and harness evidence only: these commits are **not yet loaded** by the ru
 - so it is neither the URL alone, nor the tab alone, nor the page size (example.com's document height equals the viewport, 1305 px).
 
 That excludes the "cost grows with pixels" explanation the height cap was built on, but **not enough data to name the mechanism**. The first attempt hung before any timeout existed, so "a capture left in flight by an earlier failure" cannot explain it — a compositor/paint state tied to this document instance can. Do not ship a mitigation (reload-before-capture is the only one the evidence even hints at) until it is reproduced from a cold start with the tab freshly loaded.
+
+### Cold restart (process `lstart` 11:22:51), `tool_timeout` = 30 — all of 2.8–2.12 loaded
+
+| Check | Result |
+|---|---|
+| `ps -o lstart` | 11:22:51 — after `68792ff`, so this is the first run with everything actually loaded (the previous "restart" had only reloaded `module.py`; §11/B25) ✔ |
+| `full_page` on example.com (half window ⇒ ~14.75 s; the capture itself takes well under a second) | succeeds, 75,714 B ✔ |
+| `click` under a blocked main thread | `…timed out after 29.5s - this tool call gets 30.0s in total (Settings > Core > Tool Timeout), and the module stops just short of that so it can answer instead of being cut off…` — sentence, number and scaling are all the current ones ✔ |
+
+That closes B37–B40 with live evidence at both 15 s and 30 s settings.
 
 ### Real-site session (Wikipedia, 2026-10-27)
 
