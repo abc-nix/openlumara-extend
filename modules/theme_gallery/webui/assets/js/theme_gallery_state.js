@@ -338,7 +338,10 @@ tgPart({
         // _renderInner awaited every slot family.
         const varsA = resolveVars(this.base, this.cache[A.family], A.mode);
         const varsB = resolveVars(this.base, this.cache[B.family], B.mode);
-        const all = new Set([...Object.keys(this.base), ...Object.keys(rawA), ...Object.keys(rawB)]);
+        // base.json may be flat or {common,dark,light}; each pane resolves its
+        // own mode's group, so the union of the RESOLVED maps covers every
+        // base key either pane can render.
+        const all = new Set([...Object.keys(varsA), ...Object.keys(varsB), ...Object.keys(rawA), ...Object.keys(rawB)]);
         const rows = [];
         let differing = 0, missing = 0, eff = 0;
         for (const k of all) {

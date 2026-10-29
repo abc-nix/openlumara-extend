@@ -39,6 +39,20 @@
 /* Mirrors theming.js apply(): base first, then theme[mode] on top, with the
    same fallback chain (requested mode → opposite mode → dark). Returns the
    flat {varName: value} map for one family+mode. */
+/* Base defaults for one mode. base.json ships one of two shapes: the legacy
+   flat { --var: value, ... }, and the mode-aware { common, dark, light }.
+   Mirrors theming.js apply(): the common group first, then the group for the
+   mode that is actually in play (effective — after the fallback chain). */
+function baseVars(base, effective) {
+    const b = base || {};
+    if (!('common' in b) && !('dark' in b) && !('light' in b)) return b;
+    const out = {};
+    for (const group of [b.common, b[effective]]) {
+        for (const [k, v] of Object.entries(group || {})) out[k] = v;
+    }
+    return out;
+}
+
 function resolveVars(base, themeData, mode) {
     let effective = mode;
     if (themeData && !themeData[mode]) {
@@ -46,7 +60,7 @@ function resolveVars(base, themeData, mode) {
         effective = themeData[alternate] ? alternate : 'dark';
     }
     const out = {};
-    for (const [k, v] of Object.entries(base || {})) out[k] = v;
+    for (const [k, v] of Object.entries(baseVars(base, effective))) out[k] = v;
     for (const [k, v] of Object.entries((themeData && themeData[effective]) || {})) out[k] = v;
     return out;
 }
