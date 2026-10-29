@@ -123,13 +123,24 @@ class CDPClient:
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
         self._pending[mid] = fut
-        await self.ws.send_json(msg)
+        try:
+            await self.ws.send_json(msg)
+        except Exception as exc:
+            # B21: the future was registered before the send; a failed send
+            # used to leave it in _pending until the connection died
+            self._pending.pop(mid, None)
+            raise ConnectionError(
+                f"Could not send '{method}' to the browser: {exc}") from None
         try:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
-            self._pending.pop(mid, None)
             # one decimal: 14.499991990000126s reads like a floating-point bug
             raise TimeoutError(f"CDP command '{method}' timed out after {timeout:.1f}s")
+        finally:
+            # this command owns its entry, whatever happened: a reply (the
+            # reader pops too, harmlessly), a timeout, a cancellation, or a
+            # command that never answers at all (B21)
+            self._pending.pop(mid, None)
 
     async def close(self):
         if self.ws and not self.ws.closed:

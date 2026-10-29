@@ -40,7 +40,7 @@ def _load_helpers():
 
 _load_helpers()
 
-from _browser_helpers_pkg import page  # noqa: E402
+from _browser_helpers_pkg import cdp, page  # noqa: E402
 
 
 class NormalizeGridTests(unittest.TestCase):
@@ -223,6 +223,77 @@ class ViewportMetricsTests(unittest.TestCase):
                            "contentSize": {"width": 800, "height": 4000}})
         self.assertEqual((m["docW"], m["docH"]), (800, 4000))
         self.assertEqual(m["devicePixelRatio"], 1.0)
+
+
+class _FakeWS:
+    """A websocket that records sends, or fails them on demand."""
+
+    closed = False
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.sent = []
+
+    async def send_json(self, msg):
+        if self.fail:
+            raise RuntimeError("socket closed")
+        self.sent.append(msg)
+
+
+class CDPCommandTests(unittest.TestCase):
+    """B21: a command that never completes must not leave a pending future."""
+
+    @staticmethod
+    def _client(fail=False):
+        client = cdp.CDPClient(None, "", None, lambda *args: None)
+        client.ws = _FakeWS(fail=fail)
+        return client
+
+    def test_failed_send_leaves_nothing_pending(self):
+        import asyncio
+        client = self._client(fail=True)
+        with self.assertRaises(ConnectionError):
+            asyncio.run(client.cmd("Page.enable"))
+        self.assertEqual(client._pending, {})
+
+    def test_timeout_reports_and_cleans_up(self):
+        import asyncio
+        client = self._client()
+        with self.assertRaises(TimeoutError) as ctx:
+            asyncio.run(client.cmd("Page.captureScreenshot", timeout=0.05))
+        self.assertIn("'Page.captureScreenshot'", str(ctx.exception))
+        self.assertIn("after 0.1s", str(ctx.exception))   # one decimal, no 14.49999
+        self.assertEqual(client._pending, {})
+
+    def test_cancellation_leaves_nothing_pending(self):
+        import asyncio
+        client = self._client()
+
+        async def main():
+            task = asyncio.create_task(client.cmd("Page.enable", timeout=30))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(main())
+        self.assertEqual(client._pending, {})
+
+    def test_a_reply_resolves_the_pending_future(self):
+        import asyncio
+        client = self._client()
+        client._id = 0
+
+        async def main():
+            task = asyncio.create_task(client.cmd("Page.enable", timeout=2))
+            while not client._pending:
+                await asyncio.sleep(0.01)
+            mid, fut = next(iter(client._pending.items()))
+            fut.set_result({"ok": True})
+            return await task
+
+        self.assertEqual(asyncio.run(main()), {"ok": True})
+        self.assertEqual(client._pending, {})
 
 
 if __name__ == "__main__":
