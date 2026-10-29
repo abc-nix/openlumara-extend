@@ -63,10 +63,17 @@ KEY_MAP = {
 # ---------------------------------------------------------------------------
 
 async def list_page_targets(cdp_client):
+    """Page targets in the order Chrome reports them (stable across calls).
+
+    Deliberately NOT sorted by `targetInfos[].attached` (B26): that flag only
+    says "a debugger is attached", so the order changed as soon as this module
+    attached to a second tab and `switch_tab(0)` no longer meant the tab
+    `list_tabs` showed first. What the callers need is one order that holds
+    from one call to the next; which tab is "current" is answered separately
+    (`active` in the tool output, `self._current_target`).
+    """
     res = await cdp_client.cmd("Target.getTargets")
-    pages = [t for t in res.get("targetInfos", []) if t.get("type") == "page"]
-    pages.sort(key=lambda t: 0 if t.get("attached") else 1)
-    return pages
+    return [t for t in res.get("targetInfos", []) if t.get("type") == "page"]
 
 
 def find_target(targets, target):

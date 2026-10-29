@@ -165,6 +165,20 @@ class _FakeCDP:
         return self.result
 
 
+class ListPageTargetsTests(unittest.TestCase):
+    def test_order_is_the_order_chrome_reports(self):
+        # B26: sorting by `attached` made the index depend on our own
+        # attachments, so switch_tab(0) could hit another tab than list_tabs(0)
+        import asyncio
+        fake = _FakeCDP({"targetInfos": [
+            {"targetId": "B", "type": "page", "attached": False},
+            {"targetId": "A", "type": "page", "attached": True},
+            {"targetId": "S", "type": "service_worker"},
+        ]})
+        targets = asyncio.run(page.list_page_targets(fake))
+        self.assertEqual([t["targetId"] for t in targets], ["B", "A"])
+
+
 class ViewportMetricsTests(unittest.TestCase):
     """B38: the metrics must come from CDP, in the right units."""
 
