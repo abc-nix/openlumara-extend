@@ -220,6 +220,30 @@ def wrap_await(expression):
     return "(async () => { return (" + str(expression) + "\n); })()"
 
 
+def headless_from_version(info):
+    """Was the browser that answered /json/version headless? (B33, corrected)
+
+    The "Browser" product string is not enough. Measured 2026-10-29 with
+    Chrome 156 and `--headless=new`: /json/version answers
+    "Browser": "Chrome/156.0.8078.73" while its User-Agent still says
+    HeadlessChrome - so the product-string check reported a headless browser
+    as visible, the exact error B33 was meant to end. The UA is the browser's
+    own claim about itself and wins; the product string stays as the fallback
+    for builds whose UA says nothing either way.
+    """
+    if not info:
+        return None
+    ua = str(info.get("User-Agent") or "")
+    if "HeadlessChrome" in ua:
+        return True
+    product = headless_from_product(info.get("Browser"))
+    if product is not None:
+        return product
+    if ua:
+        return False
+    return None
+
+
 def headless_from_product(product):
     """Was `product` (CDP /json/version "Browser") running headless?
 

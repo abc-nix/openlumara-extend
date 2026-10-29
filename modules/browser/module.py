@@ -55,7 +55,7 @@ from .cdp import CDPClient, CDPError, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
 from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
-                   headless_from_product, timeout_text, rejected_top_level_await,
+                   headless_from_version, timeout_text, rejected_top_level_await,
                    wrap_await)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
@@ -354,10 +354,13 @@ class Browser(core.module.Module):
         """Headless mode of the browser that is actually running (B33).
 
         The setting only predicts the next launch and says nothing about a
-        browser we merely attached to, so ask the browser itself: /json/version
-        reports "HeadlessChrome/x" vs "Chrome/x". None means genuinely unknown.
+        browser we merely attached to, so ask the browser itself. Note that
+        modern Chrome's `--headless=new` keeps "Chrome/x" in the Browser field
+        and only admits it in the User-Agent, which is why
+        util.headless_from_version reads both (B33, corrected 2026-10-29).
+        None means genuinely unknown.
         """
-        actual = headless_from_product((self._browser_info or {}).get("Browser"))
+        actual = headless_from_version(self._browser_info)
         if actual is None and self._owns_browser():
             # the product string was unreadable: answer with the mode we
             # launched with, not with the current setting - that one predicts

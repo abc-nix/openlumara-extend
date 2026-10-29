@@ -333,7 +333,11 @@ class ProcessOwnershipTests(unittest.TestCase):
                 self.assertTrue(cdp.process_owns_browser(proc.pid, 9711, profile))
                 self.assertFalse(cdp.process_owns_browser(proc.pid, 9712, profile))
                 self.assertFalse(cdp.process_owns_browser(proc.pid, 9711, profile + "-x"))
-                self.assertTrue(await cdp.stop_pid(proc.pid))
+                # stop_pid signals it; reap it ourselves before checking (a
+                # child stays a zombie - and a live pid - until wait() runs,
+                # which made this test flaky once)
+                await cdp.stop_pid(proc.pid)
+                await proc.wait()
                 with self.assertRaises(OSError):
                     os.kill(proc.pid, 0)
             finally:

@@ -38,6 +38,34 @@ class HeadlessFromProductTests(unittest.TestCase):
         self.assertTrue(util.headless_from_product("HeadlessFork/1.0"))
 
 
+class HeadlessFromVersionTests(unittest.TestCase):
+    """B33: modern Chrome is headless without saying so in the product string."""
+
+    BROWSER = "Chrome/156.0.8078.73"
+
+    def test_new_headless_admits_it_only_in_the_user_agent(self):
+        # measured 2026-10-29: --headless=new still reports Browser=Chrome/...
+        self.assertTrue(util.headless_from_version({
+            "Browser": self.BROWSER,
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+        }))
+
+    def test_visible_browser(self):
+        self.assertFalse(util.headless_from_version({
+            "Browser": self.BROWSER,
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+        }))
+
+    def test_old_headless_product_string_still_counts(self):
+        self.assertTrue(util.headless_from_version({"Browser": "HeadlessChrome/131"}))
+
+    def test_nothing_known_is_none(self):
+        self.assertIsNone(util.headless_from_version(None))
+        self.assertIsNone(util.headless_from_version({}))
+
+
 class DropTargetTests(unittest.TestCase):
     def test_current_tab_dying_clears_the_current_target(self):
         attached = {"A": "sid-a", "B": "sid-b"}
