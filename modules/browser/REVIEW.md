@@ -732,6 +732,8 @@ Not live-tested, and why: **dialog scoping** would need `auto_accept_dialogs` of
 | `close()` | Chrome gone **and the pid file removed** — a stale file can't be adopted later ✔ |
 | `open()` again | new pid **6624**, pid file rewritten ✔ |
 
+**B33 corrected, live (12:30 restart):** `status` on a `--headless=new` browser now reports `headless: true` (same browser: cmdline `--headless=new`, `Browser: Chrome/156…`, UA `HeadlessChrome/156…`), with `owned_process: true` and the pid file naming the live Chrome (9876).
+
 **B15, live (12:23, panel "Switch to headless"):** the restart route ran end to end — old browser closed, the port came back quiet, a new Chrome (pid 8128, 12:23:55) started, the pid file was rewritten and `owned_process` stayed true. The abort branch (port never quiet) was not exercised and is not expected to be easy to provoke.
 
 **Still owed live** (both need the user, not a tool): the **module reload** that originally lost ownership (B5's actual event — the adoption code is verified against a real file, but on_ready being called by a reload is not), and one **panel Restart** (B15's port-down wait is only on that route; the stop half is verified above).
