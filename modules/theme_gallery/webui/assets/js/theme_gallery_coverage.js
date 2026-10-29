@@ -22,7 +22,7 @@ tgPart({
     // channels/webui/assets/css/modals/settings/ — they are CORE sheets that
     // the first version mis-bucketed as "module-owned", which silently
     // dropped ~140 core classes from the denominator.
-    const CORE_SHEET = /^(base|main|animations|modal|modals|fields|sidebar|window|input|header|message_bubble|message_buttons|upload|context_pill|reasoning|toolcalls|combined_block|custom_tool_views|agent_chain|prompt_processing|typing_indicator|global_search|categories|move_chat|restart|appearance|login|code-copy|welcome|module_library|api|logs|system_prompt)\.css$/;
+    const CORE_SHEET = /^(base|main|animations|modal|modals|fields|sidebar|window|input|header|message_bubble|message_buttons|upload|context_pill|reasoning|toolcalls|combined_block|custom_tool_views|agent_chain|prompt_processing|typing_indicator|steering|global_search|categories|move_chat|restart|appearance|login|code-copy|welcome|module_library|api|logs|system_prompt)\.css$/;
         const MODULE_SHEET = /^(coder|codeeditor|editor|git|docs|memories|mem|testbench|dp_vlm|browser|vim)\.css$/;
         const EXCLUDE = /theme_gallery|hljs|code-themes|responsive|normalize|github-light|\.user\.css/;
         // FIX 2026-10-25: .modal-overlay is NOT dead — modals/index.html

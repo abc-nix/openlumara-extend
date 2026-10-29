@@ -1,0 +1,21 @@
+{# ================= E37 steering queue (upstream mid-stream steering) ================= #}
+<section class="tg-el-section">
+    <h3>Steering queue</h3>
+    {# messages sent while the AI is busy: REAL structure
+       #input > .steering-queue > .steering-queue-header + N x (.steering-item > .steering-text).
+       Rendered by input.html through x-if only while streaming with queued
+       messages, so it sits directly above .input-wrapper. #}
+    <div id="input">
+        <div class="steering-queue">
+            <div class="steering-queue-header">steering</div>
+            <div class="steering-item">
+                <span class="steering-text">Actually, use the 70b model for this one</span>
+            </div>
+            <div class="steering-item">
+                <span class="steering-text">then summarise what changed
+and keep the diff short</span>
+            </div>
+        </div>
+    </div>
+    <div class="tg-el-cap">#input &gt; .steering-queue &gt; .steering-queue-header + .steering-item &gt; .steering-text — dashed border + 8% fill both from color-mix() on --accent, radius-sm, and the second item shows the merged multi-line text (white-space: pre-line, never truncated). .steering-arrow exists in steering.css but the template does not render it (omitted here on purpose)</div>
+</section>

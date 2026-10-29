@@ -252,6 +252,20 @@ turns/), templates/modals/**, js/renderers/markdown.js, live DOM class scan.
   `#chat-list > .chats > .day-chats > .item.renaming > .title-row`
   (rename-input: transparent bg + 1px accent border — verified).
 
+### E37 Steering queue  `[x]`  (added 2026-10-29 — upstream mid-stream steering)
+- `#input > .steering-queue > .steering-queue-header` + N x `.steering-item >
+  .steering-text`. Dashed border + 8% fill, both `color-mix()` on `--accent`;
+  `--radius-sm` for the pill. Only rendered by input.html while
+  `$store.stream.state !== 'idle'` with queued messages, directly above
+  `.input-wrapper`.
+- Second sample is the merged multi-line message (`white-space: pre-line` —
+  stacking steering messages shows every line, nothing is truncated).
+- `.steering-arrow` (`@keyframes steeringPulse`) is defined in
+  `assets/css/chat/steering.css` but the template does not render it today;
+  omitted from the sample on purpose. `steering.css` was also missing from
+  `CORE_SHEET` in theme_gallery_coverage.js — added, so these classes now count
+  as core in the class-coverage report.
+
 ### E20 Global bits  `[x]` passive — scrollbars (::webkit-scrollbar +
     scrollbar-color), ::selection, :focus-visible rings, `*:disabled`
     opacity .5 all live on :root/global selectors → THEY ALREADY apply
