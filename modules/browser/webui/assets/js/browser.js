@@ -7,9 +7,13 @@
  *   POST /api/ext/browser/close    -> terminate (owned) / disconnect (external)
  *
  * The rail button and the popover both bind to this store, so their state
- * can never drift apart. Polling only runs while the popover is open;
- * instead of teardown hooks, refresh() itself stops the interval when the
- * popover is gone -> a leaked timer self-heals within one tick.
+ * can never drift apart. The passive status route is polled for as long as
+ * the page is visible - NOT only while the popover is open: the dot on the
+ * rail button shows whether the browser is up, and it used to stay stale
+ * until the panel was clicked (there is no event for "a tool closed the
+ * browser", so the UI has to look). Polling pauses while the tab is hidden,
+ * requests never overlap, and every action (open/close/restart) still
+ * refreshes immediately.
  * Popover open/close lives here (panelOpen) so the button toggle, the
  * click-outside dismiss and the Esc listener can never disagree.
  *
@@ -29,17 +33,19 @@ const BROWSER_PANEL = {
     error: null,
     polling: false,
     _timer: null,
+    _inflight: false,
 
     async refresh() {
-        if (this.polling && !this.panelOpen) {
-            this.stopPolling();  // watchdog: popover closed via any path
-        }
+        if (this._inflight) return;   // never stack requests on a slow route
+        this._inflight = true;
         try {
             this.status = await simpleApiFetch('/api/ext/browser/status');
         } catch (e) {
             // route unreachable (module disabled/reloaded mid-session):
             // show closed, don't nag with an error line
             this.status = { ...BROWSER_PANEL_CLOSED };
+        } finally {
+            this._inflight = false;
         }
     },
 
@@ -85,7 +91,8 @@ const BROWSER_PANEL = {
     closePanel() {
         this.panelOpen = false;
         this.helpOpen = false;
-        this.stopPolling();
+        // polling keeps running: the rail dot must stay truthful while the
+        // popover is closed (that was the bug)
     },
 
     togglePanel() {
@@ -163,9 +170,11 @@ const BROWSER_PANEL = {
     },
 
     startPolling() {
-        this.stopPolling();
+        if (this._timer) return;      // already running (called on init, on show, on panel open)
         this.polling = true;
-        this._timer = setInterval(() => this.refresh(), 2500);
+        this._timer = setInterval(() => {
+            if (!document.hidden) this.refresh();
+        }, 3000);
     },
 
     stopPolling() {
@@ -207,4 +216,16 @@ const BROWSER_PANEL = {
 
 document.addEventListener('alpine:init', () => {
     Alpine.store('browserPanel', BROWSER_PANEL);
+    // the rail dot is visible whether or not the popover is open, so start
+    // looking right away and keep looking while the page is shown
+    BROWSER_PANEL.refresh();
+    BROWSER_PANEL.startPolling();
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            BROWSER_PANEL.stopPolling();
+        } else {
+            BROWSER_PANEL.refresh();
+            BROWSER_PANEL.startPolling();
+        }
+    });
 });
