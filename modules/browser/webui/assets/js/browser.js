@@ -216,16 +216,19 @@ const BROWSER_PANEL = {
 
 document.addEventListener('alpine:init', () => {
     Alpine.store('browserPanel', BROWSER_PANEL);
-    // the rail dot is visible whether or not the popover is open, so start
-    // looking right away and keep looking while the page is shown
-    BROWSER_PANEL.refresh();
-    BROWSER_PANEL.startPolling();
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            BROWSER_PANEL.stopPolling();
-        } else {
-            BROWSER_PANEL.refresh();
-            BROWSER_PANEL.startPolling();
-        }
-    });
+});
+
+// The rail dot is visible whether or not the popover is open, so polling must
+// not depend on any Alpine event having fired (a listener registered late
+// would never run, and the dot would stay at "checking.." until a click):
+// this runs as soon as the file is evaluated.
+BROWSER_PANEL.refresh();
+BROWSER_PANEL.startPolling();
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        BROWSER_PANEL.stopPolling();
+    } else {
+        BROWSER_PANEL.refresh();
+        BROWSER_PANEL.startPolling();
+    }
 });
