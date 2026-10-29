@@ -190,6 +190,7 @@ class Browser(core.module.Module):
         self._http = None
         self._cdp = None
         self._owned_proc = None
+        self._owned_pid = None       # adopted from the pid file after a reload (B5)
         self._current_target = None
         self._attached = {}          # targetId -> sessionId
         # B18: refs belong to a tab's snapshot, not to the module: a snapshot
@@ -215,6 +216,7 @@ class Browser(core.module.Module):
         os.makedirs(self._snapshots_dir, exist_ok=True)
         self._http = aiohttp.ClientSession()
         self._started = True
+        self._adopt_pidfile()
         self.log("browser", "Ready (browser will launch on first use)")
 
     async def on_shutdown(self):
@@ -231,16 +233,10 @@ class Browser(core.module.Module):
             except Exception:
                 pass
             self._http = None
-        if self._owned_proc and self.config.get("close_browser_on_shutdown", True):
-            try:
-                self._owned_proc.terminate()
-                await asyncio.wait_for(self._owned_proc.wait(), timeout=3)
-            except Exception:
-                try:
-                    self._owned_proc.kill()
-                except Exception:
-                    pass
-        self._owned_proc = None
+        if self._owns_browser() and self.config.get("close_browser_on_shutdown", True):
+            await self._stop_owned()
+        # when the setting says "leave it running", the pid file stays: the
+        # next start adopts the browser instead of calling it external (B5)
 
     async def on_background(self):
         """Supervisor: keep the connection alive / reconnect if needed."""
@@ -269,9 +265,64 @@ class Browser(core.module.Module):
     def _find_binary(self):
         return cdp.find_binary(self.config)
 
+    def _pidfile(self):
+        return os.path.join(core.get_data_path("browser"), "browser.pid")
+
+    def _adopt_pidfile(self):
+        """Recover ownership of a browser launched by an earlier module load (B5).
+
+        A reload re-executes module.py, so `_owned_proc` is gone and the module
+        would report (and treat) its own browser as external. The pid file is
+        only trusted when the process is alive *and* its command line still
+        names this module's profile and port - a reused pid must never be
+        killed.
+        """
+        path = self._pidfile()
+        recorded = cdp.read_pidfile(path)
+        if not recorded:
+            return
+        if cdp.process_owns_browser(recorded["pid"], self._port(),
+                                    cdp.profile_dir(self.config)):
+            self._owned_pid = recorded["pid"]
+            self.log("browser", f"Adopted browser pid {recorded['pid']}")
+        else:
+            cdp.clear_pidfile(path)
+
+    def _owns_browser(self):
+        """True if the running browser was started by this module (B5)."""
+        return self._owned_proc is not None or self._owned_pid is not None
+
+    async def _stop_owned(self):
+        """Stop the browser this module started and forget it (B5/R1).
+
+        One path for close, shutdown and restart, for both kinds of ownership:
+        the asyncio process when this run launched it, the adopted pid after a
+        reload (checked again before signalling - pids get reused).
+        """
+        proc, pid = self._owned_proc, self._owned_pid
+        self._owned_proc = None
+        self._owned_pid = None
+        cdp.clear_pidfile(self._pidfile())
+        if proc is not None:
+            await cdp.stop_process(proc)
+            return True
+        if pid is not None and cdp.process_owns_browser(
+                pid, self._port(), cdp.profile_dir(self.config)):
+            return await cdp.stop_pid(pid)
+        return False
+
     async def _probe(self, tries=1, delay=0.5):
         """Return /json/version dict if a CDP endpoint is up, else None."""
         return await cdp.probe(self._http, self._port(), tries=tries, delay=delay)
+
+    async def _wait_port_down(self, timeout=5.0):
+        """Wait until nothing answers on the CDP port (B15)."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if await self._probe() is None:
+                return True
+            await asyncio.sleep(0.2)
+        return False
 
     async def _launch_browser(self):
         # waiting for the endpoint is part of the tool call: bound by what is
@@ -287,6 +338,10 @@ class Browser(core.module.Module):
         )
         self._launched_headless = launched_headless
         self._owned_proc = proc
+        self._owned_pid = proc.pid
+        # B5: remembered on disk, because a module reload loses _owned_proc
+        cdp.write_pidfile(self._pidfile(), proc.pid, self._port(),
+                          cdp.profile_dir(self.config))
         return info
 
     def _effective_headless(self):
@@ -303,7 +358,7 @@ class Browser(core.module.Module):
         reports "HeadlessChrome/x" vs "Chrome/x". None means genuinely unknown.
         """
         actual = headless_from_product((self._browser_info or {}).get("Browser"))
-        if actual is None and self._owned_proc is not None:
+        if actual is None and self._owns_browser():
             # the product string was unreadable: answer with the mode we
             # launched with, not with the current setting - that one predicts
             # the next launch and says nothing about this process
@@ -717,16 +772,8 @@ class Browser(core.module.Module):
     @core.module.tool
     async def close(self):
         """Closes the browser only if this module launched it; otherwise just disconnects."""
-        if self._owned_proc:
-            try:
-                self._owned_proc.terminate()
-                await asyncio.wait_for(self._owned_proc.wait(), timeout=3)
-            except Exception:
-                try:
-                    self._owned_proc.kill()
-                except Exception:
-                    pass
-            self._owned_proc = None
+        if self._owns_browser():
+            await self._stop_owned()
             if self._cdp:
                 await self._cdp.close()
                 self._cdp = None
@@ -751,7 +798,7 @@ class Browser(core.module.Module):
                 break
         return self.result({
             "connected": True,
-            "owned_process": self._owned_proc is not None,
+            "owned_process": self._owns_browser(),
             # what the running browser really is (not what the setting says),
             # and the one timeout every tool call shares - the number to raise
             # when a capture says it ran out of time
@@ -820,7 +867,7 @@ class Browser(core.module.Module):
         return {
             "connected": connected,
             "browser_running": browser_running,
-            "owned_process": self._owned_proc is not None,
+            "owned_process": self._owns_browser(),
             "browser": browser,
             "current_tab": current_tab,
             "tab_count": tab_count,
@@ -857,7 +904,7 @@ class Browser(core.module.Module):
         session-scoped (the `headless` setting in settings stays the
         permanent source of truth). External browsers are refused: we never
         kill a browser we did not start."""
-        if self._owned_proc is None:
+        if not self._owns_browser():
             return self.result(
                 "Cannot restart: the running browser was not launched by "
                 "this module (external). Close it yourself and reopen from "
@@ -870,7 +917,15 @@ class Browser(core.module.Module):
         new_mode = not self._effective_headless()
         self._headless_override = new_mode
         await self.close()
-        await asyncio.sleep(0.5)  # let the port die before relaunch
+        # B15: a fixed 0.5 s sleep raced the real shutdown - if the port was
+        # still held by the dying browser (or grabbed by something else), the
+        # relaunch attached to a stranger. Wait until nothing answers.
+        if not await self._wait_port_down():
+            return self.result(
+                "Restart aborted: the previous browser is still holding the "
+                f"debug port after {self._port()}. Close it manually and reopen.",
+                success=False,
+            )
         await self._ensure_connection()
         try:
             restored = await self._restore_state(snapshot)

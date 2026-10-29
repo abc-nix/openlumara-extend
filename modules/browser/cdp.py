@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import time
 
 import aiohttp
@@ -216,6 +217,95 @@ async def probe(http, port, tries=1, delay=0.5, deadline=None):
             break
         await asyncio.sleep(delay)
     return None
+
+
+def read_pidfile(path):
+    """{'pid', 'port', 'profile'} from a pid file, or None if unusable."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        pid = int(data.get("pid"))
+        if pid <= 0:
+            return None
+        return {"pid": pid, "port": int(data.get("port") or 0),
+                "profile": str(data.get("profile") or "")}
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def write_pidfile(path, pid, port, profile):
+    """Record which process this module launched, so a reload can still own it."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"pid": int(pid), "port": int(port),
+                       "profile": str(profile)}, f)
+        return True
+    except OSError:
+        return False
+
+
+def clear_pidfile(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def process_owns_browser(pid, port, profile):
+    """Is `pid` still the browser this module launched? (B5)
+
+    A bare pid proves nothing - it can be reused by any process, and killing a
+    stranger's process is worse than losing ownership. Linux exposes the
+    command line, so require it to name this module's profile directory *and*
+    debugging port (both unique to our launch). Where that cannot be checked
+    the answer is no, which degrades to the pre-B5 behaviour instead of
+    guessing.
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmdline = f.read()
+    except OSError:
+        return False
+    return (f"--user-data-dir={profile}".encode() in cmdline
+            and f"--remote-debugging-port={port}".encode() in cmdline)
+
+
+async def stop_pid(pid, wait=3.0):
+    """SIGTERM a process by pid, then SIGKILL it; True once it is gone."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        await asyncio.sleep(0.1)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+    await asyncio.sleep(0.2)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return True
+    return False
 
 
 async def stop_process(proc, wait=3.0):

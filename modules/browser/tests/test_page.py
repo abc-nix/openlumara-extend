@@ -289,6 +289,66 @@ class LaunchFailureTests(unittest.TestCase):
             os.kill(pid, 0)
 
 
+class ProcessOwnershipTests(unittest.TestCase):
+    """B5: a pid is only ours if its command line says so."""
+
+    def test_pidfile_round_trip(self):
+        import os
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "nested", "browser.pid")
+        self.assertTrue(cdp.write_pidfile(path, 4242, 9222, "/tmp/p"))
+        self.assertEqual(cdp.read_pidfile(path),
+                         {"pid": 4242, "port": 9222, "profile": "/tmp/p"})
+        cdp.clear_pidfile(path)
+        self.assertIsNone(cdp.read_pidfile(path))
+
+    def test_garbage_pidfile_is_none(self):
+        import os
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "browser.pid")
+        with open(path, "w") as f:
+            f.write("{not json")
+        self.assertIsNone(cdp.read_pidfile(path))
+
+    def test_another_process_is_not_ours(self):
+        import os
+        # this python process is alive, but its command line names neither the
+        # profile nor the port, so it must not be adopted
+        self.assertFalse(cdp.process_owns_browser(os.getpid(), 9711, "/nonexistent"))
+
+    def test_ownership_needs_the_recorded_profile_and_port(self):
+        import asyncio
+        import os
+        import tempfile
+
+        if not os.path.isdir("/proc"):
+            self.skipTest("needs /proc")
+        profile = tempfile.mkdtemp()
+
+        async def main():
+            proc = await asyncio.create_subprocess_exec(
+                "sh", "-c", "exec sleep 10", "sh",
+                f"--user-data-dir={profile}", "--remote-debugging-port=9711")
+            try:
+                self.assertTrue(cdp.process_owns_browser(proc.pid, 9711, profile))
+                self.assertFalse(cdp.process_owns_browser(proc.pid, 9712, profile))
+                self.assertFalse(cdp.process_owns_browser(proc.pid, 9711, profile + "-x"))
+                self.assertTrue(await cdp.stop_pid(proc.pid))
+                with self.assertRaises(OSError):
+                    os.kill(proc.pid, 0)
+            finally:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await proc.wait()
+                except Exception:
+                    pass
+
+        asyncio.run(main())
+
+
 class _FakeWS:
     """A websocket that records sends, or fails them on demand."""
 
