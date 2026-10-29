@@ -46,8 +46,9 @@ core code, plus refactoring notes. (Added 2026-10-07.)
   kill a browser we did not launch).
 - A sanitized snapshot is written to `data/browser/last_state.json`
   (crash-recovery aid for a future "restore tabs" affordance).
-- Tested by `tmp/browser_restart_harness.py` (gate, capture-before-kill
-  ordering, tab skip list, injection, activation, bounds, launch flag).
+- No automated coverage yet (`tests/` stays unit-level): the invariants the
+  route must keep are the gate, capture-before-kill ordering, tab skip
+  list, injection, activation, bounds and the launch flag.
 
 ## Apply rules (what needs what)
 - Edit template/CSS/JS: hard browser refresh only (per-request extension

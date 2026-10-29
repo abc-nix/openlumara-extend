@@ -1156,7 +1156,7 @@ class Browser(core.module.Module):
                       "nativeVirtualKeyCode": vk}
             # character keys need the `text` payload on keyDown or Chrome
             # never reaches the keypress stage -> no implicit form submit
-            # on Enter, no space character insertion (probe: tmp/enter_probe.py)
+            # on Enter, no space character insertion
             if ktype == "keyDown" and key in ("enter", "space"):
                 params["text"] = "\r" if key == "enter" else " "
                 params["unmodifiedText"] = params["text"]

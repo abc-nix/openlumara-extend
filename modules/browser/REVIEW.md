@@ -260,8 +260,8 @@ Both fixed in phase 2 (`3a26241`); the `finally`/`remove_grid` half became **obs
 - `README.md`: says **four** routes and lists `templates/modals/browser.html`; there are **five** routes (`shot`) and no modals folder.
 - Calls `data/browser/last_state.json` "sanitized": `_capture_state` writes filled-in form values verbatim (only `password`/`file` inputs are skipped).
 - Claims "core has no module-safe config setter; worth proposing one upstream" — contradicted by `core/module.py:ModuleConfig.set()` + `core/config.py:325 ConfigManager.__setitem__` → `root_config.save()`. Rewrite that section.
-- Harness paths (`tmp/browser_restart_harness.py`, `tmp/browser_surface_harness.py`, `tmp/grid_proto.py`, `tmp/enter_probe.py`) point at files that no longer exist (`tmp/` was cleaned). Move them into `tests/` (see R6).
-- `page.py:333-338` and `module.py:855` still reference `tmp/grid_proto.py` / `tmp/enter_probe.py`.
+- Harness paths (`tmp/browser_restart_harness.py`, `tmp/browser_surface_harness.py`, `tmp/grid_proto.py`, `tmp/enter_probe.py`) pointed at files that no longer exist (`tmp/` was cleaned). **Fixed 2026-10-29:** README now lists the restart invariants instead of citing the harness, and the `enter_probe` comment is gone from `module.py`. The harnesses themselves still need a permanent home in `tests/` (see R6).
+- Also claimed `page.py:333-338` and `module.py:855` still referenced `tmp/grid_proto.py` / `tmp/enter_probe.py` — wrong on both counts (rechecked 2026-10-29: `page.py` has no `tmp/` reference at all; `module.py` had one, at line 1159, now removed).
 
 ### B25 — Submodules not reloaded (Low)
 
@@ -671,7 +671,7 @@ Static and harness evidence only: these commits are **not yet loaded** by the ru
 | Check | Result |
 |---|---|
 | `python3 -m unittest discover -s modules/browser/tests` | **75 pass** (52 → 75: reserve arithmetic, `resolve_timeout`, ContextVar isolation, css/device units, no page JS, area-not-height, grid `scale`, timeout text) |
-| import-through-stub (`tmp/check_browser_import.py`) | 22 tools, module loads; `_guarded` publishes a budget inside the body and clears it after; `_error_result` for `navigate` no longer mentions `full_page`, for `screenshot` it does |
+| import-through-stub (`~/git/tmp/check_browser_import.py`, with `check_adoption.py` alongside) | 22 tools, module loads; `_guarded` publishes a budget inside the body and clears it after; `_error_result` for `navigate` no longer mentions `full_page`, for `screenshot` it does |
 | `_full_page_max_pixels()` with the stub default | 25 000 000; `capture_fits(1200, 8079)` → fits (9.7 Mpx), `capture_fits(1200, 40415)` → 48.5 Mpx, refused |
 | this machine's `devicePixelRatio` (`evaluate`) | **1** — so the HiDPI half of the unit work (`scale`, grid labels, region) is unit-tested only; it is invisible here |
 | `Page.getLayoutMetrics` units | taken from the protocol reference (this install has `allow_raw_cdp` off, so the command was not sent): *"Deprecated size of scrollable area. Is in DP. Use cssContentSize instead."* |
