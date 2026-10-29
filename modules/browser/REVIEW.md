@@ -708,6 +708,19 @@ That closes B37–B40 with live evidence at both 15 s and 30 s settings.
 
 **B8, measured before fixing (same session):** a `contenteditable` div holding `hello` received `type_text("#ce", "bye")` → the DOM ended up with **`byehello`**. So the docstring's "clears" was fiction: the element has no `select()` (`typeof d.select === 'function'` → false), the single Backspace deleted nothing because the caret sat at the start, and `Input.insertText` then inserted at that caret. The Range-based select (`selectNodeContents` + `getSelection().addRange`) does select `byehello` in the same tab, which is what the fix relies on. The fix itself is unverified until the next restart — and it is also the live check for B29/B30/B18, which all change behaviour the unit tests can only model.
 
+### Phase 4 live checks (process `lstart` 11:44:27, three tabs)
+
+| Item | Check | Result |
+|---|---|---|
+| B26 | `example.com`, `example.org`, Wikipedia; `list_tabs` order; `switch_tab("1")` | switched to **example.org**, and `status().current_tab` + `active` agree with the list ✔ |
+| B18 (refs) | tab B's snapshot had `goB` = `@e3`, tab A's had `goA` = `@e3`; click `@e3` on A | A's title became `A-CLICKED`, tab B's stayed `Example Domain` — the ref resolved in A's own table ✔ |
+| B41 | after navigating that tab away, `click("@e3")` | `Unknown ref @e3. Take a fresh snapshot first` — a refusal, not a click on a stranger node ✔ |
+| B8 | `div#ce` holding `hello`, `type_text("#ce", "bye")` | `textContent` = **`bye`** ✔ |
+| B29 | `console.log('marker-A-from-example-com')`, then navigate the tab to example.org, then `console(5)` | entry kept `page: https://example.com/` and its `tab` id ✔ |
+| B30 | `evaluate("await Promise.resolve(7)")` | returned **7** ✔ |
+
+Not live-tested, and why: **dialog scoping** would need `auto_accept_dialogs` off (the default auto-accepts before `handle_dialog` can see it) and **network tagging** needs `enable_network_monitoring` on — both are settings changes I did not make; they are covered by `tests/test_module_events.py`.
+
 ### Real-site session (Wikipedia, 2026-10-27)
 
 Passed on a site with real cookies and real traffic:
