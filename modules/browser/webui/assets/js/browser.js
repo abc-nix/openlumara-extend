@@ -22,6 +22,18 @@
  * files doesn't matter (Alpine itself is deferred).
  */
 
+// The UI reads the Alpine store *proxy*; writing through the raw object
+// (BROWSER_PANEL) changes the data without notifying Alpine, so the render
+// never follows. Every write has to go through this: the proxy once Alpine
+// exists, the raw object before that (first paint / tests).
+function browserPanelStore() {
+    if (typeof Alpine !== 'undefined' && Alpine.store) {
+        const store = Alpine.store('browserPanel');
+        if (store) return store;
+    }
+    return BROWSER_PANEL;
+}
+
 const BROWSER_PANEL_CLOSED = {
     connected: false, browser_running: false, owned_process: false,
     browser: null, current_tab: null, tab_count: null,
@@ -173,7 +185,10 @@ const BROWSER_PANEL = {
         if (this._timer) return;      // already running (called on init, on show, on panel open)
         this.polling = true;
         this._timer = setInterval(() => {
-            if (!document.hidden) this.refresh();
+            // refresh through the Alpine proxy, never through the captured
+            // raw object: otherwise the fetch updates data the UI is not
+            // subscribed to (the dot stayed stale while status was correct)
+            if (!document.hidden) browserPanelStore().refresh();
         }, 3000);
     },
 
@@ -216,19 +231,22 @@ const BROWSER_PANEL = {
 
 document.addEventListener('alpine:init', () => {
     Alpine.store('browserPanel', BROWSER_PANEL);
+    // through the proxy: the first paint gets real data and Alpine's effects
+    // subscribe to it from the start
+    browserPanelStore().refresh();
 });
 
 // The rail dot is visible whether or not the popover is open, so polling must
-// not depend on any Alpine event having fired (a listener registered late
-// would never run, and the dot would stay at "checking.." until a click):
-// this runs as soon as the file is evaluated.
-BROWSER_PANEL.refresh();
+// not depend on Alpine having fired yet (a listener registered late would
+// never run, and the dot would stay at "checking.." until a click). The timer
+// itself resolves the store per tick, so it keeps writing through the proxy
+// once Alpine is up.
 BROWSER_PANEL.startPolling();
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         BROWSER_PANEL.stopPolling();
     } else {
-        BROWSER_PANEL.refresh();
+        browserPanelStore().refresh();
         BROWSER_PANEL.startPolling();
     }
 });
