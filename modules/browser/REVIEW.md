@@ -23,7 +23,8 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 2.10 — timeout text (B40) | done + **verified live** (11:23, fresh process) | `ea7d08a` | Text names the total that bound the call, offers capture advice only from `screenshot`, rounds the number; `navigate` omits `note` when the load event arrived and says when the budget — not `wait_seconds` — cut the wait; the webui status route reports `_headless_actual()`, which falls back to the launch-time mode instead of the current setting. 75 tests. |
 | 2.11 — number text (B40, part 2) | done + **verified live** (11:23) | `6eb5ab5` | Live check caught the first text naming `budget.total` (14.5 s) while the setting says 15.0 s — the B40 mismatch again at a smaller scale. `timeout_text` takes `core.tool_timeout`; the screenshot messages quote the setting too. |
 | 2.12 — bound a stalled full-page capture (B43) | done, live for the normal path | `68792ff` | Full-page capture gets half the call, falls back to a viewport capture with a note naming the stalled full-page attempt; both failing means the tab is stalled. Normal `full_page` (example.com) still succeeds with the half window. The stall itself is still intermittent and unnamed — the fix bounds its cost, it does not claim to cure it. |
-| 4 … 8 | pending | — | see §9 (§2 B43 open: `full_page` stall) |
+| 4 — typing & refs | B8, B18, B26, B29, B30 done, **needs restart** | `ba53929` · `55e0457` · `ba1ba8f` | Refs per tab and dropped on main-frame navigation (the unnumbered item, folded in), one dialog per tab, logs tagged with tab + page, top-level `await` retried wrapped, stable tab order, contenteditable cleared via a Range. New `tests/test_module_events.py` loads module.py through core/aiohttp/webui stubs. 96 tests. Live checks pending (`switch_tab` order with 3 tabs, two-tab refs, "bye" into contenteditable). |
+| 4 rest … 8 | pending | — | see §9 (§2 B43 open: `full_page` stall) |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
 
@@ -60,7 +61,7 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B5 | **Medium** | `_owned_proc` reset unconditionally → ownership lost on module reload |
 | B6 | **Medium** | `_capture_state` `active_index` mixes target-space and tab-space indices |
 | B7 | **Medium** | `launch_browser` orphans the spawned process when the CDP port never opens |
-| B8 | **Medium** | `type_text` does not clear `contenteditable` (docstring claims it does) |
+| B8 | **Medium** | `type_text` does not clear `contenteditable` (docstring claims it does) — **fixed phase 4** (`55e0457`); confirmed live first: typing "bye" into "hello" produced "byehello" |
 | B9 | **Medium** | `--remote-allow-origins=*` probably unnecessary, widens CDP exposure ⟨verify⟩ |
 | B10 | **Medium** | `user_data_dir` pointing at a real profile = credential exposure, under-signposted |
 | B11 | **Medium** | `unsafe = False` while the module executes processes/JS and reads credentials |
@@ -70,7 +71,7 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B15 | **Low–Med** | Restart relaunch can attach to a dying/foreign browser |
 | B16 | Low | `count=0` returns the whole console/network buffer |
 | B17 | Low | `screenshot()` `finally` can mask the real error; `int(quality)` unguarded |
-| B18 | Low | Cross-tab: `_refs` global, `_pending_dialog` cleared by any tab's dialog |
+| B18 | Low | Cross-tab: `_refs` global, `_pending_dialog` cleared by any tab's dialog — **fixed phase 4** (`55e0457` refs per tab + refs dropped on main-frame navigation, `ba1ba8f` dialog per tab) |
 | B19 | Low | Tab/session bookkeeping leaks (`_capture_state` never detaches) |
 | B20 | Low | `switch_tab(0)` with an int → `AttributeError` (core does not coerce args) |
 | B21 | Low | `CDPClient.cmd` leaks the pending future if `send_json` raises |
@@ -78,11 +79,11 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B23 | Low | `_route_ui_shot` failures are silent in the UI |
 | B24 | Low | README/doc rot (5 routes not 4, dead `modals/`, dead harness paths, wrong config-setter claim) |
 | B25 | Low | `cdp.py`/`page.py` edits are not picked up by a module reload |
-| B26 | Low–Med | Tab index order is unstable: `list_page_targets` sorts "attached first", which stops meaning anything once several tabs are attached, so `switch_tab(0)` can hit a different tab than `list_tabs` showed |
+| B26 | Low–Med | Tab index order is unstable: `list_page_targets` sorts "attached first", which stops meaning anything once several tabs are attached, so `switch_tab(0)` can hit a different tab than `list_tabs` showed — **fixed phase 4** (`ba53929`) |
 | B27 | **Medium** | `screenshot(full_page=True)` on a long page exceeds the 15 s core tool timeout; the module's 20 s `SCREENSHOT_TIMEOUT` can never fire, so the failure is a bare "Tool timed out after 15.0s" |
 | B28 | Low–Med | `get_images` returns every image (38 on one Wikipedia article, including 20 px icons and duplicate `src`) → context bloat |
-| B29 | Low–Med | Console/network entries carry no tab or URL, and the buffers survive navigation → logs from a previous page are attributed to the current one |
-| B30 | Low | `evaluate` rejects top-level `await` (Chrome: "await is only valid in async functions") although `awaitPromise` is on; the AI has to know to wrap in `(async () => …)()` |
+| B29 | Low–Med | Console/network entries carry no tab or URL, and the buffers survive navigation → logs from a previous page are attributed to the current one — **fixed phase 4** (`55e0457`: `tab` + `page` per entry) |
+| B30 | Low | `evaluate` rejects top-level `await` (Chrome: "await is only valid in async functions") although `awaitPromise` is on; the AI has to know to wrap in `(async () => …)()` — **fixed phase 4** (`55e0457`: one retry, wrapped) |
 | B31 | Low | Capped full-page captures are refused, not cut: Chrome paints the whole page for `captureBeyondViewport` whatever `clip` says (measured), so the cheap way to a "top N px" capture is still unknown |
 | B32 | **Medium** | Stale tab session: a closed tab stays `_current_target`, `_ensure_connection` still reports connected, `_attach_target` reuses the dead session id → `-32001 Session with given id not found`, and every tab shows `current: false` — **fixed 2.7** |
 | B33 | Low–Med | Nothing reported the *running* browser's headless mode: the panel value comes from the **setting**, which only predicts the next launch and says nothing about an external browser or a session that ended — the trap behind a wrong "it was headless" claim (**fixed 2.7**) |
@@ -704,6 +705,8 @@ That excludes the "cost grows with pixels" explanation the height cap was built 
 | `click` under a blocked main thread | `…timed out after 29.5s - this tool call gets 30.0s in total (Settings > Core > Tool Timeout), and the module stops just short of that so it can answer instead of being cut off…` — sentence, number and scaling are all the current ones ✔ |
 
 That closes B37–B40 with live evidence at both 15 s and 30 s settings.
+
+**B8, measured before fixing (same session):** a `contenteditable` div holding `hello` received `type_text("#ce", "bye")` → the DOM ended up with **`byehello`**. So the docstring's "clears" was fiction: the element has no `select()` (`typeof d.select === 'function'` → false), the single Backspace deleted nothing because the caret sat at the start, and `Input.insertText` then inserted at that caret. The Range-based select (`selectNodeContents` + `getSelection().addRange`) does select `byehello` in the same tab, which is what the fix relies on. The fix itself is unverified until the next restart — and it is also the live check for B29/B30/B18, which all change behaviour the unit tests can only model.
 
 ### Real-site session (Wikipedia, 2026-10-27)
 
