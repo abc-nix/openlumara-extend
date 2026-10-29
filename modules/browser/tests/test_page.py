@@ -225,6 +225,70 @@ class ViewportMetricsTests(unittest.TestCase):
         self.assertEqual(m["devicePixelRatio"], 1.0)
 
 
+class _NoHTTP:
+    """HTTP stub whose every request fails at once (a port nobody listens on)."""
+
+    def get(self, *args, **kwargs):
+        raise RuntimeError("connection refused")
+
+
+class LaunchFailureTests(unittest.TestCase):
+    """B7: a browser that never comes up must not be left running.
+
+    This is the process harness: a real child process (`exec sleep`, so it
+    replaces the shell and there is no orphan) stands in for Chrome.
+    """
+
+    def test_a_launch_that_never_comes_up_is_killed(self):
+        import asyncio
+        import os
+        import socket
+        import tempfile
+        import time as _time
+
+        if not os.path.isdir("/proc"):
+            self.skipTest("process check needs /proc")
+        tmp = tempfile.mkdtemp()
+        pid_file = os.path.join(tmp, "child.pid")
+        script = os.path.join(tmp, "fake-chrome")
+        with open(script, "w") as f:
+            f.write("#!/bin/sh\n"
+                    f"echo $$ > {pid_file}\n"
+                    "exec sleep 30\n")
+        os.chmod(script, 0o755)
+
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+
+        class Config:
+            def get(self, key=None, default=None, **kwargs):
+                return {"browser_binary": "custom", "custom_binary_path": script,
+                        "user_data_dir": os.path.join(tmp, "profile"),
+                        "port": port, "headless": False,
+                        "window_size": "800,600"}.get(key, default)
+
+        started = _time.monotonic()
+        with self.assertRaises(TimeoutError):
+            asyncio.run(cdp.launch_browser(
+                Config(), lambda *a: None, _NoHTTP(),
+                deadline=_time.monotonic() + 0.6))
+        self.assertLess(_time.monotonic() - started, 5)
+
+        with open(pid_file) as f:
+            pid = int(f.read().strip())
+        # the launch failed, so the caller must not own a stray process
+        deadline = _time.monotonic() + 3
+        while _time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+            _time.sleep(0.1)
+        with self.assertRaises(OSError):
+            os.kill(pid, 0)
+
+
 class _FakeWS:
     """A websocket that records sends, or fails them on demand."""
 

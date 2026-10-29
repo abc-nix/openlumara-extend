@@ -218,6 +218,36 @@ async def probe(http, port, tries=1, delay=0.5, deadline=None):
     return None
 
 
+async def stop_process(proc, wait=3.0):
+    """Terminate a process we started and make sure it is gone (B7).
+
+    Used both when a launch never came up and when the browser is closed: a
+    terminate() that is ignored (or a process already gone) falls back to
+    kill(), and no exception escapes - the caller's own error matters more.
+    """
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return
+    except Exception:
+        pass
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=wait)
+        return
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=1.0)
+    except Exception:
+        pass
+
+
 async def launch_browser(config, log, http, headless=None, deadline=None):
     """Launch the browser process and wait for its CDP endpoint.
 
@@ -248,6 +278,10 @@ async def launch_browser(config, log, http, headless=None, deadline=None):
     )
     info = await probe(http, port, tries=20, delay=0.5, deadline=deadline)
     if info is None:
+        # B7: we started a browser that never became reachable. Leaving it
+        # running would keep a whole Chrome (and its profile lock) alive with
+        # nothing pointing at it.
+        await stop_process(proc)
         if deadline is not None and time.monotonic() >= deadline:
             # the tool call's own budget cut the wait short: say so, and let
             # the error boundary name the setting to raise
