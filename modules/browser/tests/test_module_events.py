@@ -96,7 +96,7 @@ def make_browser(attached=None, urls=None, config_values=None):
     browser._attached = dict(attached or {"T1": "S1"})
     browser._current_target = next(iter(browser._attached), None)
     browser._refs_by_tab = {}
-    browser._pending_dialog = None
+    browser._pending_dialogs = {}
     browser._load_event = asyncio.Event()
     browser._console_log = deque(maxlen=50)
     browser._network_log = deque(maxlen=50)
@@ -214,6 +214,44 @@ class TabRefsTests(unittest.TestCase):
         browser._on_cdp_event({"method": "Target.targetDestroyed",
                                "params": {"targetId": "T1"}})
         self.assertNotIn("T1", browser._refs_by_tab)
+
+
+class DialogScopeTests(unittest.TestCase):
+    """B18: a dialog belongs to the tab it opened on."""
+
+    def _open(self, browser, sid="S1", kind="confirm"):
+        browser._on_cdp_event({
+            "method": "Page.javascriptDialogOpening", "sessionId": sid,
+            "params": {"type": kind, "message": "sure?", "url": "https://a.test/"},
+        })
+
+    def _browser(self):
+        return make_browser(attached={"T1": "S1", "T2": "S2"},
+                            config_values={"auto_accept_dialogs": False})
+
+    def test_two_tabs_keep_their_own_dialog(self):
+        browser = self._browser()
+        self._open(browser, sid="S1")
+        self._open(browser, sid="S2", kind="alert")
+        self.assertEqual(set(browser._pending_dialogs), {"T1", "T2"})
+        self.assertEqual(browser._pending_dialogs["T1"]["type"], "confirm")
+        self.assertEqual(browser._pending_dialogs["T2"]["type"], "alert")
+
+    def test_closing_one_dialog_leaves_the_other(self):
+        browser = self._browser()
+        self._open(browser, sid="S1")
+        self._open(browser, sid="S2", kind="alert")
+        browser._on_cdp_event({"method": "Page.javascriptDialogClosed",
+                               "sessionId": "S1", "params": {}})
+        self.assertNotIn("T1", browser._pending_dialogs)
+        self.assertIn("T2", browser._pending_dialogs)
+
+    def test_destroyed_tab_drops_its_dialog(self):
+        browser = self._browser()
+        self._open(browser, sid="S1")
+        browser._on_cdp_event({"method": "Target.targetDestroyed",
+                               "params": {"targetId": "T1"}})
+        self.assertEqual(browser._pending_dialogs, {})
 
 
 class _AwaitRejectingCDP:

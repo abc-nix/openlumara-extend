@@ -202,7 +202,7 @@ class Browser(core.module.Module):
         # requestId -> the in-flight entry dict inside _network_log, so
         # responseReceived/loadingFinished/loadingFailed can annotate it
         self._net_pending = {}
-        self._pending_dialog = None
+        self._pending_dialogs = {}   # targetId -> pending dialog (B18)
         self._load_event = asyncio.Event()
         self._lock = asyncio.Lock()
         self._browser_info = None
@@ -429,6 +429,7 @@ class Browser(core.module.Module):
             self._attached = {}
             self._current_target = None
             self._refs_by_tab.clear()
+            self._pending_dialogs.clear()   # a new connection has no dialogs
             self._net_pending.clear()
             self._cdp = CDPClient(
                 self._http, info["webSocketDebuggerUrl"],
@@ -502,8 +503,8 @@ class Browser(core.module.Module):
             self._target_url.pop(tid, None)
             keep = drop_target(self._attached, self._current_target, tid)
             self._refs_by_tab.pop(tid, None)   # refs belonged to that document
+            self._pending_dialogs.pop(tid, None)
             if keep != self._current_target:
-                self._pending_dialog = None
                 self._load_event.clear()
             self._current_target = keep
             return
@@ -593,12 +594,16 @@ class Browser(core.module.Module):
                 entry["error"] = ("canceled" if params.get("canceled")
                                   else params.get("errorText", "failed"))
         elif method == "Page.javascriptDialogOpening":
-            self._pending_dialog = {
+            # B18: one slot per tab. A single slot meant a dialog in one tab
+            # could be handled on another tab's session, and a second dialog
+            # silently replaced the first.
+            self._pending_dialogs[self._target_of_session(sid) or sid] = {
                 "type": params.get("type", "alert"),
                 "message": params.get("message", ""),
                 "defaultPrompt": params.get("defaultPrompt", ""),
                 "url": params.get("url", ""),
                 "sessionId": sid,
+                "targetId": self._target_of_session(sid),
             }
             if self.config.get("auto_accept_dialogs", True):
                 asyncio.create_task(self._auto_accept_dialog(sid))
@@ -606,15 +611,15 @@ class Browser(core.module.Module):
             # authoritative signal from Chrome that a dialog was resolved
             # (auto-accept, user click, or handle_dialog): never leave a
             # stale entry that would send handle_dialog to a dialog-less tab
-            self._pending_dialog = None
+            self._pending_dialogs.pop(self._target_of_session(sid) or sid, None)
 
     async def _auto_accept_dialog(self, sid):
         try:
             await self._cdp.cmd("Page.handleJavaScriptDialog",
                                 {"accept": True}, sid)
-            if (self._pending_dialog
-                    and self._pending_dialog.get("sessionId") == sid):
-                self._pending_dialog = None
+            entry = self._pending_dialogs.get(self._target_of_session(sid) or sid)
+            if entry is not None and entry.get("sessionId") == sid:
+                self._pending_dialogs.pop(self._target_of_session(sid) or sid, None)
         except Exception:
             pass
 
@@ -1545,22 +1550,36 @@ class Browser(core.module.Module):
             prompt_text: Text to provide for prompt() dialogs (optional).
         """
         await self._ensure_connection()
-        if not self._pending_dialog:
+        # B18: the current tab's dialog; a dialog from another tab is only
+        # taken when it is the sole one open (otherwise which one is answered
+        # would be a guess)
+        key = self._current_target
+        entry = self._pending_dialogs.get(key)
+        if entry is None and len(self._pending_dialogs) == 1:
+            key, entry = next(iter(self._pending_dialogs.items()))
+        if entry is None:
+            others = [k for k in self._pending_dialogs if k != key]
+            if others:
+                return self.result(
+                    "This tab has no dialog, but another tab has one open "
+                    f"({len(others)}). Switch to that tab and call again.",
+                    success=False,
+                )
             return self.result("No pending dialog.", success=False)
         params = {"accept": bool(accept)}
         if prompt_text is not None:
             params["promptText"] = str(prompt_text)
-        sid = self._pending_dialog.get("sessionId") or self._current_session()
+        sid = entry.get("sessionId") or self._current_session()
         try:
             await self._cdp.cmd("Page.handleJavaScriptDialog", params, sid)
         except CDPError:
             # dialog vanished between the opening event and this call (user
             # clicked it, auto-accept raced us): self-heal instead of
             # leaking a raw CDP error to the model
-            self._pending_dialog = None
+            self._pending_dialogs.pop(key, None)
             return self.result("No dialog is showing (already handled?).",
                                success=False)
-        self._pending_dialog = None
+        self._pending_dialogs.pop(key, None)
         return self.result(f"Dialog {'accepted' if accept else 'dismissed'}.")
 
     @core.module.tool
