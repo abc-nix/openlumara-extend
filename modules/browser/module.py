@@ -1099,8 +1099,8 @@ class Browser(core.module.Module):
             # depend on the cap, so they stay allowed).
             return self.result(
                 "Cannot read the page dimensions, so a full-page capture is refused - "
-                f"an unmeasurably large page would use up the whole {budget.total:.0f}s tool "
-                "timeout and answer nothing. Take a viewport capture (scroll first).",
+                f"an unmeasurably large page would use up the whole {self._tool_timeout():.0f}s "
+                "tool timeout and answer nothing. Take a viewport capture (scroll first).",
                 success=False,
             )
         fits, mpx = capture_fits(shot_w, shot_h, max_px)
@@ -1114,7 +1114,7 @@ class Browser(core.module.Module):
                 f"full-page captures are limited to {max_px // 1_000_000} Mpx "
                 f"(full_page_max_pixels). Take viewport captures instead, or raise "
                 f"that setting - the capture itself has to fit in the "
-                f"{budget.total:.1f}s tool timeout as well.",
+                f"{self._tool_timeout():.1f}s tool timeout as well.",
                 success=False,
             )
         scale = float(metrics.get("devicePixelRatio") or 1.0)
@@ -1134,8 +1134,9 @@ class Browser(core.module.Module):
         except TimeoutError as e:
             self.log("browser", f"screenshot: {core.detail_error(e)}")
             return self.result(
-                f"The capture did not finish inside the {budget.total:.1f}s tool timeout "
-                f"(Settings > Core > Tool Timeout - the same limit every tool gets). "
+                f"The capture did not finish inside the {self._tool_timeout():.1f}s tool "
+                f"timeout (Settings > Core > Tool Timeout, minus the moment this module "
+                f"keeps to answer instead of being cut off). "
                 f"Chrome was still painting: capture the viewport instead of full_page "
                 f"(the capture is {shot_w or '?'}x{shot_h or '?'} px, the limit is "
                 f"{max_px // 1_000_000} Mpx), or raise that tool timeout.",
@@ -1512,7 +1513,7 @@ def _error_result(self, tool_name, exc):
         # advice that belongs to the tool that timed out, not to captures in
         # general (B40: this text used to offer "viewport instead of full_page"
         # to navigate and evaluate)
-        text = timeout_text(text, self._budget().total,
+        text = timeout_text(text, self._tool_timeout(),
                             capture=tool_name == "screenshot")
     elif isinstance(exc, ConnectionError):
         text = ("The browser connection was lost. Call open to reconnect (or new_tab); "
