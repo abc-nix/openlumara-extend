@@ -1,13 +1,21 @@
 # -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-26)
 """
-Small pure helpers shared by module.py: URL normalisation for navigate/new_tab
-and safe tail-slicing of the console/network deques.
+Small pure helpers shared by module.py: URL normalisation for navigate/new_tab,
+safe tail-slicing of the console/network deques, and the per-tool-call time
+budget.
 
 Kept out of page.py (DOM/screenshot work) so they need no core/aiohttp stubs and
 can be tested directly - see tests/test_util.py.
 """
 
+import time
 import urllib.parse
+
+# Cost of the grid annotation drawn onto a PNG (decode + draw + encode),
+# measured on this module's own saved captures - real Chrome PNGs are mostly
+# filter-4 (Paeth) rows, so decode_png's Python loop dominates: ~0.85 s/Mpx
+# (1272x1305 -> 1.6 s, 1257x2952 -> 3.1 s).
+GRID_COST_S_PER_MPX = 0.85
 
 # schemes navigate/new_tab accept as-is; anything else gets https:// prefixed
 ALLOWED_SCHEMES = ("http", "https", "file", "about", "data", "chrome")
@@ -45,3 +53,52 @@ def tail_entries(buffer, count):
     except (TypeError, ValueError):
         count = 0
     return list(buffer)[-count:] if count else []
+
+
+class Budget:
+    """One deadline for a whole tool call.
+
+    The framework cancels any tool call running past core.tool_timeout and the
+    model then sees only "Tool timed out after Ns" (core/toolcalls.py:229).
+    A browser tool issues several CDP commands back to back, so the budget is
+    taken once at tool entry and every command gets what is left of it: the
+    call always finishes inside the framework's number, and reports *that*
+    number, so there is exactly one timeout to raise (Settings -> Core -> Tool
+    Timeout) instead of a module-private one the caller has never heard of.
+
+    The deadline starts when the tool starts, which also covers the work that
+    happens before any CDP call (launching Chrome costs 1-3 s).
+    """
+
+    __slots__ = ("total", "_end")
+
+    def __init__(self, total):
+        self.total = float(total)
+        self._end = time.monotonic() + self.total
+
+    def left(self):
+        """Seconds still available; never negative."""
+        return max(0.0, self._end - time.monotonic())
+
+    def cap(self, ceiling):
+        """Timeout for the next command: what it usually needs, or what is left."""
+        return min(float(ceiling), self.left())
+
+    def spent(self):
+        """Seconds used so far (for logs/messages)."""
+        return max(0.0, self.total - self.left())
+
+
+def grid_fits(width, height, seconds_left):
+    """Would annotating a WxH capture fit in `seconds_left`?
+
+    Returns (fits, estimated_seconds). The grid is pure CPU *after* the CDP
+    reply, so no command timeout covers it: starting it with no time left just
+    makes the caller wait past the tool budget for an answer they then lose.
+    """
+    try:
+        pixels = max(0, int(width)) * max(0, int(height))
+    except (TypeError, ValueError):
+        return False, 0.0
+    need = pixels / 1e6 * GRID_COST_S_PER_MPX
+    return need <= max(0.0, float(seconds_left)), need

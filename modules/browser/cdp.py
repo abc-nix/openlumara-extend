@@ -25,12 +25,17 @@ import core
 
 DEFAULT_PORT = 9222
 
-# Per-command timeouts must stay UNDER core.tool_timeout (15 s in config.yml):
-# otherwise the core kills the whole tool call first and the module's own
-# friendly error never runs - the caller just sees "Tool timed out" (B27).
-# Keep room for the several commands one tool issues back to back.
-CDP_CALL_TIMEOUT = 10.0        # per-command timeout (seconds)
-SCREENSHOT_TIMEOUT = 10.0      # captureBeyondViewport on a tall page is slow
+# These are CEILINGS for the cheap commands, not the caller's timeout. The real
+# bound is core.tool_timeout (config.yml -> Settings > Core > Tool Timeout):
+# the framework cancels a tool call that runs past it and the model then sees a
+# bare "Tool timed out after Ns" with no hint (B27). module.Budget takes that
+# number once per tool call and hands every command what is left of it, so the
+# module answers first and names the setting the caller can raise.
+CDP_CALL_TIMEOUT = 10.0        # ceiling for cheap commands (status, tabs, logs)
+SCREENSHOT_TIMEOUT = 10.0      # fallback only: page.capture_screenshot's default
+                               # when a caller passes no budget. The screenshot
+                               # tool always passes one, so a capture gets the
+                               # whole remaining budget, not this number.
 MAX_MSG_SIZE = 64 * 1024 * 1024  # screenshots/AX trees can be big
 
 

@@ -225,7 +225,7 @@ def normalize_grid(value):
 
 
 async def capture_screenshot(cdp_client, sid, screenshots_dir,
-                             full_page=False, fmt="png", quality=80):
+                             full_page=False, fmt="png", quality=80, timeout=None):
     """Capture a screenshot; returns (absolute_path, bytes).
 
     Args:
@@ -234,6 +234,9 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
               check the page height first (module.screenshot does).
         fmt: 'png' or 'jpeg' (CDP-native encoding; no post-processing).
         quality: JPEG quality 0-100 (ignored for png).
+        timeout: seconds for the capture command. Callers pass the time left in
+              their tool-call budget; SCREENSHOT_TIMEOUT is only the fallback
+              for calls made without one.
     """
     ext = "jpg" if fmt == "jpeg" else "png"
     params = {
@@ -243,7 +246,9 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
     }
     if fmt == "jpeg":
         params["quality"] = max(0, min(100, int(quality)))
-    res = await cdp_client.cmd("Page.captureScreenshot", params, sid, timeout=SCREENSHOT_TIMEOUT)
+    if timeout is None:
+        timeout = SCREENSHOT_TIMEOUT
+    res = await cdp_client.cmd("Page.captureScreenshot", params, sid, timeout=timeout)
     raw = base64.b64decode(res.get("data", ""))
     if not raw:
         raise RuntimeError("Screenshot came back empty")
@@ -253,8 +258,14 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
     return path, raw
 
 
-async def viewport_metrics(cdp_client, sid):
-    """Read viewport/doc metrics in one evaluate. Returns a dict or None."""
+async def viewport_metrics(cdp_client, sid, timeout=None):
+    """Read viewport/doc metrics in one evaluate. Returns a dict or None.
+
+    Returns None when the read fails, so the caller cannot tell a huge page
+    from an unreadable one - see the note in module.screenshot.
+    """
+    if timeout is None:
+        timeout = CDP_CALL_TIMEOUT
     try:
         res = await cdp_client.cmd("Runtime.evaluate", {
             "expression": "JSON.stringify({"
@@ -264,7 +275,7 @@ async def viewport_metrics(cdp_client, sid):
                           "docW: Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0),"
                           "docH: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)})",
             "returnByValue": True,
-        }, sid, timeout=CDP_CALL_TIMEOUT)
+        }, sid, timeout=timeout)
         val = res.get("result", {}).get("value")
         if val:
             return json.loads(val)

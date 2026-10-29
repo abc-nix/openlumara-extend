@@ -16,6 +16,7 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 2 — tool correctness | done | `3a26241` | B12/B13/B16/B17/B20 + `util.py` (URL normalisation, deque tailing); 22 unit tests; every item re-checked in a live browser on 2026-10-27 — evidence in §10. |
 | 2.5 — screenshot grid rework | **done + verified live** | `bbcccc3` · `cf47268` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` is a refusal threshold (clip does not bound Chrome's work — B27/B31), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. All §10 checks pass. |
 | 3 — error boundary | **done + verified live** | `d3da68a` · `7cf78e8` | `_guard_tools` wraps all 22 tools once: `CDPError` (-32001/-32601/-32602 hints), `TimeoutError`, `ConnectionError`, module `RuntimeError`/`OSError` → `success:false` with actionable text; programming errors still escape. §10 checks pass. |
+| 2.6 — tool-call budget | **implemented, live check pending** | (this commit) | B37 (budget inherited from `core.tool_timeout`), B39 (grid annotation gated on its measured cost), B38 partial (full-page refused when metrics are unreadable). `util.Budget` + `util.grid_fits`, 44 tests. Needs a server restart to load. |
 | 4 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
@@ -34,6 +35,10 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
   - WebUI route handlers stay **private** (`_`-prefixed, `core/tool_loader.py:196`).
   - `_route_ui_status` stays **passive** (never `_ensure_connection`) — polling must not launch a browser.
   - Never kill a browser the module did not launch.
+  - **The only timeout is `core.tool_timeout`.** Never reintroduce a module-private
+    number: take `util.Budget` at tool entry and give each command what is left
+    (B37). Anything that runs after the last CDP reply (grid, encoding) must be
+    gated on `budget.left()`, because no command timeout covers it (B39).
 - Items marked **⟨verify⟩** need a runtime check I could not perform (I don't launch browsers or hit the API as part of a review).
 
 ---
@@ -74,6 +79,9 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B30 | Low | `evaluate` rejects top-level `await` (Chrome: "await is only valid in async functions") although `awaitPromise` is on; the AI has to know to wrap in `(async () => …)()` |
 | B31 | Low | Capped full-page captures are refused, not cut: Chrome paints the whole page for `captureBeyondViewport` whatever `clip` says (measured), so the cheap way to a "top N px" capture is still unknown |
 | B32 | **Medium** | Stale tab session: a closed tab stays `_current_target`, `_ensure_connection` still reports connected, `_attach_target` reuses the dead session id → `-32001 Session with given id not found`, and every tab shows `current: false` |
+| B37 | **Medium** | Timeouts hardcoded (10 s) against a limit that lives in config: `core.tool_timeout` is 15 here but **30 by default** (`core/config.py:41`), so B27 silently returns if the config drops below 10, and legitimate work is cut at 10 s on a default install. No per-tool deadline: a tool issuing two commands can spend 20 s against a 15 s budget |
+| B38 | Medium | `viewport_metrics` swallows every exception and returns `None` → the `full_page_max_height` guard **fails open** on a 40k-px page; metrics are CSS px compared against a device-px image (`devicePixelRatio` read, never used); `doc_w` is read but never capped |
+| B39 | Medium | `draw_grid` cost is unbounded and un-timed (pure CPU after the CDP reply): measured ~0.85 s/Mpx on real captures → ~13 s at the permitted 12000 px, i.e. a guaranteed tool timeout *after* the work succeeded |
 
 ---
 
@@ -322,6 +330,70 @@ Must be verified, not assumed: responsive reflow (breakpoints, sticky headers),
 lazy-loaded images, and the page being briefly resized while the AI could take
 a snapshot. If it holds, the refusal could become a real "cut at N px" capture.
 
+### B37 — One timeout to explain: inherit `core.tool_timeout` (Medium, fixed in 2.6)
+
+Phase 2.5 hardcoded `CDP_CALL_TIMEOUT = 10.0` / `SCREENSHOT_TIMEOUT = 10.0` with a
+comment naming "15 s in config.yml". The limit does not live here: `core/config.py:41`
+ships it at **30**, this install sets **15**, and `core/toolcalls.py:121` reads it per
+chain and **cancels the tool task** at it (`:229-240`), answering
+`Tool timed out after Ns`. Two consequences:
+
+- lower `tool_timeout` below 10 and B27 silently returns — core kills the call before
+  the module's own error can run, so the friendly text is unreachable again;
+- a default install (30 s) gets work killed at 10 s for no reason;
+- and there was no *per-call* budget: `screenshot` issues metrics (10 s) + capture
+  (10 s) back to back, i.e. up to 20 s against a 15 s ceiling.
+
+**Fix (2.6):** `util.Budget` takes `core.tool_timeout - 0.5` once at tool entry — before
+`_ensure_connection`, so a Chrome launch (1-3 s) is inside it — and every command gets
+`min(its ceiling, budget.left())`. The screenshot capture passes the *whole* remainder,
+no module ceiling of its own, so the caller waits exactly the number they already know
+and the message names it: *"did not finish inside the 14.5s tool timeout
+(Settings > Core > Tool Timeout — the same limit every tool gets)"*.
+
+The 0.5 s, not ssh's 2.0 s: core's timer starts **before** the tool body runs, so an
+equal budget loses the race and the model gets core's bare message. `ssh` already had
+this pattern (`user_modules/ssh/module.py:550-553` `_tool_timeout_cap`); the browser
+differs only in needing the *deadline* form, because browser tools do CPU work after
+the last network reply (see B39). `status()` now reports `tool_timeout` like ssh reports
+`tool_timeout_cap`. Because it is read per call, changing the setting needs no restart.
+
+### B38 — The height guard failed open (Medium, partial in 2.6)
+
+`page.viewport_metrics` catches **every** exception and returns `None`, so
+`doc_h = 0` and `doc_h > max_h` never fires — a 40,000 px page walked straight into the
+timeout with no explanation. Also: metrics are CSS px (`scrollHeight`) compared against a
+**device px** image (`devicePixelRatio` is collected and never used — harmless at dsf 1,
+which is this machine's case: 1280 window → 1272 px image), and `doc_w` is read but never
+bounded, so horizontal overflow is uncapped.
+
+**2.6 did the cheap half:** a `full_page` request with unreadable metrics is now refused
+instead of guessed. **Still open:** read the truth from `Page.getLayoutMetrics` (returns
+`contentSize` *and* `cssContentSize` separately, needs no JS in the page), guard width as
+well as height, and stop treating CSS px as image px.
+
+### B39 — Grid annotation cost was unbounded (Medium, fixed in 2.6)
+
+`draw_grid` is pure Python CPU **after** the CDP reply, so no command timeout covers it.
+Measured on this module's own saved captures — real Chrome PNGs are mostly filter-4
+(Paeth) rows, e.g. 1272×1305 = 776 Paeth + 477 Up + 48 Sub + 4 Average, and
+`decode_png`'s Paeth branch costs ~1.15 s/Mpx (Average ~0.53, Up ~0.18, none ~0.03):
+
+| image | decode | draw + encode | whole grid step |
+|---|---|---|---|
+| 1272×1305 (1.7 Mpx) | 0.76 s | 0.81 s | **1.6 s** |
+| 1257×2952 (3.7 Mpx) | 1.53 s | 1.60 s | **3.1 s** |
+
+≈ **0.85 s/Mpx**. The §10 note "0.76 s grid" measured the decode half only and understates
+the cost by ~2×. Extrapolated to the caps: 10.2 Mpx (8000 px) ≈ 9 s of annotation on top
+of a capture already near its ceiling; 15.3 Mpx (the permitted 12000) ≈ 13 s — a
+guaranteed tool timeout *after* a successful capture.
+
+**Fix (2.6):** `util.grid_fits(w, h, budget.left())` gates the annotation through the
+existing `grid_note` degradation path — the capture is always delivered, the grid is
+skipped with an explicit reason. The annotated PNG is also ~27% larger
+(927 KB → 1177 KB): pure-red 1 px lines compress badly.
+
 ---
 
 ## 3. Security summary
@@ -488,7 +560,7 @@ Order is dependency-driven, not priority-driven: phases 7 (security) and 5/6 (li
 | **2 — cheap tool correctness** | B12 `_normalize_url`, B13 cookies fallback, B16 count clamp, B17 `sid` hoist + quality guard, B20 `str(target)` | `new_tab("example.com")`, `console(0)`, `cookies()` on `about:blank`, `switch_tab(0)` | one call per fix |
 | **2.5 — screenshot grid rework** | grid drawn on the PNG (`page.draw_grid`), `full_page_max_height` + `page_cut`, timeouts below the core budget (B27), grid ⇒ png | `full_page` on a 39k-px article returns with `page_cut`; grid labels are document coordinates; no DOM mutation | **done** (`bbcccc3`) |
 | **3 — error boundary** | R2: map `CDPError`/`TimeoutError`/`ConnectionError` (+ deliberate `RuntimeError`/`OSError`) → `self.result(..., success=False)` with hints | `click('@e999')` → clean message (not "Error while executing tool"); a hung `evaluate` → timeout text | **done** (`d3da68a`); live check pending |
-| **4 — typing & refs** | B8 `type_text`, B18 per-tab refs + dialog session scoping, **B26** (stable tab order), **B29** (tag logs by tab/URL), **B30** (`evaluate` await handling/docstring) | `contenteditable` fill; two tabs with different `@eN`; click after `switch_tab`; `switch_tab(0)` resolves to the tab `list_tabs` showed | |
+| **4 — typing & refs** | B8 `type_text`, B18 per-tab refs + dialog session scoping, **B26** (stable tab order), **B29** (tag logs by tab/URL), **B30** (`evaluate` await handling/docstring), **B32** (stale tab session — see §2, never got scheduled), **B38** (`Page.getLayoutMetrics` + width guard) | `contenteditable` fill; two tabs with different `@eN`; click after `switch_tab`; `switch_tab(0)` resolves to the tab `list_tabs` showed | |
 | **5 — process lifecycle** | R1 private start/stop, B5 ownership across reload, B7 terminate on failed launch, B21 future leak, B15 port-down wait + reap; **process harness** in `tests/` | settings save with `close_browser_on_shutdown=false` → browser survives *and* `owned_process` stays true; bad binary → no stray Chrome; 10 restarts stable | tests start here (needs a browser) |
 | **6 — restart state** | B6 `active_index`, B14 radio groups, B19 detach after capture; **restart harness** | 5 tabs incl. a `chrome://` one + a radio-heavy form → restart twice → active tab and radios correct | must pass before phase 8 moves the code |
 | **7 — security & policy** | B2 fence + warnings, B3 URL policy, B9 ⟨verify⟩, B10 profile guard, B11 `unsafe`, S6/S7 decisions, **B28** (`get_images` caps/filter), §5.11 caps | blocked `navigate` → clear refusal; `snapshot` fenced; `get_images` on an article returns tens, not 38+ | own review; behavior change |

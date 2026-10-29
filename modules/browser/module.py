@@ -52,7 +52,7 @@ import channels.webui.api as webui
 from . import cdp, page
 from .cdp import CDPClient, CDPError, CDP_CALL_TIMEOUT, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
-from .util import normalize_url, tail_entries
+from .util import normalize_url, tail_entries, Budget, grid_fits
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -290,6 +290,30 @@ class Browser(core.module.Module):
             return max(500, min(12000, int(self.config.get("full_page_max_height", 8000))))
         except (TypeError, ValueError):
             return 8000
+
+    def _tool_timeout(self):
+        """The framework's per-tool-call ceiling (config.yml -> core.tool_timeout).
+
+        Read per call, not cached in a constant: a settings save then takes
+        effect without a server restart. core reads it the same way
+        (core/toolcalls.py:121) and cancels the call at it (toolcalls.py:229),
+        so this is the ONLY timeout a caller has to think about.
+        """
+        try:
+            return max(1.0, float(core.config.get("core", "tool_timeout", default=10.0)))
+        except (TypeError, ValueError):
+            return 10.0
+
+    def _budget(self):
+        """Deadline for one tool call; see util.Budget.
+
+        Deliberately 0.5 s shorter than core.tool_timeout - core's timer starts
+        before our body runs, so an equal budget would lose the race and the
+        caller would get core's unhelpful "Tool timed out after Ns" instead of
+        a message that names the setting to raise. The reserve also covers
+        writing the file and formatting the result.
+        """
+        return Budget(max(1.0, self._tool_timeout() - 0.5))
 
     def _is_connected(self):
         """True if we have a live CDP connection and an attached tab."""
@@ -655,6 +679,9 @@ class Browser(core.module.Module):
             # effective headless mode: known when we launched/own it,
             # unknown (None) for an external browser we merely attached to
             "headless": self._effective_headless() if connected else None,
+            # the ceiling every tool call gets; long captures are sized to it,
+            # so this is the number to raise if a capture says it ran out of time
+            "tool_timeout": self._tool_timeout(),
         }
 
     @webui.route("open", method="POST")
@@ -944,12 +971,15 @@ class Browser(core.module.Module):
         """Takes a screenshot of the current tab (PNG/JPEG) and returns the path plus an inline image.
 
         Args:
-            full_page: Capture the whole page instead of the viewport. Pages taller than full_page_max_height are refused with their real height (Chrome paints the whole page regardless of clipping).
+            full_page: Capture the whole page instead of the viewport. Pages taller than full_page_max_height are refused with their real height (Chrome paints the whole page regardless of clipping). Captures get the full per-tool timeout (core.tool_timeout) and nothing more.
             include_image: Deliver the screenshot to the model as an image message.
             grid: Labeled grid drawn on the image. True = 100px spacing, int = custom px. Requires format='png'.
             format: 'png' (default) or 'jpeg'.
             quality: JPEG quality 0-100 (default 80).
         """
+        # taken BEFORE anything else: launching Chrome (1-3s), the metrics read,
+        # the capture and the grid all have to fit inside core.tool_timeout
+        budget = self._budget()
         await self._ensure_connection()
         sid = self._current_session()
         fmt = "jpeg" if format in ("jpeg", "jpg") else ("png" if format == "png" else None)
@@ -971,10 +1001,22 @@ class Browser(core.module.Module):
 
         # metrics BEFORE the capture: they decide whether a full-page capture
         # is feasible and give the document origin the grid labels use
-        metrics = await page.viewport_metrics(self._cdp, sid) or {}
+        metrics = await page.viewport_metrics(
+            self._cdp, sid, timeout=budget.cap(CDP_CALL_TIMEOUT)) or {}
         doc_w = int(metrics.get("docW") or 0)
         doc_h = int(metrics.get("docH") or 0)
         max_h = self._full_page_max_height()
+        if full_page and not metrics:
+            # No metrics means the height cap below cannot be checked. Refusing
+            # is the honest answer: an unreadably tall page would spend the
+            # whole tool timeout and still return nothing (viewport captures
+            # don't depend on the cap, so they stay allowed).
+            return self.result(
+                "Cannot read the page dimensions, so a full-page capture is refused - "
+                f"an unmeasurably tall page would use up the whole {budget.total:.0f}s tool "
+                "timeout and answer nothing. Take a viewport capture (scroll first).",
+                success=False,
+            )
         if full_page and doc_h > max_h:
             # Chrome paints the WHOLE page for captureBeyondViewport no matter
             # what `clip` says (measured 2026-10-27: an 8k clip on a 40k page
@@ -992,30 +1034,49 @@ class Browser(core.module.Module):
         try:
             path, raw = await page.capture_screenshot(
                 self._cdp, sid, self._screenshots_dir,
-                full_page=full_page, fmt=fmt, quality=quality)
+                full_page=full_page, fmt=fmt, quality=quality,
+                # no ceiling of its own: a capture gets all the time this tool
+                # call has left, so the caller waits exactly core.tool_timeout
+                timeout=budget.left())
         except TimeoutError as e:
+            self.log("browser", f"screenshot: {core.detail_error(e)}")
             return self.result(
-                f"Capture timed out ({core.detail_error(e)}). The page may be too tall or busy - "
-                f"lower full_page_max_height (currently {max_h}) or capture the viewport instead.",
+                f"The capture did not finish inside the {budget.total:.1f}s tool timeout "
+                f"(Settings > Core > Tool Timeout - the same limit every tool gets). "
+                f"Chrome was still painting: capture the viewport instead of full_page "
+                f"(page is {doc_h or '?'} px tall, full_page_max_height is {max_h} px), "
+                f"or raise that tool timeout.",
                 success=False,
             )
 
+        # parsed dimensions first: they feed both the grid cost estimate and the
+        # region hint, so neither can drift from the pixels actually written
+        # (clipping, Chrome rounding). draw_grid never changes the dimensions.
+        px_w, px_h = page.image_size(raw, fmt)
+
         # grid: drawn onto the PNG after the capture (no page mutation, no
         # canvas size limit). The saved file is replaced by the annotated one.
+        # This is pure CPU with no command timeout watching it, so it only runs
+        # when it still fits in this call - measured ~0.85s per megapixel.
         grid_note = None
         if grid_spacing:
-            try:
-                raw = page.draw_grid(raw, grid_spacing, origin_x, origin_y)
-                with open(path, "wb") as f:
-                    f.write(raw)
-            except Exception as e:
-                grid_note = f"grid not drawn: {core.detail_error(e)}"
+            fits, need = grid_fits(px_w, px_h, budget.left())
+            if not fits:
+                grid_note = (f"grid not drawn: the annotation needs ~{need:.1f}s and only "
+                             f"{budget.left():.1f}s of this tool call is left; the plain "
+                             "capture is attached")
                 self.log("browser", grid_note)
+            else:
+                try:
+                    raw = page.draw_grid(raw, grid_spacing, origin_x, origin_y)
+                    with open(path, "wb") as f:
+                        f.write(raw)
+                except Exception as e:
+                    grid_note = f"grid not drawn: {core.detail_error(e)}"
+                    self.log("browser", grid_note)
 
         # region describes the IMAGE that was actually written: the parsed
-        # dimensions win over the pre-capture metrics, so clipping and Chrome
-        # rounding cannot make the hint drift from the pixels
-        px_w, px_h = page.image_size(raw, fmt)
+        # dimensions win over the pre-capture metrics
         if full_page:
             region = {
                 "x": 0, "y": 0,
@@ -1344,9 +1405,12 @@ def _error_result(self, tool_name, exc):
         else:
             text = f"The browser rejected the command: {text}"
     elif isinstance(exc, TimeoutError):
-        text = (f"The browser did not answer in time ({text}). The page may be busy or very "
-                "large: retry, or use a narrower action (viewport instead of full_page, "
-                "smaller full_page_max_height).")
+        # name the one number the caller can act on - the framework's, not a
+        # module-private one
+        text = (f"{text} - that was the time left in this tool call. Every tool gets "
+                f"{self._tool_timeout():.1f}s (Settings > Core > Tool Timeout); the page may "
+                "be busy or very large, so retry with a narrower action (viewport instead of "
+                "full_page) or raise that timeout.")
     elif isinstance(exc, ConnectionError):
         text = ("The browser connection was lost. Call open to reconnect (or new_tab); "
                 "if it keeps dropping, the browser may have crashed.")
