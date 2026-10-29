@@ -722,6 +722,18 @@ That closes B37–B40 with live evidence at both 15 s and 30 s settings.
 
 Not live-tested, and why: **dialog scoping** would need `auto_accept_dialogs` off (the default auto-accepts before `handle_dialog` can see it) and **network tagging** needs `enable_network_monitoring` on — both are settings changes I did not make; they are covered by `tests/test_module_events.py`.
 
+### Phase 5 live checks (process `lstart` 12:10:03)
+
+| Check | Result |
+|---|---|
+| pid file written at launch; does it name the running Chrome? | `{"pid": 6154, "port": 9222, "profile": …/data/browser/profile}` and `/proc/6154/cmdline` carries exactly those two flags ✔ |
+| kill that Chrome (`kill 6154`), then `status` | relaunched: new pid **6384**, pid file rewritten, `owned_process: true` ✔ |
+| adoption path against the real file and the live browser (standalone script, real data dir) | `read_pidfile` → 6384; `_adopt_pidfile()` → `_owned_pid = 6384`, `_owns_browser()` true ✔ |
+| `close()` | Chrome gone **and the pid file removed** — a stale file can't be adopted later ✔ |
+| `open()` again | new pid **6624**, pid file rewritten ✔ |
+
+**Still owed live** (both need the user, not a tool): the **module reload** that originally lost ownership (B5's actual event — the adoption code is verified against a real file, but on_ready being called by a reload is not), and one **panel Restart** (B15's port-down wait is only on that route; the stop half is verified above).
+
 ### Real-site session (Wikipedia, 2026-10-27)
 
 Passed on a site with real cookies and real traffic:
