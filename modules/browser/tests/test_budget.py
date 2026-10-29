@@ -143,6 +143,24 @@ class TimeoutTextTests(unittest.TestCase):
         self.assertIn("viewport instead of full_page", util.timeout_text("x", 15, capture=True))
 
 
+class FirstCaptureWindowTests(unittest.TestCase):
+    def test_viewport_capture_gets_the_whole_call(self):
+        self.assertEqual(util.first_capture_window(29.5, False), 29.5)
+
+    def test_full_page_capture_gets_half(self):
+        self.assertEqual(util.first_capture_window(29.5, True), 14.75)
+
+    def test_half_is_floored_but_never_exceeds_the_budget(self):
+        self.assertEqual(util.first_capture_window(3.0, True), 2.0)   # floor 2 s
+        self.assertEqual(util.first_capture_window(1.0, True), 1.0)   # <= left
+        self.assertEqual(util.first_capture_window(0.0, True), 0.0)
+
+    def test_garbage_input_does_not_raise(self):
+        # unknown seconds never turn into an invented wait
+        self.assertEqual(util.first_capture_window(None, True), 0.0)
+        self.assertEqual(util.first_capture_window("x", False), 0.0)
+
+
 class CaptureFitsTests(unittest.TestCase):
     def test_the_page_that_was_refused_now_fits(self):
         # 8079 px tall, ~1200 wide = 9.7 Mpx: refused by the old 8000 px height

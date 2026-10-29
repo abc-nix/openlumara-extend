@@ -140,6 +140,25 @@ def grid_fits(width, height, seconds_left):
     return need <= max(0.0, float(seconds_left)), need
 
 
+def first_capture_window(seconds_left, full_page):
+    """How long the first capture command may take.
+
+    A viewport capture is the reliable one (it has never been seen to stall) and
+    gets everything that is left. A full-page capture can stall Chrome on some
+    documents (B43: three hangs on one example.com document, ~14.5 s each,
+    while the same page captured in a fresh tab) and used to eat the whole call
+    doing it. Giving it half the call leaves the other half for a viewport
+    fallback, so a stall still answers with an image instead of with nothing.
+    """
+    try:
+        left = max(0.0, float(seconds_left))
+    except (TypeError, ValueError):
+        left = 0.0            # unknown reads as "nothing left": no invented wait
+    if not full_page:
+        return left
+    return min(left, max(2.0, left * 0.5))
+
+
 def capture_fits(width, height, max_pixels):
     """Would a WxH full-page capture fit the pixel cap? (fits, megapixels).
 

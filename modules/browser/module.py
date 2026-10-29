@@ -54,8 +54,8 @@ from . import cdp, page
 from .cdp import CDPClient, CDPError, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
 from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
-                   tool_budget, CALL_BUDGET, drop_target, headless_from_product,
-                   timeout_text)
+                   first_capture_window, tool_budget, CALL_BUDGET, drop_target,
+                   headless_from_product, timeout_text)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -322,6 +322,15 @@ class Browser(core.module.Module):
         except (TypeError, ValueError):
             mpx = 25.0
         return int(max(1.0, mpx) * 1_000_000)
+
+    def _capture_failed_text(self, what):
+        """Message for a capture that outlived its window (B43)."""
+        return (
+            f"The {what} capture did not finish inside the {self._tool_timeout():.1f}s "
+            f"tool timeout (Settings > Core > Tool Timeout, minus the small pause this "
+            f"module keeps so it can answer instead of being cut off). Chrome was still "
+            f"painting or stalled: reload the tab (press f5) and retry, or raise that "
+            f"setting.")
 
     def _tool_timeout(self):
         """The framework's per-tool-call ceiling (config.yml -> core.tool_timeout).
@@ -1124,24 +1133,37 @@ class Browser(core.module.Module):
         origin_x = 0 if full_page else int(round(doc_origin_x * scale))
         origin_y = 0 if full_page else int(round(doc_origin_y * scale))
 
+        # a full-page capture gets part of the call, not all of it (B43): if
+        # Chrome stalls on this document, the rest of the time is still usable
+        window = first_capture_window(budget.left(), full_page)
+        fallback_note = None
         try:
-            # no timeout of its own: the capture gets all the time this tool
-            # call has left (cmd resolves the budget), so the caller waits
-            # exactly core.tool_timeout
             path, raw = await page.capture_screenshot(
                 self._cdp, sid, self._screenshots_dir,
-                full_page=full_page, fmt=fmt, quality=quality)
+                full_page=full_page, fmt=fmt, quality=quality, timeout=window)
         except TimeoutError as e:
             self.log("browser", f"screenshot: {core.detail_error(e)}")
-            return self.result(
-                f"The capture did not finish inside the {self._tool_timeout():.1f}s tool "
-                f"timeout (Settings > Core > Tool Timeout, minus the moment this module "
-                f"keeps to answer instead of being cut off). "
-                f"Chrome was still painting: capture the viewport instead of full_page "
-                f"(the capture is {shot_w or '?'}x{shot_h or '?'} px, the limit is "
-                f"{max_px // 1_000_000} Mpx), or raise that tool timeout.",
-                success=False,
-            )
+            if not full_page:
+                return self.result(self._capture_failed_text("viewport"), success=False)
+            # Chrome did not answer the full-page capture: use what the call
+            # still has and return the viewport, saying exactly that
+            fallback_note = (
+                f"full-page capture did not answer within {window:.1f}s (Chrome can "
+                f"stall on some pages on a full-page capture); this is the viewport. "
+                f"If it keeps happening, reload the tab (press f5) and retry.")
+            self.log("browser", fallback_note)
+            try:
+                path, raw = await page.capture_screenshot(
+                    self._cdp, sid, self._screenshots_dir,
+                    full_page=False, fmt=fmt, quality=quality)
+            except TimeoutError as e2:
+                self.log("browser", f"screenshot: {core.detail_error(e2)}")
+                return self.result(self._capture_failed_text("full-page"), success=False)
+            # what was written is a viewport capture: region and `full_page`
+            # have to describe the image, not the request
+            full_page = False
+            origin_x = int(round(doc_origin_x * scale))
+            origin_y = int(round(doc_origin_y * scale))
 
         # parsed dimensions first: they feed both the grid cost estimate and the
         # region hint, so neither can drift from the pixels actually written
@@ -1212,6 +1234,8 @@ class Browser(core.module.Module):
             meta["quality"] = quality
         if scale != 1.0:
             meta["scale"] = scale
+        if fallback_note:
+            meta["note"] = fallback_note
         if grid_spacing:
             meta["grid"] = {"spacing": grid_spacing, "applied": grid_note is None}
             if grid_note:
