@@ -155,6 +155,23 @@ def capture_fits(width, height, max_pixels):
     return pixels <= limit, pixels / 1e6
 
 
+def timeout_text(text, total, capture=False):
+    """The message for a call that ran out of its budget (B40).
+
+    `text` is the failure itself ("CDP command 'X' timed out after 14.5s") and
+    `total` is the number that bound it: the tool call's budget, the only
+    timeout a caller can raise. Naming the wrong one - which the old text did
+    whenever a module-private limit fired - sends the caller to raise a setting
+    that would not have helped.
+    """
+    out = (f"{text} - this tool call gets {float(total):.1f}s in total "
+           "(Settings > Core > Tool Timeout). The page may be busy or very "
+           "large: retry with a narrower action, or raise that setting.")
+    if capture:
+        out += " For a capture, try the viewport instead of full_page."
+    return out
+
+
 def headless_from_product(product):
     """Was `product` (CDP /json/version "Browser") running headless?
 

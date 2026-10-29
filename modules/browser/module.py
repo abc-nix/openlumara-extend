@@ -54,7 +54,8 @@ from . import cdp, page
 from .cdp import CDPClient, CDPError, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
 from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
-                   tool_budget, CALL_BUDGET, drop_target, headless_from_product)
+                   tool_budget, CALL_BUDGET, drop_target, headless_from_product,
+                   timeout_text)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -201,6 +202,7 @@ class Browser(core.module.Module):
         self._lock = asyncio.Lock()
         self._browser_info = None
         self._headless_override = None   # session-only mode flip (restart flow)
+        self._launched_headless = None   # mode the running browser was started with
         self._started = False
         self._screenshots_dir = core.get_data_path("browser/screenshots")
         self._snapshots_dir = core.get_data_path("browser/snapshots")
@@ -270,11 +272,15 @@ class Browser(core.module.Module):
         # waiting for the endpoint is part of the tool call: bound by what is
         # left of the budget, not by cdp's own 20 x 0.5 s
         budget = self._budget()
+        # recorded here, not read from the setting later: the setting says what
+        # the *next* launch would use, and it can change while this one runs
+        launched_headless = self._effective_headless()
         proc, info = await cdp.launch_browser(
             self.config, self.log, self._http,
             headless=self._headless_override,
             deadline=time.monotonic() + budget.left(),
         )
+        self._launched_headless = launched_headless
         self._owned_proc = proc
         return info
 
@@ -293,7 +299,10 @@ class Browser(core.module.Module):
         """
         actual = headless_from_product((self._browser_info or {}).get("Browser"))
         if actual is None and self._owned_proc is not None:
-            return self._effective_headless()   # we launched it, we know the mode
+            # the product string was unreadable: answer with the mode we
+            # launched with, not with the current setting - that one predicts
+            # the next launch and says nothing about this process
+            return self._launched_headless
         return actual
 
     def _full_page_max_pixels(self):
@@ -737,9 +746,9 @@ class Browser(core.module.Module):
             "browser": browser,
             "current_tab": current_tab,
             "tab_count": tab_count,
-            # effective headless mode: known when we launched/own it,
-            # unknown (None) for an external browser we merely attached to
-            "headless": self._effective_headless() if connected else None,
+            # the running browser's real mode (the same answer the status tool
+            # gives), unknown (None) when it cannot be read at all
+            "headless": self._headless_actual() if connected else None,
             # the ceiling every tool call gets; long captures are sized to it,
             # so this is the number to raise if a capture says it ran out of time
             "tool_timeout": self._tool_timeout(),
@@ -837,18 +846,25 @@ class Browser(core.module.Module):
         if res.get("errorText"):
             return self.result(f"Navigation failed: {res['errorText']}", success=False)
         loaded = True
+        window = 0.0
         try:
             # the load wait shares the same deadline: it can only use the time
             # the command above did not, never a number of its own
-            await asyncio.wait_for(self._load_event.wait(),
-                                   timeout=min(wait, budget.left()))
+            window = min(wait, budget.left())
+            await asyncio.wait_for(self._load_event.wait(), timeout=window)
         except asyncio.TimeoutError:
             loaded = False
-        return self.result({
-            "url": url,
-            "loaded": loaded,
-            "note": "Page load event not received within the wait window (page may still be loading)." if not loaded else None,
-        })
+        out = {"url": url, "loaded": loaded}
+        if not loaded:
+            # omit the key instead of carrying "note": null into every result
+            if window < wait:
+                out["note"] = ("Page load event not received before this tool call's "
+                               "time ran out (the requested wait_seconds did not fit "
+                               "in it; the page may still be loading).")
+            else:
+                out["note"] = ("Page load event not received within the wait window "
+                               "(page may still be loading).")
+        return self.result(out)
 
     @core.module.tool
     async def snapshot(self, max_chars: int = None):
@@ -1492,12 +1508,12 @@ def _error_result(self, tool_name, exc):
         else:
             text = f"The browser rejected the command: {text}"
     elif isinstance(exc, TimeoutError):
-        # name the one number the caller can act on - the framework's, not a
-        # module-private one
-        text = (f"{text} - that was the time left in this tool call. Every tool gets "
-                f"{self._tool_timeout():.1f}s (Settings > Core > Tool Timeout); the page may "
-                "be busy or very large, so retry with a narrower action (viewport instead of "
-                "full_page) or raise that timeout.")
+        # name the number that actually bound it - the framework's - and give
+        # advice that belongs to the tool that timed out, not to captures in
+        # general (B40: this text used to offer "viewport instead of full_page"
+        # to navigate and evaluate)
+        text = timeout_text(text, self._budget().total,
+                            capture=tool_name == "screenshot")
     elif isinstance(exc, ConnectionError):
         text = ("The browser connection was lost. Call open to reconnect (or new_tab); "
                 "if it keeps dropping, the browser may have crashed.")

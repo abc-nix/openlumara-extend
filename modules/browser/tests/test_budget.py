@@ -128,6 +128,21 @@ class CallBudgetContextTests(unittest.TestCase):
         self.assertEqual(sorted(out), [1.0, 9.0])
 
 
+class TimeoutTextTests(unittest.TestCase):
+    def test_names_the_number_that_bound_it(self):
+        text = util.timeout_text("CDP command 'Page.navigate' timed out after 14.5s", 15)
+        self.assertIn("'Page.navigate' timed out after 14.5s", text)
+        self.assertIn("gets 15.0s in total", text)
+        self.assertIn("Settings > Core > Tool Timeout", text)
+
+    def test_rounds_the_total(self):
+        self.assertIn("gets 14.5s in total", util.timeout_text("x", 14.499991990000126))
+
+    def test_capture_advice_only_where_it_applies(self):
+        self.assertNotIn("full_page", util.timeout_text("x", 15))
+        self.assertIn("viewport instead of full_page", util.timeout_text("x", 15, capture=True))
+
+
 class CaptureFitsTests(unittest.TestCase):
     def test_the_page_that_was_refused_now_fits(self):
         # 8079 px tall, ~1200 wide = 9.7 Mpx: refused by the old 8000 px height
