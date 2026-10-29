@@ -17,7 +17,7 @@ Work lives in the `openlumara-extend` repo: `modules/browser` is symlinked to th
 | 2.5 — screenshot grid rework | **done + verified live** | `bbcccc3` · `cf47268` | Grid drawn on the PNG (no DOM, no canvas limit), `full_page_max_height` is a refusal threshold (clip does not bound Chrome's work — B27/B31), internal timeouts under the core budget, `grid ⇒ png`, 30 unit tests. All §10 checks pass. |
 | 3 — error boundary | **done + verified live** | `d3da68a` · `7cf78e8` | `_guard_tools` wraps all 22 tools once: `CDPError` (-32001/-32601/-32602 hints), `TimeoutError`, `ConnectionError`, module `RuntimeError`/`OSError` → `success:false` with actionable text; programming errors still escape. §10 checks pass. |
 | 2.6 — tool-call budget | done + live smoke-checked | `6944586` | B37 (budget inherited from `core.tool_timeout`), B39 (grid gated on its measured cost), B38 partial (full-page refused when metrics are unreadable). `util.Budget` + `util.grid_fits`, 44 tests. |
-| 2.7 — budget everywhere + stale tab | **implemented, live check pending** | (this commit) | Budget also in `navigate` (was the worst overshooter: 10 s + 12 s wait vs a 15 s ceiling), `evaluate`, `snapshot`; B32 fixed (destroyed/crashed tab handling); B33 fixed (`status()` reports the *running* browser's mode from its product string, plus `tool_timeout`); `wait_seconds` coerced like other args; better `_current_session()` error. 52 tests; import-through-stub check: 22 tools, 22 guarded, signatures intact. **Needs a restart to load.** |
+| 2.7 — budget everywhere + stale tab | done + **verified live** (2026-10-29) | `52f99ad` | Budget also in `navigate` (was the worst overshooter: 10 s + 12 s wait vs a 15 s ceiling), `evaluate`, `snapshot`; B32 fixed (destroyed/crashed tab handling); B33 fixed (`status()` reports the *running* browser's mode from its product string, plus `tool_timeout`); `wait_seconds` coerced like other args; better `_current_session()` error. 52 tests; import-through-stub check: 22 tools, 22 guarded, signatures intact. **Needs a restart to load.** |
 | 4 … 8 | pending | — | see §9 |
 
 Phase 1 gate: confirmed by the user after a restart — the three settings render (`Custom Binary Path` only while `browser_binary=custom`) and the module is grouped under **Web**. Still needs one live check with a running browser: `status()`'s `active` flag and the panel/restart-label wording.
@@ -84,6 +84,7 @@ Gate for the tests: `python3 -m unittest discover -s modules/browser/tests -v` �
 | B37 | **Medium** | Timeouts hardcoded (10 s) against a limit that lives in config: `core.tool_timeout` is 15 here but **30 by default** (`core/config.py:41`), so B27 silently returns if the config drops below 10, and legitimate work is cut at 10 s on a default install. No per-tool deadline: a tool issuing two commands can spend 20 s against a 15 s budget |
 | B38 | Medium | `viewport_metrics` swallows every exception and returns `None` → the `full_page_max_height` guard **fails open** on a 40k-px page; metrics are CSS px compared against a device-px image (`devicePixelRatio` read, never used); `doc_w` is read but never capped |
 | B39 | Medium | `draw_grid` cost is unbounded and un-timed (pure CPU after the CDP reply): measured ~0.85 s/Mpx on real captures → ~13 s at the permitted 12000 px, i.e. a guaranteed tool timeout *after* the work succeeded |
+| B40 | Low | The shared timeout message claims the number was "the time left in this tool call" — false when a command's own ceiling bound it (live: `Page.navigate` at 10.0 s with 14.5 s left); it also pushes capture-specific advice into navigate/evaluate errors and prints an unrounded float |
 
 ---
 
@@ -638,6 +639,21 @@ Phase 3 error boundary, verified live on 2026-10-27:
 - Immediately after both failures `status`, `navigate` and `snapshot` all
   succeed → the session and the CDP client are undamaged ✔
 - Short full-page (`example.com`, 1305 px) + grid → still succeeds with `grid.applied: true` and a byte-identical PNG to the earlier run (96,615 bytes).
+
+### Phase 2.6 + 2.7 verified live (2026-10-29, after the restart)
+
+| Check | Result |
+|---|---|
+| `status()` new keys | `"headless": false` (from the running browser's product string, B33) and `"tool_timeout": 15.0` ✔ |
+| B32: current tab closed, then `snapshot` | **no `-32001`** — the destroyed event dropped the session, `_ensure_connection` re-selected the surviving tab and the snapshot succeeded with fresh refs (`@e1`) ✔ |
+| `full_page` on the article (now 40415 px) | refused in ~0.1 s: *"The page is 40415 px tall; full-page captures are limited to 8000 px…"* ✔ |
+| `evaluate` on a never-resolving promise | answered at **14.5 s** with the module's own message — core's bare "Tool timed out after 15.0s" never fired, so the 0.5 s reserve is enough in practice ✔ |
+| `navigate` to a black-hole address (`wait_seconds: 999`) | `Page.navigate` blocked and hit the **10 s command ceiling**; answered at 10.0 s, inside the 15 s call — the old 10 s + 12 s wait overshoot is gone ✔ |
+| session health after both timeouts | `status` and a following `navigate` succeed; pending futures are popped ✔ |
+
+**New defect found by that last run — B40 (Low, text):** the shared timeout message says *"that was the time left in this tool call"*, which is **false when a command's own ceiling bound it** (the navigate case: 10.0 s ceiling while 14.5 s remained). It also leaks capture-specific advice ("viewport instead of full_page") into navigation/evaluate errors, and prints the raw float (`14.499991990000126s`).
+
+Minor pre-existing shape quirks, same run: `navigate` returns `"note": null` instead of omitting the key, and `status` can pair a stale `title` with the new `url` (`"Alan Turing - Wikipedia"` + `http://10.255.255.1/`) while a failed navigation is on screen.
 
 ### Real-site session (Wikipedia, 2026-10-27)
 
