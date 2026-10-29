@@ -53,8 +53,8 @@ import channels.webui.api as webui
 from . import cdp, page
 from .cdp import CDPClient, CDPError, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
-from .util import (normalize_url, tail_entries, grid_fits, tool_budget,
-                   CALL_BUDGET, drop_target, headless_from_product)
+from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
+                   tool_budget, CALL_BUDGET, drop_target, headless_from_product)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -151,12 +151,11 @@ class Browser(core.module.Module):
             "default": DEFAULT_SNAPSHOT_CHARS,
             "min": 500,
         },
-        "full_page_max_height": {
+        "full_page_max_pixels": {
             "type": "number",
-            "description": "Tallest page a full-page screenshot is taken of, in pixels. Chrome paints the whole page no matter how the capture is clipped, so taller pages are refused with their real height instead of stalling into a timeout. Raise it only for pages you know are light; a grid adds roughly half a second per megapixel.",
-            "default": 8000,
-            "min": 500,
-            "max": 12000,
+            "description": "Largest full-page screenshot to attempt, in megapixels (width x height of the capture). Chrome paints the whole page no matter how the capture is clipped, and the capture and the grid both cost time per pixel, so bigger pages are refused with their real size instead of stalling into a timeout. 25 MPx is a ~1200 px wide page at ~20000 px tall; a 40000 px article does not fit.",
+            "default": 25,
+            "min": 1,
         },
         "save_full_snapshots": {
             "type": "boolean",
@@ -297,17 +296,23 @@ class Browser(core.module.Module):
             return self._effective_headless()   # we launched it, we know the mode
         return actual
 
-    def _full_page_max_height(self):
-        """Pixel height cap for full-page captures.
+    def _full_page_max_pixels(self):
+        """Pixel-area cap for full-page captures, in pixels.
 
-        A whole article is ~40k px tall: capturing that alone blows the tool
-        budget (B27) and the grid used to refuse it. Capping keeps both fast
-        and honest - the result says how tall the page really was.
+        Area, not height: the cost that bites (rasterising, PNG encoding, the
+        grid) grows with pixels, and a height cap both refuses a tall-but-narrow
+        page that would have fitted and accepts a short-but-huge one. A whole
+        article is ~40k px tall - capturing that alone blows the tool budget
+        (B27) - while the user's 8079 px page at 1200 px wide is 9.7 Mpx and
+        captures fine. There is no upper clamp on purpose: the tool budget is
+        the real limit, and exceeding it is reported by the timeout message
+        instead of by a cap the caller cannot see.
         """
         try:
-            return max(500, min(12000, int(self.config.get("full_page_max_height", 8000))))
+            mpx = float(self.config.get("full_page_max_pixels", 25))
         except (TypeError, ValueError):
-            return 8000
+            mpx = 25.0
+        return int(max(1.0, mpx) * 1_000_000)
 
     def _tool_timeout(self):
         """The framework's per-tool-call ceiling (config.yml -> core.tool_timeout).
@@ -1037,7 +1042,7 @@ class Browser(core.module.Module):
         """Takes a screenshot of the current tab (PNG/JPEG) and returns the path plus an inline image.
 
         Args:
-            full_page: Capture the whole page instead of the viewport. Pages taller than full_page_max_height are refused with their real height (Chrome paints the whole page regardless of clipping).
+            full_page: Capture the whole page instead of the viewport. Captures larger than full_page_max_pixels are refused with their real size.
             include_image: Deliver the screenshot to the model as an image message.
             grid: Labeled grid drawn on the image. True = 100px spacing, int = custom px. Requires format='png'.
             format: 'png' (default) or 'jpeg'.
@@ -1066,35 +1071,42 @@ class Browser(core.module.Module):
             )
 
         # metrics BEFORE the capture: they decide whether a full-page capture
-        # is feasible and give the document origin the grid labels use
+        # is feasible, in the raster size Chrome will actually paint
         metrics = await page.viewport_metrics(self._cdp, sid) or {}
-        doc_w = int(metrics.get("docW") or 0)
-        doc_h = int(metrics.get("docH") or 0)
-        max_h = self._full_page_max_height()
+        shot_w = int(metrics.get("docWpx") or 0)
+        shot_h = int(metrics.get("docHpx") or 0)
+        max_px = self._full_page_max_pixels()
         if full_page and not metrics:
-            # No metrics means the height cap below cannot be checked. Refusing
-            # is the honest answer: an unreadably tall page would spend the
-            # whole tool timeout and still return nothing (viewport captures
-            # don't depend on the cap, so they stay allowed).
+            # No metrics means the cap below cannot be checked. Refusing is the
+            # honest answer: an unmeasurably large page would spend the whole
+            # tool timeout and still return nothing (viewport captures don't
+            # depend on the cap, so they stay allowed).
             return self.result(
                 "Cannot read the page dimensions, so a full-page capture is refused - "
-                f"an unmeasurably tall page would use up the whole {budget.total:.0f}s tool "
+                f"an unmeasurably large page would use up the whole {budget.total:.0f}s tool "
                 "timeout and answer nothing. Take a viewport capture (scroll first).",
                 success=False,
             )
-        if full_page and doc_h > max_h:
+        fits, mpx = capture_fits(shot_w, shot_h, max_px)
+        if full_page and not fits:
             # Chrome paints the WHOLE page for captureBeyondViewport no matter
             # what `clip` says (measured 2026-10-27: an 8k clip on a 40k page
             # still ran past 10s), so refuse up front instead of stalling into
-            # a timeout - and tell the caller the real height.
+            # a timeout - and tell the caller the real size.
             return self.result(
-                f"The page is {doc_h} px tall; full-page captures are limited to "
-                f"{max_h} px. Scroll and take viewport captures, or raise "
-                f"full_page_max_height (very tall pages can exceed the tool budget).",
+                f"The page is {shot_w}x{shot_h} px ({mpx:.1f} Mpx); "
+                f"full-page captures are limited to {max_px // 1_000_000} Mpx "
+                f"(full_page_max_pixels). Take viewport captures instead, or raise "
+                f"that setting - the capture itself has to fit in the "
+                f"{budget.total:.1f}s tool timeout as well.",
                 success=False,
             )
-        origin_x = 0 if full_page else int(metrics.get("scrollX") or 0)
-        origin_y = 0 if full_page else int(metrics.get("scrollY") or 0)
+        scale = float(metrics.get("devicePixelRatio") or 1.0)
+        # `region` is in image pixels, the grid labels in document pixels
+        doc_origin_x = int(metrics.get("scrollX") or 0)
+        doc_origin_y = int(metrics.get("scrollY") or 0)
+        origin_x = 0 if full_page else int(round(doc_origin_x * scale))
+        origin_y = 0 if full_page else int(round(doc_origin_y * scale))
 
         try:
             # no timeout of its own: the capture gets all the time this tool
@@ -1109,15 +1121,15 @@ class Browser(core.module.Module):
                 f"The capture did not finish inside the {budget.total:.1f}s tool timeout "
                 f"(Settings > Core > Tool Timeout - the same limit every tool gets). "
                 f"Chrome was still painting: capture the viewport instead of full_page "
-                f"(page is {doc_h or '?'} px tall, full_page_max_height is {max_h} px), "
-                f"or raise that tool timeout.",
+                f"(the capture is {shot_w or '?'}x{shot_h or '?'} px, the limit is "
+                f"{max_px // 1_000_000} Mpx), or raise that tool timeout.",
                 success=False,
             )
 
         # parsed dimensions first: they feed both the grid cost estimate and the
         # region hint, so neither can drift from the pixels actually written
         # (clipping, Chrome rounding). draw_grid never changes the dimensions.
-        px_w, px_h = page.image_size(raw, fmt)
+        px_w, px_h = page.image_size(raw, fmt) or (0, 0)
 
         # grid: drawn onto the PNG after the capture (no page mutation, no
         # canvas size limit). The saved file is replaced by the annotated one.
@@ -1133,7 +1145,8 @@ class Browser(core.module.Module):
                 self.log("browser", grid_note)
             else:
                 try:
-                    raw = page.draw_grid(raw, grid_spacing, origin_x, origin_y)
+                    raw = page.draw_grid(raw, grid_spacing, doc_origin_x,
+                                         doc_origin_y, scale=scale)
                     with open(path, "wb") as f:
                         f.write(raw)
                 except Exception as e:
@@ -1145,14 +1158,14 @@ class Browser(core.module.Module):
         if full_page:
             region = {
                 "x": 0, "y": 0,
-                "width": px_w or doc_w or 0,
-                "height": px_h or (min(doc_h, max_h) if doc_h else 0),
+                "width": px_w or shot_w or 0,
+                "height": px_h or shot_h or 0,
             }
         else:
             region = {
                 "x": origin_x, "y": origin_y,
-                "width": px_w or int(metrics.get("innerWidth") or 0),
-                "height": px_h or int(metrics.get("innerHeight") or 0),
+                "width": px_w or int(round(int(metrics.get("innerWidth") or 0) * scale)),
+                "height": px_h or int(round(int(metrics.get("innerHeight") or 0) * scale)),
             }
         region = {key: int(value or 0) for key, value in region.items()}
         # the tool result stays plain text (path + geometry): the image can't
@@ -1160,8 +1173,13 @@ class Browser(core.module.Module):
         # message instead - the inference API only accepts images in user
         # turns. adding it directly avoids channel.send() inside a tool call,
         # which deadlocks the channel's stream chain.
-        hint = ("Screenshot image is attached. Coordinates: doc_x = shot_x + region.x, "
-                "doc_y = shot_y + region.y.")
+        if scale == 1.0:
+            hint = ("Screenshot image is attached. Coordinates: doc_x = shot_x + region.x, "
+                    "doc_y = shot_y + region.y.")
+        else:
+            hint = (f"Screenshot image is attached. The capture has {scale:g} image px per "
+                    f"document px: doc_x = (shot_x + region.x) / {scale:g}, "
+                    f"doc_y = (shot_y + region.y) / {scale:g}. `region` itself is in image px.")
         if grid_spacing and not grid_note:
             hint += " The grid labels are document coordinates."
         meta = {
@@ -1175,6 +1193,8 @@ class Browser(core.module.Module):
         }
         if fmt == "jpeg":
             meta["quality"] = quality
+        if scale != 1.0:
+            meta["scale"] = scale
         if grid_spacing:
             meta["grid"] = {"spacing": grid_spacing, "applied": grid_note is None}
             if grid_note:

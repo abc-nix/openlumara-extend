@@ -150,5 +150,66 @@ class ImageSizeTests(unittest.TestCase):
         self.assertIsNone(page.jpeg_size(b"\xff\xd8\xff\xc0"))
 
 
+class _FakeCDP:
+    """Just enough of cdp.CDPClient for viewport_metrics."""
+
+    def __init__(self, result=None, error=None):
+        self.result = result or {}
+        self.error = error
+        self.calls = []
+
+    async def cmd(self, method, params=None, session_id=None, timeout=None):
+        self.calls.append(method)
+        if self.error:
+            raise self.error
+        return self.result
+
+
+class ViewportMetricsTests(unittest.TestCase):
+    """B38: the metrics must come from CDP, in the right units."""
+
+    LAYOUT = {"pageX": 10, "pageY": 20, "clientWidth": 1200, "clientHeight": 800}
+    CSS = {"width": 1200, "height": 9000}
+    DEV = {"width": 2400, "height": 18000}
+
+    def _metrics(self, result):
+        import asyncio
+        return asyncio.run(page.viewport_metrics(_FakeCDP(result), "sid"))
+
+    def test_reads_css_and_device_pixels(self):
+        m = self._metrics({"cssLayoutViewport": self.LAYOUT,
+                           "cssContentSize": self.CSS, "contentSize": self.DEV})
+        self.assertEqual((m["docW"], m["docH"]), (1200, 9000))     # CSS px
+        self.assertEqual((m["docWpx"], m["docHpx"]), (2400, 18000))  # capture px
+        self.assertEqual(m["devicePixelRatio"], 2.0)
+        self.assertEqual((m["scrollX"], m["scrollY"]), (10, 20))
+        self.assertEqual((m["innerWidth"], m["innerHeight"]), (1200, 800))
+
+    def test_does_not_touch_page_javascript(self):
+        # the page that blocks its main thread is exactly the one whose guard
+        # value must still be readable
+        fake = _FakeCDP({"cssLayoutViewport": self.LAYOUT, "cssContentSize": self.CSS,
+                         "contentSize": self.DEV})
+        import asyncio
+        asyncio.run(page.viewport_metrics(fake, "sid"))
+        self.assertEqual(fake.calls, ["Page.getLayoutMetrics"])
+
+    def test_unknown_size_is_none_not_zero(self):
+        # None means "cannot measure", which module.screenshot refuses; 0 would
+        # have read as "nothing to cap"
+        self.assertIsNone(self._metrics({"cssContentSize": {"width": 0, "height": 0}}))
+
+    def test_cdp_failure_is_none(self):
+        import asyncio
+        fake = _FakeCDP(error=TimeoutError("no time"))
+        self.assertIsNone(asyncio.run(page.viewport_metrics(fake, "sid")))
+
+    def test_old_chrome_without_css_fields(self):
+        m = self._metrics({"layoutViewport": self.LAYOUT,
+                           "contentSize": {"width": 800, "height": 4000}})
+        self.assertEqual((m["docW"], m["docH"]), (800, 4000))
+        self.assertEqual(m["devicePixelRatio"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

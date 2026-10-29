@@ -119,10 +119,11 @@ class DecodeTests(unittest.TestCase):
 class DrawGridTests(unittest.TestCase):
     W, H = 200, 120
 
-    def _drawn(self, spacing=50, origin=(0, 0), bpp=3):
+    def _drawn(self, spacing=50, origin=(0, 0), bpp=3, scale=1.0):
         base = solid(self.W, self.H, bpp, BASE if bpp == 3 else BASE + (200,))
         raw = build_png(self.W, self.H, bpp, base, filters=(0, 1, 2, 3, 4))
-        out = page.draw_grid(raw, spacing, origin_x=origin[0], origin_y=origin[1])
+        out = page.draw_grid(raw, spacing, origin_x=origin[0], origin_y=origin[1],
+                             scale=scale)
         self.assertEqual(page.png_size(out), (self.W, self.H))
         _, _, decoded_bpp, pixels = page.decode_png(out)
         self.assertEqual(decoded_bpp, bpp)
@@ -144,6 +145,20 @@ class DrawGridTests(unittest.TestCase):
         self.assertNotEqual(px(pixels, self.W, bpp, 0, 60), RED)
         self.assertEqual(px(pixels, self.W, bpp, 100, 25), RED)
         self.assertNotEqual(px(pixels, self.W, bpp, 100, 20), RED)
+
+    def test_scale_maps_document_px_to_image_px(self):
+        # devicePixelRatio 2: a 50-document-px grid sits every 100 image px
+        pixels, bpp = self._drawn(spacing=50, scale=2)
+        self.assertEqual(px(pixels, self.W, bpp, 100, 90), RED)
+        self.assertNotEqual(px(pixels, self.W, bpp, 50, 90), RED)
+        self.assertNotEqual(px(pixels, self.W, bpp, 101, 90), RED)
+
+    def test_scale_keeps_the_document_origin(self):
+        # left edge at document x=30, scale 2: the document-50 line lands at
+        # image x=(50-30)*2=40, not at 20 (scale 1) or 60
+        pixels, bpp = self._drawn(spacing=50, origin=(30, 0), scale=2)
+        self.assertEqual(px(pixels, self.W, bpp, 40, 90), RED)
+        self.assertNotEqual(px(pixels, self.W, bpp, 20, 90), RED)
 
     def test_labels_have_white_backing_and_ink(self):
         pixels, bpp = self._drawn(spacing=50)

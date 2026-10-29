@@ -128,6 +128,26 @@ class CallBudgetContextTests(unittest.TestCase):
         self.assertEqual(sorted(out), [1.0, 9.0])
 
 
+class CaptureFitsTests(unittest.TestCase):
+    def test_the_page_that_was_refused_now_fits(self):
+        # 8079 px tall, ~1200 wide = 9.7 Mpx: refused by the old 8000 px height
+        # cap, and it is nowhere near the cost of a 40k px article
+        self.assertTrue(util.capture_fits(1200, 8079, 25_000_000)[0])
+
+    def test_a_whole_article_does_not_fit(self):
+        fits, mpx = util.capture_fits(1200, 40415, 25_000_000)
+        self.assertFalse(fits)
+        self.assertAlmostEqual(mpx, 48.5, places=1)
+
+    def test_area_not_height(self):
+        # tall and narrow costs little; short and very wide costs a lot
+        self.assertTrue(util.capture_fits(300, 40000, 25_000_000)[0])
+        self.assertFalse(util.capture_fits(20000, 2000, 25_000_000)[0])
+
+    def test_garbage_does_not_fit(self):
+        self.assertEqual(util.capture_fits(None, "x", 1), (False, 0.0))
+
+
 class GridFitsTests(unittest.TestCase):
     def test_small_image_with_time_left_fits(self):
         fits, need = util.grid_fits(1272, 1305, 14.5)

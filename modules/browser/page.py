@@ -9,7 +9,9 @@ the capture), image dimension parsing, viewport metrics, and tab-state
 capture/restore
 (restart headless<->visible). Every function receives what it needs
 explicitly (cdp client, session id, dirs, refs) — no module state.
-Dependency direction: module.py -> page.py -> cdp.py (constants only).
+Dependency direction: module.py -> page.py. page.py imports nothing from
+cdp.py: a command's deadline is resolved inside cdp.cmd from util.CALL_BUDGET,
+so the tool call's one number reaches these helpers without being passed in.
 """
 
 import asyncio
@@ -255,27 +257,52 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
 
 
 async def viewport_metrics(cdp_client, sid, timeout=None):
-    """Read viewport/doc metrics in one evaluate. Returns a dict or None.
+    """Viewport and document size from Page.getLayoutMetrics. Dict or None.
 
-    Returns None when the read fails, so the caller cannot tell a huge page
-    from an unreadable one - see the note in module.screenshot.
+    Deliberately not page JS (B38): the page that makes a capture time out can
+    have its main thread blocked, and a guard value read through a blocked
+    thread tells us nothing. None therefore has to mean "unknown", and
+    module.screenshot refuses full-page captures on it rather than treating it
+    as "no limit".
+
+    Units, per the protocol: the `css*` fields are CSS pixels; the deprecated
+    layoutViewport/visualViewport/contentSize are DEVICE pixels. The last is
+    the raster size of a full-page capture, which is what the pixel cap, the
+    grid and `region` need. `docW`/`docH` stay in CSS pixels - that is the
+    space refs and scroll offsets use.
     """
     try:
-        res = await cdp_client.cmd("Runtime.evaluate", {
-            "expression": "JSON.stringify({"
-                          "scrollX: window.scrollX, scrollY: window.scrollY,"
-                          "innerWidth: window.innerWidth, innerHeight: window.innerHeight,"
-                          "devicePixelRatio: window.devicePixelRatio || 1,"
-                          "docW: Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0),"
-                          "docH: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)})",
-            "returnByValue": True,
-        }, sid, timeout=timeout)
-        val = res.get("result", {}).get("value")
-        if val:
-            return json.loads(val)
+        res = await cdp_client.cmd("Page.getLayoutMetrics", {}, sid, timeout=timeout)
     except Exception:
         return None
-    return None
+    lv = res.get("cssLayoutViewport") or {}
+    cs = res.get("cssContentSize") or {}
+    dev_cs = res.get("contentSize") or {}
+    if not lv and res.get("layoutViewport"):
+        # pre-M93 Chrome: only the deprecated (device pixel) fields exist.
+        # Read them as CSS pixels - exact at devicePixelRatio 1, and the only
+        # reading available otherwise.
+        lv = res.get("layoutViewport") or {}
+        cs = dev_cs
+    doc_w = int(cs.get("width") or 0)
+    doc_h = int(cs.get("height") or 0)
+    if doc_w <= 0 or doc_h <= 0:
+        return None
+    px_w = int(dev_cs.get("width") or 0)
+    px_h = int(dev_cs.get("height") or 0)
+    # image px per CSS px, straight from the two content sizes
+    scale = (px_w / doc_w) if px_w and doc_w else 1.0
+    if px_w <= 0 or px_h <= 0:
+        px_w, px_h = int(round(doc_w * scale)), int(round(doc_h * scale))
+    return {
+        "scrollX": int(lv.get("pageX") or 0),
+        "scrollY": int(lv.get("pageY") or 0),
+        "innerWidth": int(lv.get("clientWidth") or 0),
+        "innerHeight": int(lv.get("clientHeight") or 0),
+        "docW": doc_w, "docH": doc_h,
+        "docWpx": px_w, "docHpx": px_h,
+        "devicePixelRatio": round(scale, 3),
+    }
 
 
 def png_size(raw):
@@ -486,12 +513,16 @@ def _draw_label(pixels, width, height, bpp, text, x, y, scale):
                             pixels[start:start + 3] = ink
 
 
-def draw_grid(raw, spacing, origin_x=0, origin_y=0, font_scale=2, label_every=1000):
+def draw_grid(raw, spacing, origin_x=0, origin_y=0, scale=1.0,
+              font_scale=2, label_every=1000):
     """Draw a labeled coordinate grid onto a PNG capture; returns new PNG bytes.
 
     Lines sit on multiples of `spacing` in *document* space, so the labels read
     as document coordinates: `origin_x`/`origin_y` are the document position of
-    the image's top-left (exactly the `region` the screenshot tool reports).
+    the image's top-left and `scale` is image pixels per document pixel
+    (devicePixelRatio). At scale 2 one document pixel is two image pixels, so
+    the lines are twice as far apart in the image while the labels must still
+    be document numbers, not image ones.
 
     Raises ValueError when the image cannot be decoded (caller reports
     "grid not drawn" and keeps the plain capture).
@@ -499,19 +530,21 @@ def draw_grid(raw, spacing, origin_x=0, origin_y=0, font_scale=2, label_every=10
     width, height, bpp, pixels = decode_png(raw)
     stride = width * bpp
     spacing = max(4, int(spacing))
+    scale = max(0.01, float(scale))
 
     # image-space positions where document coordinates are multiples of spacing
-    x_start = (-int(origin_x)) % spacing
-    y_start = (-int(origin_y)) % spacing
+    step = max(1, int(round(spacing * scale)))
+    x_start = (-int(round(origin_x * scale))) % step
+    y_start = (-int(round(origin_y * scale))) % step
 
     column_ink = [bytes([_GRID_RED[c]]) for c in range(3)]
     row_ink = bytes(_GRID_RED) * width
 
-    for x in range(x_start, width, spacing):
+    for x in range(x_start, width, step):
         for channel in range(3):
             start = x * bpp + channel
             pixels[start::stride] = column_ink[channel] * height
-    for y in range(y_start, height, spacing):
+    for y in range(y_start, height, step):
         row_start = y * stride
         if bpp == 3:
             pixels[row_start:row_start + stride] = row_ink
@@ -523,12 +556,13 @@ def draw_grid(raw, spacing, origin_x=0, origin_y=0, font_scale=2, label_every=10
 
     # labels: x= on top of each vertical line (repeated down tall captures),
     # y= at the left edge of each horizontal line
-    for x in range(x_start, width, spacing):
-        text = f"x={origin_x + x}"
+    for x in range(x_start, width, step):
+        text = f"x={int(round(origin_x + x / scale))}"
         for ly in range(2, height, label_every):
             _draw_label(pixels, width, height, bpp, text, x + 3, ly, font_scale)
-    for y in range(y_start, height, spacing):
-        _draw_label(pixels, width, height, bpp, f"y={origin_y + y}", 2, y + 3, font_scale)
+    for y in range(y_start, height, step):
+        label = f"y={int(round(origin_y + y / scale))}"
+        _draw_label(pixels, width, height, bpp, label, 2, y + 3, font_scale)
 
     return encode_png(width, height, bpp, pixels)
 

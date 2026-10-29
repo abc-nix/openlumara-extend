@@ -140,6 +140,21 @@ def grid_fits(width, height, seconds_left):
     return need <= max(0.0, float(seconds_left)), need
 
 
+def capture_fits(width, height, max_pixels):
+    """Would a WxH full-page capture fit the pixel cap? (fits, megapixels).
+
+    Area, not height: cost grows with pixels (see GRID_COST_S_PER_MPX), and a
+    height cap refuses a tall-but-narrow page that fits while accepting a
+    short-but-huge one.
+    """
+    try:
+        pixels = max(0, int(width)) * max(0, int(height))
+        limit = max(0, int(max_pixels))
+    except (TypeError, ValueError):
+        return False, 0.0
+    return pixels <= limit, pixels / 1e6
+
+
 def headless_from_product(product):
     """Was `product` (CDP /json/version "Browser") running headless?
 
