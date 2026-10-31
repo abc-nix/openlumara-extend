@@ -56,7 +56,7 @@ from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
 from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
                    headless_from_version, timeout_text, rejected_top_level_await,
-                   wrap_await)
+                   wrap_await, restorable_url, captured_active_index)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -692,13 +692,14 @@ class Browser(core.module.Module):
         data/browser/last_state.json (crash-recovery aid, future use)."""
         targets = await page.list_page_targets(self._cdp)
         tabs = []
-        active_index = None
-        for i, t in enumerate(targets):
+        # B6: number the active tab in the captured list, not in the full
+        # target list - skipped chrome:// and devtools tabs still occupy a
+        # slot in Chrome's own order.
+        active_index = captured_active_index(targets, self._current_target)
+        for t in targets:
             tid = t["targetId"]
             url = t.get("url", "")
-            if tid == self._current_target:
-                active_index = i
-            if not (url.startswith("http") or url.startswith("about:blank")):
+            if not restorable_url(url):
                 continue  # chrome://, devtools://, extensions: not reopenable
             await self._attach_target(tid)
             sid = self._attached.get(tid)

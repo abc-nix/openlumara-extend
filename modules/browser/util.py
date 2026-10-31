@@ -43,6 +43,36 @@ def normalize_url(url):
     return url
 
 
+def restorable_url(url):
+    """True if this tab's URL can be reopened after a relaunch.
+
+    Only http(s) and about:blank are reopenable; chrome://, devtools:// and
+    extension pages are not, so the restart capture skips them.
+    """
+    url = str(url or "")
+    return url.startswith("http") or url.startswith("about:blank")
+
+
+def captured_active_index(targets, active_id):
+    """Index of the active tab inside the CAPTURED list, or None.
+
+    `_capture_state` walks every page target but keeps only restorable ones.
+    Numbering the active tab over the whole target list (B6) and then
+    indexing the filtered list restored a different tab whenever a chrome://
+    or devtools tab sat between the active one and the end of the list.
+    None = the active tab is not captured at all (chrome://), and the caller
+    falls back to the first tab.
+    """
+    index = 0
+    for target in targets:
+        if not restorable_url(target.get("url")):
+            continue
+        if target.get("targetId") == active_id:
+            return index
+        index += 1
+    return None
+
+
 def tail_entries(buffer, count):
     """The last `count` entries of a deque.
 

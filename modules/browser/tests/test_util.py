@@ -144,5 +144,53 @@ class TailEntriesTests(unittest.TestCase):
         self.assertEqual(util.tail_entries(deque(), 5), [])
 
 
+class RestorableUrlTests(unittest.TestCase):
+    def test_http_and_about_blank(self):
+        for url in ("http://example.com", "https://example.com/x",
+                    "about:blank"):
+            self.assertTrue(util.restorable_url(url), url)
+
+    def test_internal_pages_are_not(self):
+        for url in ("chrome://newtab", "devtools://x/y", "edge://settings",
+                    "file:///tmp/a.html", ""):
+            self.assertFalse(util.restorable_url(url), url)
+
+    def test_missing_url(self):
+        self.assertFalse(util.restorable_url(None))
+
+
+class CapturedActiveIndexTests(unittest.TestCase):
+    """B6: the index must be counted inside the captured list."""
+
+    def _targets(self):
+        return [
+            {"targetId": "A", "url": "https://a.test/"},
+            {"targetId": "B", "url": "chrome://newtab"},   # skipped
+            {"targetId": "C", "url": "https://c.test/"},   # active
+            {"targetId": "D", "url": "https://d.test/"},
+        ]
+
+    def test_chrome_tab_between_active_tab_and_the_end(self):
+        # target-space index of C is 2, but the captured list is [A, C, D]
+        self.assertEqual(util.captured_active_index(self._targets(), "C"), 1)
+
+    def test_first_tab(self):
+        self.assertEqual(util.captured_active_index(self._targets(), "A"), 0)
+
+    def test_last_tab(self):
+        self.assertEqual(util.captured_active_index(self._targets(), "D"), 2)
+
+    def test_active_tab_not_captured(self):
+        # the active tab is a chrome:// page: nothing to restore, caller
+        # falls back to the first tab
+        self.assertIsNone(util.captured_active_index(self._targets(), "B"))
+
+    def test_unknown_active_id(self):
+        self.assertIsNone(util.captured_active_index(self._targets(), "Z"))
+
+    def test_no_targets(self):
+        self.assertIsNone(util.captured_active_index([], "A"))
+
+
 if __name__ == "__main__":
     unittest.main()
