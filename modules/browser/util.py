@@ -167,6 +167,33 @@ def tail_entries(buffer, count):
     return list(buffer)[-count:] if count else []
 
 
+def unique_images(entries, max_url=200):
+    """Deduplicated image entries, in page order, with long URLs cut.
+
+    `src` is the identity: the same file can be used several times on one page
+    (logos, category symbols), and the model only needs it once. A src longer
+    than `max_url` is truncated with the same "..." the network log uses.
+    """
+    seen = set()
+    out = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        src = str(entry.get("src") or "")
+        if not src or src in seen:
+            continue
+        seen.add(src)
+        if len(src) > max_url:
+            src = src[:max_url - 3] + "..."
+        out.append({
+            "src": src,
+            "alt": entry.get("alt") or "",
+            "width": int(entry.get("width") or 0),
+            "height": int(entry.get("height") or 0),
+        })
+    return out
+
+
 class Budget:
     """One deadline for a whole tool call.
 

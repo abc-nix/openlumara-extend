@@ -311,6 +311,44 @@ async def tag_name(cdp_client, object_id, sid):
         return ""
 
 
+# Every image the page has, minus the noise: a missing src, an icon smaller
+# than `min` on both sides, and a data: URL's payload (replaced by its length,
+# a single one can be tens of KB). Size is natural pixels, so a CSS-scaled
+# icon is still judged by what the file really is.
+_IMAGES_JS = (
+    "function(min){"
+    "var imgs=document.images||[],out=[];"
+    "for(var i=0;i<imgs.length&&out.length<400;i++){"
+    "var img=imgs[i],src=img.currentSrc||img.src||'';"
+    "if(!src){continue;}"
+    "var w=img.naturalWidth||0,h=img.naturalHeight||0;"
+    "if(min>0&&w<min&&h<min){continue;}"
+    "if(src.slice(0,5)==='data:'){"
+    "var comma=src.indexOf(',');"
+    "src=(comma>0?src.slice(0,comma):'data:')"
+    "+' (data URL, '+(comma>0?src.length-comma:src.length)+' chars)';"
+    "}"
+    "out.push({src:src,alt:img.alt||'',width:w,height:h});"
+    "}"
+    "return JSON.stringify(out);"
+    "}"
+)
+
+
+async def collect_images(cdp_client, sid, min_size=48):
+    """Images of the page as {src, alt, width, height}, noise already dropped."""
+    try:
+        res = await cdp_client.cmd("Runtime.evaluate", {
+            "expression": "(" + _IMAGES_JS + ")(" + str(int(min_size)) + ")",
+            "returnByValue": True,
+        }, sid)
+        value = (res.get("result") or {}).get("value")
+        data = json.loads(value) if value else []
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
+
+
 async def input_type(cdp_client, object_id, sid):
     """Lower-case type of an <input> ('' for other elements or on failure)."""
     try:

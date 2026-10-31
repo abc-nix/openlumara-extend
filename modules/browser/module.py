@@ -36,7 +36,7 @@ from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
                    headless_from_version, timeout_text, rejected_top_level_await,
                    wrap_await, restorable_url, captured_active_index, untrusted,
-                   split_chord, checkbox_value)
+                   split_chord, checkbox_value, unique_images)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -1638,20 +1638,45 @@ class Browser(core.module.Module):
         return self.result(untrusted(entries, self._page_source()))
 
     @core.module.tool
-    async def get_images(self):
-        """Lists all images on the current page with their src and alt text."""
+    async def get_images(self, min_size: int = 48, limit: int = 50):
+        """Lists images on the current page with their src, alt text and pixel size.
+
+        Images narrower and shorter than min_size are skipped and repeated src
+        values are dropped; more than limit results are cut, with the whole
+        list saved to a file.
+
+        Args:
+            min_size: Skip images smaller than this many px on both sides (0 = keep all).
+            limit: Max images to return (default 50).
+        """
         await self._ensure_connection()
         sid = self._current_session()
-        res = await self._cdp.cmd("Runtime.evaluate", {
-            "expression": (
-                "Array.from(document.images).map(i => ({src: i.src, alt: i.alt}))"
-            ),
-            "returnByValue": True,
-        }, sid)
-        images = res.get("result", {}).get("value", []) or []
+        try:
+            min_size = max(0, int(min_size))
+        except (TypeError, ValueError):
+            min_size = 48
+        try:
+            limit = max(1, int(limit))
+        except (TypeError, ValueError):
+            limit = 50
+        entries = await page.collect_images(self._cdp, sid, min_size)
+        images = unique_images(entries, MAX_URL_LEN)
         if not images:
             return self.result([])
-        return self.result(untrusted(images, self._page_source()))
+        shown = images[:limit]
+        omitted = max(0, len(images) - len(shown))
+        data = {"images": shown, "total": len(images),
+                "returned": len(shown), "omitted": omitted}
+        if omitted:
+            path = os.path.join(self._snapshots_dir,
+                                page.new_filename("images", "json"))
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(images, f, ensure_ascii=False)
+                data["full_path"] = path
+            except OSError as e:
+                self.log("browser", f"get_images: {core.detail_error(e)}")
+        return self.result(untrusted(data, self._page_source()))
 
     @core.module.tool
     async def cookies(self, domain: str = None):
