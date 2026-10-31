@@ -1,4 +1,5 @@
 __pycache__/
+tests/
 *.py[cod]
 *.bak
 *~
@@ -11,3 +12,5 @@ __pycache__/
 # When publishing the module, drop these files with:
 #   git rm -r --cached modules/docprocess/extras
 modules/docprocess/extras/
+
+modules/browser/REVIEW.md
