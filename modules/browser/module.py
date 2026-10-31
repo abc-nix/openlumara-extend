@@ -386,19 +386,18 @@ class Browser(core.module.Module):
             mpx = 25.0
         return int(max(1.0, mpx) * 1_000_000)
 
-    def _capture_failed_text(self, what, background=False):
+    def _capture_failed_text(self, background=False):
         """Short message for a capture that outlived its window.
 
-        A tab that is not the active one is painted from scratch just for the
-        capture (74 ms while active, over 25 s in the background, measured
-        2026-10-31 on a Wikipedia page), so that case names the cause and the
-        one command that fixes it. Everything else keeps the reload advice.
+        A tab that is not the active one is painted from scratch for the capture
+        (74 ms while active, over 25 s in the background, measured 2026-10-31 on
+        a Wikipedia page), so that case names the command that fixes it.
         """
         if background:
-            return (f"The {what} screenshot timed out. This tab is not the active "
-                    f"one: switch_tab to activate it, or increase the Tool Timeout.")
-        return (f"The {what} screenshot timed out. The page was still painting: "
-                f"reload the tab (f5) and retry, or increase the Tool Timeout.")
+            return ("Screenshot timed out. This tab is not active: switch_tab to "
+                    "activate it, or raise the Tool Timeout.")
+        return ("Screenshot timed out. The page was still painting: reload the tab "
+                "(f5) and retry, or raise the Tool Timeout.")
 
     def _tool_timeout(self):
         """The framework's per-tool-call ceiling (config.yml -> core.tool_timeout).
@@ -495,10 +494,9 @@ class Browser(core.module.Module):
                     info = await self._launch_browser()
                 else:
                     raise RuntimeError(
-                        "No browser is reachable on "
-                        f"127.0.0.1:{self._port()}. Start Chrome/Chromium with "
-                        "--remote-debugging-port=<port> and a dedicated "
-                        "--user-data-dir, or enable the auto_launch setting."
+                        f"No browser on 127.0.0.1:{self._port()}. Enable "
+                        f"auto_launch, or start Chrome with "
+                        f"--remote-debugging-port={self._port()}."
                     )
             self._browser_info = info
             # a fresh connection invalidates any previous tab sessions
@@ -524,8 +522,8 @@ class Browser(core.module.Module):
             # we still name a target but its session is gone: the tab was
             # closed or crashed. Say so instead of letting CDP answer -32001
             raise RuntimeError(
-                "The tab this call addressed is gone (closed or crashed). Call "
-                "list_tabs and switch_tab to one that is still open, or new_tab."
+                "That tab is gone (closed or crashed). Call list_tabs, then "
+                "switch_tab or new_tab."
             )
         raise RuntimeError("No tab is attached. Call new_tab or navigate first.")
 
@@ -956,10 +954,8 @@ class Browser(core.module.Module):
         kill a browser we did not start."""
         if not self._owns_browser():
             return self.result(
-                "Cannot restart: the running browser was not launched by "
-                "this module (external). Close it yourself and reopen from "
-                "the panel for the other mode.",
-                success=False,
+                "Not launched by this module: close it yourself, then reopen "
+                "from the panel.", success=False,
             )
         if not self._is_connected():
             await self._ensure_connection()
@@ -972,9 +968,8 @@ class Browser(core.module.Module):
         # relaunch attached to a stranger. Wait until nothing answers.
         if not await self._wait_port_down():
             return self.result(
-                "Restart aborted: the previous browser is still holding the "
-                f"debug port after {self._port()}. Close it manually and reopen.",
-                success=False,
+                "Restart aborted: the old browser still holds the debug port. "
+                "Close it and reopen.", success=False,
             )
         await self._ensure_connection()
         try:
@@ -1041,12 +1036,11 @@ class Browser(core.module.Module):
         if not loaded:
             # omit the key instead of carrying "note": null into every result
             if window < wait:
-                out["note"] = ("Page load event not received before this tool call's "
-                               "time ran out (the requested wait_seconds did not fit "
-                               "in it; the page may still be loading).")
+                out["note"] = ("Page load not seen before the call ran out; it may "
+                               "still be loading.")
             else:
-                out["note"] = ("Page load event not received within the wait window "
-                               "(page may still be loading).")
+                out["note"] = ("Page load not seen within the wait window; it may "
+                               "still be loading.")
         return self.result(out)
 
     @core.module.tool
@@ -1273,8 +1267,7 @@ class Browser(core.module.Module):
             # 1px lines do not survive JPEG, and decoding JPEG would need an
             # imaging library: ask for png instead of silently changing format
             return self.result(
-                "A grid needs a lossless capture: call again with format='png' "
-                "(or drop the grid).", success=False,
+                "A grid needs format='png' (JPEG is lossy).", success=False,
             )
 
         # metrics BEFORE the capture: they decide whether a full-page capture
@@ -1289,10 +1282,8 @@ class Browser(core.module.Module):
             # tool timeout and still return nothing (viewport captures don't
             # depend on the cap, so they stay allowed).
             return self.result(
-                "Cannot read the page dimensions, so a full-page capture is refused - "
-                f"an unmeasurably large page would use up the whole {self._tool_timeout():.0f}s "
-                "tool timeout and answer nothing. Take a viewport capture (scroll first).",
-                success=False,
+                "Cannot read the page size, so full_page is refused. Use a "
+                "viewport capture.", success=False,
             )
         fits, mpx = capture_fits(shot_w, shot_h, max_px)
         if full_page and not fits:
@@ -1301,12 +1292,9 @@ class Browser(core.module.Module):
             # still ran past 10s), so refuse up front instead of stalling into
             # a timeout - and tell the caller the real size.
             return self.result(
-                f"The page is {shot_w}x{shot_h} px ({mpx:.1f} Mpx); "
-                f"full-page captures are limited to {max_px // 1_000_000} Mpx "
-                f"(full_page_max_pixels). Take viewport captures instead, or raise "
-                f"that setting - the capture itself has to fit in the "
-                f"{self._tool_timeout():.1f}s tool timeout as well.",
-                success=False,
+                f"Page is {mpx:.1f} Mpx; full_page is capped at "
+                f"{max_px // 1_000_000} Mpx (full_page_max_pixels). Use viewport "
+                f"captures or raise it.", success=False,
             )
         scale = float(metrics.get("devicePixelRatio") or 1.0)
         # `region` is in image pixels, the grid labels in document pixels
@@ -1335,15 +1323,13 @@ class Browser(core.module.Module):
             self.log("browser", f"screenshot: {core.detail_error(e)}")
             if not full_page:
                 return self.result(
-                    self._capture_failed_text("viewport", background=background),
+                    self._capture_failed_text(background=background),
                     success=False,
                 )
             # Chrome did not answer the full-page capture: use what the call
             # still has and return the viewport, saying exactly that
-            fallback_note = (
-                f"full-page capture did not answer within {window:.1f}s (Chrome can "
-                f"stall on some pages on a full-page capture); this is the viewport. "
-                f"If it keeps happening, reload the tab (press f5) and retry.")
+            fallback_note = ("Full-page capture timed out; this is the viewport. "
+                             "Reload the tab (f5) if it repeats.")
             self.log("browser", fallback_note)
             try:
                 path, raw = await page.capture_screenshot(
@@ -1352,7 +1338,7 @@ class Browser(core.module.Module):
             except TimeoutError as e2:
                 self.log("browser", f"screenshot: {core.detail_error(e2)}")
                 return self.result(
-                    self._capture_failed_text("full-page", background=background),
+                    self._capture_failed_text(background=background),
                     success=False,
                 )
             # what was written is a viewport capture: region and `full_page`
@@ -1374,9 +1360,8 @@ class Browser(core.module.Module):
         if grid_spacing:
             fits, need = grid_fits(px_w, px_h, budget.left())
             if not fits:
-                grid_note = (f"grid not drawn: the annotation needs ~{need:.1f}s and only "
-                             f"{budget.left():.1f}s of this tool call is left; the plain "
-                             "capture is attached")
+                grid_note = (f"Grid not drawn (needs ~{need:.1f}s, "
+                             f"{budget.left():.1f}s left). Plain capture attached.")
                 self.log("browser", grid_note)
             else:
                 try:
@@ -1516,8 +1501,7 @@ class Browser(core.module.Module):
         """
         if not self.config.get("enable_network_monitoring", False):
             return self.result(
-                "Network monitoring is disabled. Enable the "
-                "enable_network_monitoring setting and restart to use this.",
+                "enable_network_monitoring is off. Enable it and restart.",
                 success=False,
             )
         await self._ensure_connection()
@@ -1563,9 +1547,8 @@ class Browser(core.module.Module):
                 # no silent example.com fallback: that looked like "this site
                 # has no cookies" when nothing was queried for the real site
                 return self.result(
-                    "The current tab is not an http(s) page, so there is no site to read cookies for. "
-                    "Pass a domain explicitly (e.g. domain='example.com').",
-                    success=False,
+                    "This tab is not http(s). Pass a domain (e.g. "
+                    "domain='example.com').", success=False,
                 )
             urls = [url]
         res = await self._cdp.cmd("Network.getCookies", {"urls": urls}, sid)
@@ -1682,9 +1665,8 @@ class Browser(core.module.Module):
             others = [k for k in self._pending_dialogs if k != key]
             if others:
                 return self.result(
-                    "This tab has no dialog, but another tab has one open "
-                    f"({len(others)}). Switch to that tab and call again.",
-                    success=False,
+                    f"Another tab has this dialog ({len(others)}). Switch to "
+                    f"it and retry.", success=False,
                 )
             return self.result("No pending dialog.", success=False)
         params = {"accept": bool(accept)}
@@ -1746,8 +1728,7 @@ def _error_result(self, tool_name, exc):
 
     if isinstance(exc, CDPError):
         if "-32001" in text or "Session with given id not found" in text:
-            text = (f"{text} - the tab this call addressed is gone (it was closed). "
-                    "Call list_tabs, then switch_tab with its id (or new_tab) before retrying.")
+            text = f"{text}. Call list_tabs, then switch_tab or new_tab."
         elif "-32601" in text:
             text = f"Chrome does not support that command: {text}"
         elif "-32602" in text:
@@ -1755,15 +1736,11 @@ def _error_result(self, tool_name, exc):
         else:
             text = f"The browser rejected the command: {text}"
     elif isinstance(exc, TimeoutError):
-        # name the number that actually bound it - the framework's - and give
-        # advice that belongs to the tool that timed out, not to captures in
-        # general (B40: this text used to offer "viewport instead of full_page"
-        # to navigate and evaluate)
-        text = timeout_text(text, self._tool_timeout(),
-                            capture=tool_name == "screenshot")
+        # name the setting that actually bound it, never a module-private number
+        # (B40); no per-tool advice - screenshot explains its own timeouts
+        text = timeout_text(text)
     elif isinstance(exc, ConnectionError):
-        text = ("The browser connection was lost. Call open to reconnect (or new_tab); "
-                "if it keeps dropping, the browser may have crashed.")
+        text = "Connection lost. Call open to reconnect (or new_tab)."
     # RuntimeError / OSError already carry a readable message
 
     return self.result(text, success=False)

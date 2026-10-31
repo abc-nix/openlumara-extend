@@ -193,9 +193,8 @@ def find_binary(config):
         if found:
             return found
     raise RuntimeError(
-        f"No browser binary found for '{choice}'. Install Chrome or "
-        "Chromium, or set browser_binary to 'custom' and provide "
-        "custom_binary_path."
+        f"No browser binary for '{choice}'. Install Chrome/Chromium, or set "
+        "browser_binary='custom'."
     )
 
 

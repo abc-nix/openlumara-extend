@@ -365,13 +365,12 @@ class CaptureFailedTextTests(unittest.TestCase):
     def _text(self, background):
         browser = make_browser()
         browser._tool_timeout = lambda: 30.0
-        return module.Browser._capture_failed_text(
-            browser, "viewport", background=background)
+        return module.Browser._capture_failed_text(browser, background=background)
 
     def test_background_tab_points_at_switch_tab(self):
         text = self._text(True)
         self.assertIn("switch_tab", text)
-        self.assertIn("not the active one", text)
+        self.assertIn("not active", text)
         self.assertNotIn("reload the tab", text)
 
     def test_a_stalled_page_keeps_the_reload_advice(self):
@@ -380,10 +379,10 @@ class CaptureFailedTextTests(unittest.TestCase):
         self.assertNotIn("switch_tab", text)
 
     def test_both_stay_short(self):
-        # user rule 2026-10-31: no explanations, name the cause and the fix
+        # core-budget rule (2026-10-31): no explanations, name the cause and fix
         for background in (True, False):
             text = self._text(background)
-            self.assertLessEqual(len(text), 140, text)
+            self.assertLessEqual(len(text), 110, text)
             self.assertIn("Tool Timeout", text)
 
 

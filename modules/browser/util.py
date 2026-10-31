@@ -204,25 +204,15 @@ def capture_fits(width, height, max_pixels):
     return pixels <= limit, pixels / 1e6
 
 
-def timeout_text(text, limit, capture=False):
-    """The message for a call that ran out of the framework's budget (B40).
+def timeout_text(text):
+    """The short message for a call that ran out of the framework's budget (B40).
 
-    `text` is the failure itself ("CDP command 'X' timed out after 14.5s") and
-    `limit` is `core.tool_timeout` - the number in Settings, the only timeout a
-    caller can raise. The command's own number is a little lower because the
-    module answers just before core's timer fires; naming `limit` rather than
-    the budget keeps the message consistent with the setting the user edits
-    (naming a module-private limit would send them to a setting that does not
-    help - that was B40).
+    `text` is the failure itself ("CDP command 'X' timed out after 14.5s"). Names
+    the setting, never a module-private number: `core.tool_timeout` is the only
+    timeout the caller can raise, and pointing at anything else sends them to a
+    setting that does not help (that was B40).
     """
-    out = (f"{text} - this tool call gets {float(limit):.1f}s in total "
-           "(Settings > Core > Tool Timeout), and the module stops just short "
-           "of that so it can answer instead of being cut off. The page may be "
-           "busy or very large: retry with a narrower action, or raise that "
-           "setting.")
-    if capture:
-        out += " For a capture, try the viewport instead of full_page."
-    return out
+    return f"{text}. Retry, or raise Settings > Core > Tool Timeout."
 
 
 def rejected_top_level_await(details):

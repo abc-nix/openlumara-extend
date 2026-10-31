@@ -129,18 +129,15 @@ class CallBudgetContextTests(unittest.TestCase):
 
 
 class TimeoutTextTests(unittest.TestCase):
-    def test_names_the_number_that_bound_it(self):
-        text = util.timeout_text("CDP command 'Page.navigate' timed out after 14.5s", 15)
+    def test_names_the_setting_that_bound_it(self):
+        text = util.timeout_text("CDP command 'Page.navigate' timed out after 14.5s")
         self.assertIn("'Page.navigate' timed out after 14.5s", text)
-        self.assertIn("gets 15.0s in total", text)
         self.assertIn("Settings > Core > Tool Timeout", text)
 
-    def test_rounds_the_total(self):
-        self.assertIn("gets 14.5s in total", util.timeout_text("x", 14.499991990000126))
-
-    def test_capture_advice_only_where_it_applies(self):
-        self.assertNotIn("full_page", util.timeout_text("x", 15))
-        self.assertIn("viewport instead of full_page", util.timeout_text("x", 15, capture=True))
+    def test_stays_short(self):
+        # core modules keep failure texts between ~30 and 110 chars
+        text = util.timeout_text("CDP command 'Page.navigate' timed out after 14.5s")
+        self.assertLessEqual(len(text), 110)
 
 
 class FirstCaptureWindowTests(unittest.TestCase):
