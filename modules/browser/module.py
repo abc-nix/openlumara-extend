@@ -1,34 +1,10 @@
-"""
-Browser Module for OpenLumara
-=====================================
+"""Browser module: a real Chrome/Chromium (or Brave) driven over the DevTools
+Protocol.
 
-Controls a real Chrome/Chromium (or Brave) browser window via the Chrome
-DevTools Protocol (CDP), giving the AI the usual browser tools: open,
-navigate, control (click/type/press/scroll), snapshot (accessibility tree),
-screenshot, console/network inspection, tabs, cookies, and a raw CDP
-escape hatch.
-
-Pure Python: only depends on aiohttp (same dependency web_reader uses).
-No Node.js, no browser downloads, no MCP server. The module attaches to a
-browser it launches itself (dedicated profile, visible window by default)
-or to one you started manually with --remote-debugging-port.
-
-File layout (step-6 split, 2026-10-07; contract in README.md):
-- module.py: the Browser class — settings, lifecycle, webui routes and ALL
-  AI tools (thin bodies).
-- cdp.py: transport & process layer (_CDP client, binary/port/profile
-  discovery, launching, endpoint probing).
-- page.py: page/DOM helpers (AX-tree walker, element refs, screenshots,
-  grid annotation drawn on the capture, metrics). Helpers are stateless: the
-  class owns all state.
-- util.py: pure helpers (URL normalisation for navigate/new_tab, tail slicing
-  of the log deques) - stdlib only, unit-tested by tests/test_util.py.
-
-Setup (for the user):
-1. Enable this module (it is auto-detected after a restart).
-2. Optional: log in to sites once through the browser the module controls;
-   the dedicated profile persists cookies on disk under data/browser/.
-3. Screenshots are saved to data/browser/screenshots/.
+File map: module.py holds the Browser class (settings, lifecycle, webui routes,
+every AI tool); cdp.py the transport and process layer; page.py the page/DOM
+helpers; util.py the pure helpers. Only aiohttp is required, and only the
+class keeps state. Profile and screenshots live under data/browser/.
 """
 
 import core
@@ -190,20 +166,19 @@ class Browser(core.module.Module):
         self._http = None
         self._cdp = None
         self._owned_proc = None
-        self._owned_pid = None       # adopted from the pid file after a reload (B5)
+        self._owned_pid = None       # adopted from the pid file after a reload
         self._current_target = None
         self._attached = {}          # targetId -> sessionId
-        # B18: refs belong to a tab's snapshot, not to the module: a snapshot
-        # of tab B used to wipe tab A's refs, so "@e1" after switch_tab could
-        # point at a node id taken from the other document.
+        # refs belong to the tab that was snapshotted, not to the module: a
+        # snapshot of one tab must not invalidate another tab's "@e1" refs.
         self._refs_by_tab = {}       # targetId -> {"@e1": backendDOMNodeId}
         self._console_log = deque(maxlen=500)
         self._network_log = deque(maxlen=500)
-        self._target_url = {}        # targetId -> last known URL (B29)
+        self._target_url = {}        # targetId -> last known URL
         # requestId -> the in-flight entry dict inside _network_log, so
         # responseReceived/loadingFinished/loadingFailed can annotate it
         self._net_pending = {}
-        self._pending_dialogs = {}   # targetId -> pending dialog (B18)
+        self._pending_dialogs = {}   # targetId -> pending dialog
         self._load_event = asyncio.Event()
         self._lock = asyncio.Lock()
         self._browser_info = None
@@ -236,7 +211,7 @@ class Browser(core.module.Module):
         if self._owns_browser() and self.config.get("close_browser_on_shutdown", True):
             await self._stop_owned()
         # when the setting says "leave it running", the pid file stays: the
-        # next start adopts the browser instead of calling it external (B5)
+        # next start adopts the browser instead of calling it external
 
     async def on_background(self):
         """Supervisor: keep the connection alive / reconnect if needed."""
@@ -269,7 +244,7 @@ class Browser(core.module.Module):
         return os.path.join(core.get_data_path("browser"), "browser.pid")
 
     def _adopt_pidfile(self):
-        """Recover ownership of a browser launched by an earlier module load (B5).
+        """Recover ownership of a browser launched by an earlier module load.
 
         A reload re-executes module.py, so `_owned_proc` is gone and the module
         would report (and treat) its own browser as external. The pid file is
@@ -289,11 +264,11 @@ class Browser(core.module.Module):
             cdp.clear_pidfile(path)
 
     def _owns_browser(self):
-        """True if the running browser was started by this module (B5)."""
+        """True if the running browser was started by this module."""
         return self._owned_proc is not None or self._owned_pid is not None
 
     async def _stop_owned(self):
-        """Stop the browser this module started and forget it (B5/R1).
+        """Stop the browser this module started and forget it.
 
         One path for close, shutdown and restart, for both kinds of ownership:
         the asyncio process when this run launched it, the adopted pid after a
@@ -316,7 +291,7 @@ class Browser(core.module.Module):
         return await cdp.probe(self._http, self._port(), tries=tries, delay=delay)
 
     async def _wait_port_down(self, timeout=5.0):
-        """Wait until nothing answers on the CDP port (B15)."""
+        """Wait until nothing answers on the CDP port."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if await self._probe() is None:
@@ -339,7 +314,7 @@ class Browser(core.module.Module):
         self._launched_headless = launched_headless
         self._owned_proc = proc
         self._owned_pid = proc.pid
-        # B5: remembered on disk, because a module reload loses _owned_proc
+        # remembered on disk, because a module reload loses _owned_proc
         cdp.write_pidfile(self._pidfile(), proc.pid, self._port(),
                           cdp.profile_dir(self.config))
         return info
@@ -351,13 +326,13 @@ class Browser(core.module.Module):
         return bool(self.config.get("headless", False))
 
     def _headless_actual(self):
-        """Headless mode of the browser that is actually running (B33).
+        """Headless mode of the browser that is actually running.
 
         The setting only predicts the next launch and says nothing about a
         browser we merely attached to, so ask the browser itself. Note that
         modern Chrome's `--headless=new` keeps "Chrome/x" in the Browser field
         and only admits it in the User-Agent, which is why
-        util.headless_from_version reads both (B33, corrected 2026-10-29).
+        util.headless_from_version reads both.
         None means genuinely unknown.
         """
         actual = headless_from_version(self._browser_info)
@@ -371,14 +346,10 @@ class Browser(core.module.Module):
     def _full_page_max_pixels(self):
         """Pixel-area cap for full-page captures, in pixels.
 
-        Area, not height: the cost that bites (rasterising, PNG encoding, the
-        grid) grows with pixels, and a height cap both refuses a tall-but-narrow
-        page that would have fitted and accepts a short-but-huge one. A whole
-        article is ~40k px tall - capturing that alone blows the tool budget
-        (B27) - while the user's 8079 px page at 1200 px wide is 9.7 Mpx and
-        captures fine. There is no upper clamp on purpose: the tool budget is
-        the real limit, and exceeding it is reported by the timeout message
-        instead of by a cap the caller cannot see.
+        Area, not height: the cost (rasterising, PNG encoding, the grid) grows
+        with pixels, and a height cap refuses a tall-but-narrow page that would
+        have fitted while accepting a short-but-huge one. No upper clamp: the
+        tool budget is the real limit, and the timeout message names it.
         """
         try:
             mpx = float(self.config.get("full_page_max_pixels", 25))
@@ -387,11 +358,10 @@ class Browser(core.module.Module):
         return int(max(1.0, mpx) * 1_000_000)
 
     def _capture_failed_text(self, background=False):
-        """Short message for a capture that outlived its window.
+        """Message for a capture that outlived its window.
 
-        A tab that is not the active one is painted from scratch for the capture
-        (74 ms while active, over 25 s in the background, measured 2026-10-31 on
-        a Wikipedia page), so that case names the command that fixes it.
+        A background tab is painted from scratch just for the capture, so that
+        case names the command that fixes it.
         """
         if background:
             return ("Screenshot timed out. This tab is not active: switch_tab to "
@@ -400,12 +370,10 @@ class Browser(core.module.Module):
                 "(f5) and retry, or raise the Tool Timeout.")
 
     def _tool_timeout(self):
-        """The framework's per-tool-call ceiling (config.yml -> core.tool_timeout).
+        """The framework's per-tool-call ceiling (core.tool_timeout).
 
-        Read per call, not cached in a constant: a settings save then takes
-        effect without a server restart. core reads it the same way
-        (core/toolcalls.py:121) and cancels the call at it (toolcalls.py:229),
-        so this is the ONLY timeout a caller has to think about.
+        Read per call, not cached: a settings save takes effect without a
+        restart. core reads it the same way and cancels the call at it.
         """
         try:
             return max(1.0, float(core.config.get("core", "tool_timeout", default=10.0)))
@@ -423,17 +391,11 @@ class Browser(core.module.Module):
         return budget if budget is not None else self._new_budget()
 
     def _new_budget(self):
-        """One deadline per tool call: core.tool_timeout minus a small reserve.
-
-        The reserve is what lets this module answer first - core starts its
-        timer before our body runs and the answer still has to travel back -
-        and it shrinks with very small timeouts (util.tool_budget), so the
-        budget is always shorter than the call it belongs to.
-        """
+        """One deadline per tool call: core.tool_timeout minus a reserve."""
         return tool_budget(self._tool_timeout())
 
     def _tab_refs(self):
-        """Refs from the last snapshot of the tab being driven (B18).
+        """Refs from the last snapshot of the tab being driven.
 
         Empty for a tab that was never snapshotted *or* whose document has
         since changed; `resolve_target` then answers "Unknown ref …, take a
@@ -442,7 +404,7 @@ class Browser(core.module.Module):
         return self._refs_by_tab.get(self._current_target, {})
 
     def _target_of_session(self, sid):
-        """targetId for a CDP session id, or None (B29).
+        """targetId for a CDP session id, or None.
 
         CDP events name the session, never the tab: the reverse lookup is the
         only way an entry can say which tab it came from.
@@ -495,7 +457,7 @@ class Browser(core.module.Module):
         if self._is_connected():
             if self._current_target in self._attached:
                 return True
-            # B32: the tab we were driving died while the connection stayed up.
+            # the tab we were driving died while the connection stayed up.
             # Keep the connection and pick another live tab - never hand out
             # the dead session id, which would answer -32001 on every call.
             await self._select_default_target()
@@ -570,7 +532,7 @@ class Browser(core.module.Module):
         sid = data.get("sessionId")
 
         if method in ("Target.targetCreated", "Target.targetInfoChanged"):
-            # B29: events carry a sessionId, not an URL. Track the URL each tab
+            # events carry a sessionId, not an URL. Track the URL each tab
             # is on so a log entry can say which page it came from instead of
             # inheriting whatever the current tab shows now.
             info = params.get("targetInfo", {}) or {}
@@ -581,7 +543,7 @@ class Browser(core.module.Module):
                                          if len(url) > MAX_URL_LEN else url)
             return
         if method in ("Target.targetDestroyed", "Target.targetCrashed"):
-            # B32: a closed tab has to stop being _current_target and lose its
+            # a closed tab has to stop being _current_target and lose its
             # session id, or every later call addresses a dead session
             tid = params.get("targetId")
             self._target_url.pop(tid, None)
@@ -595,7 +557,7 @@ class Browser(core.module.Module):
         if method == "Page.loadEventFired" and sid == self._attached.get(self._current_target):
             self._load_event.set()
         elif method == "Page.frameNavigated":
-            # B18/B41: a new document invalidates that tab's refs. Kept, they
+            # a new document invalidates that tab's refs. Kept, they
             # would resolve to backend node ids of a document that is gone -
             # the same numbers, a different element, no error at all.
             frame = params.get("frame", {}) or {}
@@ -678,7 +640,7 @@ class Browser(core.module.Module):
                 entry["error"] = ("canceled" if params.get("canceled")
                                   else params.get("errorText", "failed"))
         elif method == "Page.javascriptDialogOpening":
-            # B18: one slot per tab. A single slot meant a dialog in one tab
+            # one slot per tab. A single slot meant a dialog in one tab
             # could be handled on another tab's session, and a second dialog
             # silently replaced the first.
             self._pending_dialogs[self._target_of_session(sid) or sid] = {
@@ -734,7 +696,7 @@ class Browser(core.module.Module):
         # happens to drive - they differ as soon as the user clicks another
         # tab. Several visible tabs mean several windows: the one this module
         # was driving wins when it is among them.
-        # B6: the index belongs to the captured list, never the target list -
+        # the index belongs to the captured list, never the target list -
         # skipped chrome:// and devtools tabs still occupy a slot in Chrome's
         # own order.
         active_index = next((i for tid, i in active_hits
@@ -791,9 +753,9 @@ class Browser(core.module.Module):
 
     # ------------------------------------------------------------------
     # AI Tools
-    # NOTE: tool_loader scans type(module).__dict__ without MRO — tools
-    # must be defined directly on this class (a mixin/base silently loses
-    # them). See user_modules/browser/README.md before any file split.
+    # NOTE: tool_loader scans type(module).__dict__ without MRO, so tools must
+    # be defined directly on this class - a mixin or base class silently loses
+    # every one of them.
     # ------------------------------------------------------------------
 
     @core.module.tool
@@ -956,7 +918,7 @@ class Browser(core.module.Module):
         restoring open (http/about) tabs, scroll positions and non-secret
         form values, plus the window position when going back to visible.
 
-        Limits (inherent, see README): navigation history stacks cannot be
+        Limits (inherent): navigation history stacks cannot be
         restored (no CDP API), sessionStorage/downloads/dialogs are lost,
         password fields are deliberately never captured. The mode flip is
         session-scoped (the `headless` setting in settings stays the
@@ -973,7 +935,7 @@ class Browser(core.module.Module):
         new_mode = not self._effective_headless()
         self._headless_override = new_mode
         await self.close()
-        # B15: a fixed 0.5 s sleep raced the real shutdown - if the port was
+        # a fixed 0.5 s sleep raced the real shutdown - if the port was
         # still held by the dying browser (or grabbed by something else), the
         # relaunch attached to a stranger. Wait until nothing answers.
         if not await self._wait_port_down():
@@ -1158,10 +1120,9 @@ class Browser(core.module.Module):
         object_id = await page.resolve_object_id(self._cdp, handle, sid)
         if not object_id:
             return self.result(f"Could not resolve element '{target}'.", success=False)
-        # B8: contenteditable elements have no select() (measured: typing "bye"
-        # into "hello" produced "byehello" - nothing was cleared and the text
-        # went in at the old caret). Select the contents with a range instead,
-        # so the Backspace below deletes the selection.
+        # contenteditable has no select(): select the contents with a range, so
+        # the Backspace below deletes the old text instead of leaving it in
+        # front of what gets typed.
         await page.call_on(
             self._cdp,
             object_id,
@@ -1297,10 +1258,9 @@ class Browser(core.module.Module):
             )
         fits, mpx = capture_fits(shot_w, shot_h, max_px)
         if full_page and not fits:
-            # Chrome paints the WHOLE page for captureBeyondViewport no matter
-            # what `clip` says (measured 2026-10-27: an 8k clip on a 40k page
-            # still ran past 10s), so refuse up front instead of stalling into
-            # a timeout - and tell the caller the real size.
+            # captureBeyondViewport paints the whole page whatever `clip` says,
+            # so an oversized capture only stalls into a timeout: refuse up
+            # front, with the real size.
             return self.result(
                 f"Page is {mpx:.1f} Mpx; full_page is capped at "
                 f"{max_px // 1_000_000} Mpx (full_page_max_pixels). Use viewport "
@@ -1313,15 +1273,13 @@ class Browser(core.module.Module):
         origin_x = 0 if full_page else int(round(doc_origin_x * scale))
         origin_y = 0 if full_page else int(round(doc_origin_y * scale))
 
-        # Is that tab the active one? Read before the capture, because it is
-        # only used to explain a timeout and the answer has to be there when
-        # the capture gives up: a background tab is painted from scratch just
-        # for the capture (74 ms active vs >25 s in the background, measured
-        # 2026-10-31). None = could not read it (a stalled page hangs even
-        # this evaluate), and then no claim is made about the cause.
+        # Read before the capture: this only explains a timeout, and the answer
+        # must already be there when the capture gives up. None = could not
+        # read it (a stalled page hangs this evaluate too), so then no claim is
+        # made about the cause.
         background = await page.visibility_state(self._cdp, sid, timeout=1.0) == "hidden"
 
-        # a full-page capture gets part of the call, not all of it (B43): if
+        # a full-page capture gets part of the call, not all of it: if
         # Chrome stalls on this document, the rest of the time is still usable
         window = first_capture_window(budget.left(), full_page)
         fallback_note = None
@@ -1362,10 +1320,9 @@ class Browser(core.module.Module):
         # (clipping, Chrome rounding). draw_grid never changes the dimensions.
         px_w, px_h = page.image_size(raw, fmt) or (0, 0)
 
-        # grid: drawn onto the PNG after the capture (no page mutation, no
-        # canvas size limit). The saved file is replaced by the annotated one.
-        # This is pure CPU with no command timeout watching it, so it only runs
-        # when it still fits in this call - measured ~0.85s per megapixel.
+        # grid: drawn onto the saved PNG (no page mutation, no canvas limit).
+        # Pure CPU with no command timeout watching it, so it only runs when it
+        # still fits in this call (~0.85 s per megapixel).
         grid_note = None
         if grid_spacing:
             fits, need = grid_fits(px_w, px_h, budget.left())
@@ -1446,12 +1403,8 @@ class Browser(core.module.Module):
 
         return self.result(meta)
 
-    # NOTE: a `vision` tool was removed. It used to capture a screenshot and
-    # route the PNG bytes through self.channel.send(files={filename: raw}) so
-    # the vision model could analyze it, but it caused a nested channel.send
-    # deadlock. If screenshots alone are not enough in the future, re-add it:
-    # capture a screenshot, send the bytes via channel.send(files=...), and
-    # return the model's description as text.
+    # A `vision` tool (screenshot -> channel.send(files=...) -> text) is not
+    # offered: calling channel.send from inside a tool deadlocks the channel.
 
     @core.module.tool
     async def evaluate(self, expression: str):
@@ -1472,7 +1425,7 @@ class Browser(core.module.Module):
         }
         res = await self._cdp.cmd("Runtime.evaluate", params, sid)
         if rejected_top_level_await(res.get("exceptionDetails")):
-            # B30: a script can't use `await` at its top level. Same call,
+            # a script can't use `await` at its top level. Same call,
             # wrapped once - the caller should not have to know to wrap it.
             params["expression"] = wrap_await(expression)
             res = await self._cdp.cmd("Runtime.evaluate", params, sid)
@@ -1664,7 +1617,7 @@ class Browser(core.module.Module):
             prompt_text: Text to provide for prompt() dialogs (optional).
         """
         await self._ensure_connection()
-        # B18: the current tab's dialog; a dialog from another tab is only
+        # the current tab's dialog; a dialog from another tab is only
         # taken when it is the sole one open (otherwise which one is answered
         # would be a guess)
         key = self._current_target
@@ -1718,16 +1671,13 @@ class Browser(core.module.Module):
 # ---------------------------------------------------------------------------
 # Tool error boundary
 # ---------------------------------------------------------------------------
-# Browser failures used to escape as exceptions, so the model saw core's raw
-# "Error while executing tool: -32601 '…' wasn't found" or a bare timeout.
-# Every @core.module.tool method is wrapped once, below the class, instead of
-# hand-wrapping 20+ methods - a tool added later is covered automatically. The
-# `_is_guarded` marker keeps this idempotent if the file is re-executed.
+# Every @core.module.tool method is wrapped once here, below the class, so a
+# tool added later is covered automatically; the `_is_guarded` marker keeps the
+# wrapping idempotent if the file is re-executed.
 #
 # Only browser-facing failures are converted: CDP rejections, timeouts, dropped
-# connections, and the module's own deliberate RuntimeErrors ("Unknown ref
-# @e9 …", "No tab is attached …"). Programming errors (TypeError, KeyError, …)
-# still escape to core, where they belong.
+# connections, and the module's own RuntimeErrors ("Unknown ref @e9 …", "No tab
+# is attached …"). Programming errors (TypeError, KeyError, …) still escape.
 
 def _error_result(self, tool_name, exc):
     """Map a browser failure to an actionable tool result."""
@@ -1747,7 +1697,7 @@ def _error_result(self, tool_name, exc):
             text = f"The browser rejected the command: {text}"
     elif isinstance(exc, TimeoutError):
         # name the setting that actually bound it, never a module-private number
-        # (B40); no per-tool advice - screenshot explains its own timeouts
+        #; no per-tool advice - screenshot explains its own timeouts
         text = timeout_text(text)
     elif isinstance(exc, ConnectionError):
         text = "Connection lost. Call open to reconnect (or new_tab)."
