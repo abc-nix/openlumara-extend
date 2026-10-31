@@ -45,6 +45,11 @@
             <span class="tg-cat-name">Elements</span>
             <span class="tg-cat-note">style guide</span>
         </button>
+        <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'pr' }"
+                @click="tgState.setCategory('pr')">
+            <span class="tg-cat-name">PR elements</span>
+            <span class="tg-cat-note">affected only</span>
+        </button>
         <button type="button" class="tg-cat" :class="{ 'on': tgState.category === 'coverage' }"
                 @click="tgState.setCategory('coverage')">
             <span class="tg-cat-name">Coverage</span>

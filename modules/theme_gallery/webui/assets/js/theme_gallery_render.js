@@ -249,6 +249,10 @@ tgPart({
             this.buildElementsBody(pane);
             return;
         }
+        if (this.category === 'pr') {
+            this.buildPrBody(pane);
+            return;
+        }
         if (this.category === 'coverage') {
             this.buildCoverageBody(pane);
             return;

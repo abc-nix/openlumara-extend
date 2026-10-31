@@ -1,0 +1,153 @@
+{# =====================================================================
+   PR SPOTLIGHT — only the elements a given change touches.
+
+   Built for PR #105 (mode-aware base theme): two worktrees / two browsers,
+   same theme, same mode, and the same short list of elements on both sides.
+   Markup is recycled from chat/elements/*.html (real app classes, fake
+   content), so if it looks wrong here that IS the finding.
+
+   This file is meant to be EDITED PER PR — it is not a style guide. Keep
+   only the elements whose variables the change touches, and name the
+   variable next to the heading so the diff is obvious.
+   ===================================================================== #}
+<template id="tg-sample-pr">
+    <div id="messages" class="tg-elements">
+
+        <div class="notice">PR #105 - affected elements only (fake content, real markup).</div>
+
+        {# ---- --button-text: labels of filled buttons ---- #}
+        <section class="tg-el-section">
+            <h3>Button labels &mdash; --button-text</h3>
+            <div class="tg-el-row"><div class="settings-modal modal"><div class="settings-footer"><div class="footer-buttons">
+                <button type="button" class="footer-btn reset">Revert</button>
+                <button type="button" class="footer-btn save">Save</button>
+                <button type="button" class="footer-btn save" disabled>Save (disabled)</button>
+            </div></div></div>
+                <span class="tg-el-cap">settings/modal.css: .footer-btn(+.save/.reset) &mdash; label on a --button-bg fill</span></div>
+            <div class="tg-el-row"><div class="settings-modal modal"><div class="close-prompt"><div class="prompt-box">
+                <p class="prompt-text">You have unsaved changes. Save before closing?</p>
+                <div class="prompt-buttons">
+                    <button type="button" class="prompt-btn">Cancel</button>
+                    <button type="button" class="prompt-btn save">Save</button>
+                    <button type="button" class="prompt-btn danger">Don't save</button>
+                </div>
+            </div></div></div>
+                <span class="tg-el-cap">modals.css: .close-prompt &gt; .prompt-box &gt; .prompt-buttons</span></div>
+            <div class="settings-modal modal"><div class="body"><aside class="sidebar"><nav class="nav">
+                <div><button class="item active"><span class="item-icon">{% include 'svg/sun.svg' %}</span><span>Appearance</span></button></div>
+                <div><button class="item"><span class="item-icon">{% include 'svg/gear.svg' %}</span><span>Core</span></button></div>
+            </nav></aside></div></div>
+            <div class="tg-el-cap">settings/modal.css: .nav .item(+.active) &mdash; hover/active fill = --button-bg + --button-text</div>
+
+            {# Get Content tab: type tabs + item action buttons are --button-text
+               consumers too (module_library.css), not just the settings footer. #}
+            <div class="settings-modal modal"><div class="module-library">
+                <h3 class="section-title">Get Content</h3>
+                <p class="section-desc">Install modules, channels, skills and themes. You can add libraries in the Core tab.</p>
+                <div class="library-type-tabs">
+                    <button type="button" class="library-type-tab active"><span>Modules</span><span class="tab-count">12</span></button>
+                    <button type="button" class="library-type-tab"><span>Channels</span><span class="tab-count">2</span></button>
+                    <button type="button" class="library-type-tab"><span>Themes</span><span class="tab-count">54</span></button>
+                    <button type="button" class="library-type-tab"><span>Skills</span><span class="tab-count">3</span></button>
+                    <button type="button" class="library-btn primary library-sync-btn">
+                        <span class="library-sync-icon spinning">{% include 'svg/reload.svg' %}</span>
+                        <span>Syncing..</span>
+                    </button>
+                </div>
+                <div class="library-item installed">
+                    <div class="library-item-main">
+                        <div class="library-item-header"><span class="library-item-name">Coder</span></div>
+                        <p class="library-item-doc">Code editing, file browsing and git tools.</p>
+                    </div>
+                    <div class="library-item-actions">
+                        <button type="button" class="library-btn">Update</button>
+                        <button type="button" class="library-btn danger">Uninstall</button>
+                    </div>
+                </div>
+                <div class="library-item">
+                    <div class="library-item-main">
+                        <div class="library-item-header"><span class="library-item-name">Browser</span></div>
+                        <p class="library-item-doc">Headless browser for the AI.</p>
+                    </div>
+                    <div class="library-item-actions"><button type="button" class="library-btn">Install</button></div>
+                </div>
+            </div></div>
+            <div class="tg-el-cap">module_library.css: .library-type-tab.active + .library-btn(.primary/.danger) &mdash; fill = --button-bg, label = --button-text</div>
+        </section>
+
+        {# ---- --shadow-strong: dialog surface ----
+             NOTE: keep real dialog anatomy (.header + a content class that
+             exists in the app). A bare .modal with invented .body/.footer
+             collapses: .tg-elements forces width:auto !important, so inside
+             a flex .tg-el-row it shrink-wraps, and those classes have no CSS. #}
+        <section class="tg-el-section">
+            <h3>Dialog shadow &mdash; --shadow-strong</h3>
+            <div class="modal categories-modal">
+                <div class="header"><h2>Manage Categories</h2><button class="close" aria-label="Close">&times;</button></div>
+                <div class="categories-content">
+                    <div class="category-rows">
+                        <div class="category-row"><div class="category-info"><span class="category-name">general</span><span class="category-count">12 chats</span></div></div>
+                    </div>
+                    <div class="add-category"><input type="text" placeholder="New category name"><button class="add-btn">Add</button></div>
+                    <div class="category-error">category name already exists</div>
+                </div>
+            </div>
+            <div class="tg-el-cap">modals.css: .modal &mdash; box-shadow: var(--shadow-strong) &middot; categories.css gives it width/padding</div>
+        </section>
+
+        {# ---- --button-stop-hover: stop button, normal + forced hover ---- #}
+        <section class="tg-el-section">
+            <h3>Stop button &mdash; --button-stop-hover</h3>
+            <div id="input"><div class="input-wrapper">
+                <textarea id="user-input" placeholder="Type a message.." rows="1" disabled></textarea>
+                <button id="stop" aria-label="Stop generation"><span class="streaming-icon">{% include 'svg/cross.svg' %}</span><span class="stop-text">Stop</span></button>
+            </div></div>
+            <div id="input"><div class="input-wrapper">
+                <textarea id="user-input" placeholder="Type a message.." rows="1" disabled></textarea>
+                <button id="stop" style="background: var(--button-stop-hover)" aria-label="Stop generation, hover state"><span class="streaming-icon">{% include 'svg/cross.svg' %}</span><span class="stop-text">Stop (hover)</span></button>
+            </div></div>
+            <div class="tg-el-cap">input.css: #stop &mdash; normal = --error-bg; :hover = --button-stop-hover (second forced) &middot; the textarea stays because the button stretches to ITS height (align-items: stretch)</div>
+        </section>
+
+        {# ---- --important: the dashed notice line ---- #}
+        <section class="tg-el-section">
+            <h3>Important notice &mdash; --important</h3>
+            <div class="notice">Important: context auto-compaction is disabled.</div>
+            <div class="settings-modal modal"><div class="item unsafe"><div>
+                <div class="toggle-row">
+                    <label>Allow host shell</label>
+                    <button class="toggle active" type="button"></button>
+                </div>
+                <span class="description">Same dashed .unsafe highlight, per-field form</span>
+            </div></div></div>
+            <div class="tg-el-cap">window.css .notice &mdash; color + dashed border &middot; settings/modal.css .item.unsafe label &mdash; color</div>
+        </section>
+
+        {# ---- --tool-border: the running tool-call ring ---- #}
+        <section class="tg-el-section">
+            <h3>Tool call ring &mdash; --tool-border</h3>
+            <div class="tg-el-row"><div class="tool-call-card">
+                <div class="tool-processing-indicator"><div class="tool-processing-content">
+                    <div class="tool-processing-spinner"></div>
+                    <span class="tool-processing-text">Processing tool call&hellip;</span>
+                    <div class="tool-progress-bar"><div class="tool-progress-bar-fill" style="width:62%"></div></div>
+                    <span class="tool-processing-percent">62%</span>
+                </div></div>
+            </div>
+                <span class="tg-el-cap">toolcalls.css: .tool-processing-content::before &mdash; ring = --tool-border + --accent</span></div>
+        </section>
+
+        {# ---- --error-bg / --error-border: settings error box ---- #}
+        <section class="tg-el-section">
+            <h3>Settings error box &mdash; --error-border</h3>
+            <div class="settings-modal modal"><div class="item"><div class="row">
+                <label>API URL (unreachable)</label>
+                <input type="text" value="http://10.0.0.9:9999/v1">
+                <div class="api-status"><span class="status-dot disconnected"></span><span>not connected</span></div>
+                <p class="error">Could not connect: connection refused</p>
+            </div></div></div>
+            <div class="tg-el-cap">settings/modal.css: .error &mdash; border only here: every light theme defines --error-bg, so only --error-border moves</div>
+        </section>
+
+    </div>
+</template>

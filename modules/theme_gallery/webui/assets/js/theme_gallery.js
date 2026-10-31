@@ -62,7 +62,36 @@ function resolveVars(base, themeData, mode) {
     const out = {};
     for (const [k, v] of Object.entries(baseVars(base, effective))) out[k] = v;
     for (const [k, v] of Object.entries((themeData && themeData[effective]) || {})) out[k] = v;
+    // mirrors theming.js: the theme named a fill but no label -> derive one
+    if (!(themeData && themeData[effective] && '--button-text' in themeData[effective])) {
+        const label = buttonLabel(out['--button-bg']);
+        if (label) out['--button-text'] = label;
+    }
     return out;
+}
+
+/* Mirrors THEME_STORE.buttonLabel(): average luminance of the fill's colour
+   stops, light label below 0.40, dark above. Null = no colour to read. */
+function buttonLabel(fill) {
+    const raw = String(fill || '');
+    const stops = [];
+    for (const m of raw.matchAll(/#([0-9a-f]{3,8})\b|rgba?\(([^)]+)\)/gi)) {
+        if (m[1]) {
+            let h = m[1];
+            if (h.length === 3) h = h.split('').map(c => c + c).join('');
+            if (h.length === 8) h = h.slice(0, 6);
+            stops.push([0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255));
+        } else {
+            const parts = m[2].split(',').map(v => parseFloat(v));
+            if (parts.length >= 3) stops.push(parts.slice(0, 3).map(v => v / 255));
+        }
+    }
+    if (!stops.length) return null;
+    const lin = (c) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    const avg = stops
+        .map(([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b))
+        .reduce((a, b) => a + b, 0) / stops.length;
+    return avg < 0.40 ? '#fafafa' : '#18181b';
 }
 
 /* raw vars a theme declares for one mode ({} while missing). Skips metadata

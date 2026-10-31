@@ -27,6 +27,21 @@ tgPart({
         this.lockdownPane(pane);
     },
 
+    // ---- PR category: ONLY the elements a given change touches ----
+    // Same static treatment as the Elements sheet (clone, typable fields,
+    // pane lockdown). Markup lives in templates/chat/pr_sheet.html and is
+    // edited per PR; sections there name the variable they demonstrate.
+    buildPrBody(pane) {
+        const tpl = document.getElementById('tg-sample-pr');
+        if (!tpl) return;
+        pane.appendChild(tpl.content.cloneNode(true));
+        pane.querySelectorAll('input, select, textarea').forEach(el => {
+            if (el.type === 'file') { el.disabled = true; return; }
+            el.classList.add('tg-allow');
+        });
+        this.lockdownPane(pane);
+    },
+
     // ---- welcome category: clone the real welcome screen ----
     // The three parts are DIRECT children of the real #chat-window; the
     // overlay lives inside #chat-window too (last child), so ':scope >'
