@@ -36,7 +36,7 @@ from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
                    headless_from_version, timeout_text, rejected_top_level_await,
                    wrap_await, restorable_url, captured_active_index, untrusted,
-                   split_chord)
+                   split_chord, checkbox_value)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -1135,19 +1135,79 @@ class Browser(core.module.Module):
         """Types text into an element (input/textarea/contenteditable): focuses, clears, then types.
 
         On a <select>, text picks the option whose label or value matches.
+        On a checkbox or radio, text sets it: true/yes/on or false/no/off.
 
         Args:
             target: Element ref (e.g. @e5) or CSS selector.
-            text: The text to type, or the option to select.
+            text: The text to type, the option to select, or true/false for a checkbox.
         """
         await self._ensure_connection()
         sid = self._current_session()
+        ok, message = await self._fill_field(sid, target, text)
+        return self.result(message, success=ok)
+
+    @core.module.tool
+    async def fill_form(self, fields: list = None):
+        """Fills several form fields in one call; stops at nothing, reports each by name.
+
+        Each item is {"target": ref or selector, "text": value}; a checkbox or
+        radio takes true/false, a <select> the option's label or value.
+
+        Args:
+            fields: List of {"target": ..., "text": ...} objects, in page order.
+        """
+        await self._ensure_connection()
+        sid = self._current_session()
+        items = _field_items(fields)
+        if items is None:
+            return self.result(
+                "Pass fields as a list of {target, text} objects.", success=False)
+        results = []
+        failed = 0
+        for item in items:
+            target = str(item.get("target") or item.get("ref")
+                         or item.get("selector") or "")
+            text = item.get("text", item.get("value", ""))
+            if not target:
+                results.append({"target": "", "ok": False, "message": "No target."})
+                failed += 1
+                continue
+            try:
+                ok, message = await self._fill_field(sid, target, text)
+            except (CDPError, TimeoutError, ConnectionError, RuntimeError,
+                    OSError) as exc:
+                # one bad field must not hide the rest of the form
+                ok, message = False, str(exc) or exc.__class__.__name__
+            results.append({"target": target, "ok": ok, "message": message})
+            if not ok:
+                failed += 1
+        data = {"filled": len(results) - failed, "failed": failed,
+                "results": results}
+        return self.result(data, success=failed == 0)
+
+    async def _fill_field(self, sid, target, text):
+        """Put `text` into one field; returns (ok, message).
+
+        A field is an input/textarea/contenteditable (typing), a <select>
+        (option pick) or a checkbox/radio (checked state). type_text and
+        fill_form both go through here, so they report a field the same way.
+        """
         handle = await page.resolve_target(self._cdp, sid, self._tab_refs(), target)
         object_id = await page.resolve_object_id(self._cdp, handle, sid)
         if not object_id:
-            return self.result(f"Could not resolve element '{target}'.", success=False)
+            return False, f"Could not resolve element '{target}'."
         if await page.tag_name(self._cdp, object_id, sid) == "SELECT":
             return await self._select_target_option(sid, object_id, target, text)
+        if await page.input_type(self._cdp, object_id, sid) in ("checkbox", "radio"):
+            wanted = checkbox_value(text)
+            if wanted is None:
+                return False, f"Use true or false for {target}."
+            state = await page.set_checked(self._cdp, object_id, wanted, sid)
+            if not state or state.get("checked") != wanted:
+                return False, f"Could not set {target}."
+            return True, f"{'Checked' if wanted else 'Unchecked'} {target}."
+        if not isinstance(text, str):
+            text = "" if text is None else str(text)
         # contenteditable has no select(): select the contents with a range, so
         # the Backspace below deletes the old text instead of leaving it in
         # front of what gets typed.
@@ -1169,20 +1229,19 @@ class Browser(core.module.Module):
                 "windowsVirtualKeyCode": 8, "nativeVirtualKeyCode": 8,
             }, sid)
         await self._cdp.cmd("Input.insertText", {"text": text}, sid)
-        return self.result(f"Typed {len(text)} characters into {target}.")
+        return True, f"Typed {len(text)} characters into {target}."
 
     async def _select_target_option(self, sid, object_id, target, wanted):
-        """Pick a <select> option by label or value (type_text's select branch)."""
+        """Pick a <select> option by label or value; (ok, message) for _fill_field."""
         picked = await page.select_option(self._cdp, object_id, wanted, sid)
         if not picked:
-            return self.result(f"Could not set {target}.", success=False)
+            return False, f"Could not set {target}."
         if picked.get("ok"):
-            return self.result(f"Selected '{picked.get('text')}' in {target}.")
+            return True, f"Selected '{picked.get('text')}' in {target}."
         labels = [(label[:12] + "\u2026") if len(label) > 12 else label
                   for label in (picked.get("labels") or [])[:3]]
         options = ", ".join(labels) or "none"
-        return self.result(
-            f"No option '{wanted}' in {target}. Options: {options}", success=False)
+        return False, f"No option '{wanted}' in {target}. Options: {options}"
 
     @core.module.tool
     async def press(self, key: str, modifiers: str = None):
@@ -1786,6 +1845,30 @@ class Browser(core.module.Module):
 # Only browser-facing failures are converted: CDP rejections, timeouts, dropped
 # connections, and the module's own RuntimeErrors ("Unknown ref @e9 …", "No tab
 # is attached …"). Programming errors (TypeError, KeyError, …) still escape.
+
+def _field_items(fields):
+    """The {target, text} items of a fill_form argument, or None when unusable.
+
+    A JSON string is accepted because a tool argument may arrive as text;
+    "ref" and "selector" are read as target names, "value" as the text.
+    """
+    if isinstance(fields, str):
+        try:
+            fields = json.loads(fields)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(fields, dict):
+        fields = [fields]
+    if not isinstance(fields, (list, tuple)):
+        return None
+    items = []
+    for item in list(fields)[:50]:
+        if isinstance(item, dict):
+            items.append(item)
+        else:
+            items.append({"text": item})
+    return items
+
 
 def _error_result(self, tool_name, exc):
     """Map a browser failure to an actionable tool result."""

@@ -110,6 +110,22 @@ def split_chord(text, extra=None):
     return [m for m in MODIFIER_ORDER if m in modifiers], keys[0]
 
 
+def checkbox_value(value):
+    """True/False for a checkbox or radio, None when the value is not a boolean.
+
+    The AI sends JSON, so a real bool arrives as a bool; a string form is
+    accepted too because a model may write "true" instead of true.
+    """
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1", "yes", "on", "checked"):
+        return True
+    if text in ("false", "0", "no", "off", "unchecked", ""):
+        return False
+    return None
+
+
 def restorable_url(url):
     """True if this tab's URL can be reopened after a relaunch.
 

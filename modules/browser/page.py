@@ -311,6 +311,48 @@ async def tag_name(cdp_client, object_id, sid):
         return ""
 
 
+async def input_type(cdp_client, object_id, sid):
+    """Lower-case type of an <input> ('' for other elements or on failure)."""
+    try:
+        res = await call_on(cdp_client, object_id,
+                            "function(){ return this.tagName === 'INPUT' ?"
+                            " (this.type || 'text') : ''; }", sid)
+        return str((res.get("result") or {}).get("value") or "").lower()
+    except Exception:
+        return ""
+
+
+# A checkbox/radio is toggled with a real click, not by assigning `checked`:
+# React/Vue synthesise these inputs' change handler from the native click event,
+# so a property assignment leaves the component state stale even though the DOM
+# looks right (verified on demoqa's React form: its submit read nothing).
+_SET_CHECKED_JS = (
+    "function(on){"
+    "var want=!!on;"
+    "if(this.checked===want){return JSON.stringify({checked:this.checked});}"
+    "if(this.type==='radio'&&!want){"
+    # a radio cannot be clicked off, so that state is set directly
+    "this.checked=false;"
+    "this.dispatchEvent(new Event('input',{bubbles:true}));"
+    "this.dispatchEvent(new Event('change',{bubbles:true}));"
+    "}else{this.click();}"
+    "return JSON.stringify({checked:this.checked});"
+    "}"
+)
+
+
+async def set_checked(cdp_client, object_id, checked, sid):
+    """Set a checkbox/radio to `checked`; {"checked": bool} or {} on failure."""
+    try:
+        res = await call_on(cdp_client, object_id, _SET_CHECKED_JS, sid,
+                            args=[bool(checked)])
+        value = (res.get("result") or {}).get("value")
+        data = json.loads(value) if value else {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 # A <select> is set through its native value setter plus input/change events,
 # the way a user pick reaches React/Vue (same trick as restore_page_state).
 # Matching order: exact label, exact value, then both case-insensitive.
