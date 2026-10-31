@@ -1,13 +1,10 @@
 # -- AI GENERATED CODE (Qwen3.8-Flash-Next) :: (2026-10-07)
-"""
-Transport & process layer for the browser module (step-6 split of module.py;
-see README.md).
+"""Transport and process layer: finding, launching and talking to a Chrome or
+Chromium process over the DevTools Protocol.
 
-Everything about *finding, launching and talking to* a Chrome/Chromium
-process over the Chrome DevTools Protocol lives here. These helpers are
-stateless with respect to the module: config/http/log are passed in as
-arguments. Module state (connection, tabs, refs, logs, dialogs) stays in
-module.py. Dependency direction: module.py -> cdp.py (never the reverse).
+Stateless with respect to the module - config/http/log are passed in. Module
+state (connection, tabs, refs, logs, dialogs) lives in module.py; the
+dependency goes module.py -> cdp.py and never back.
 """
 
 import asyncio
@@ -29,13 +26,9 @@ from .util import CALL_BUDGET, resolve_timeout
 
 DEFAULT_PORT = 9222
 
-# Fallback deadline for calls made outside a tool call (webui routes, tests).
-# Inside a tool call the deadline is whatever is left of core.tool_timeout
-# (config.yml -> Settings > Core > Tool Timeout): the framework cancels a call
-# that runs past it and the model then sees a bare "Tool timed out after Ns"
-# with no hint (B27). module._guarded takes that number once per tool call
-# (util.CALL_BUDGET) and every command gets what is left, so the framework's
-# number is the only timeout a caller can hit - and the one they can raise.
+# Deadline for calls made outside a tool call (webui routes, tests). Inside one,
+# a command gets what is left of the call's budget instead (util.CALL_BUDGET),
+# so this number is only the fallback.
 CDP_CALL_TIMEOUT = 10.0
 MAX_MSG_SIZE = 64 * 1024 * 1024  # screenshots/AX trees can be big
 
@@ -127,8 +120,7 @@ class CDPClient:
         try:
             await self.ws.send_json(msg)
         except Exception as exc:
-            # B21: the future was registered before the send; a failed send
-            # used to leave it in _pending until the connection died
+            # the future is already registered: drop it or it outlives the send
             self._pending.pop(mid, None)
             raise ConnectionError(
                 f"Could not send '{method}' to the browser: {exc}") from None
@@ -138,9 +130,8 @@ class CDPClient:
             # one decimal: 14.499991990000126s reads like a floating-point bug
             raise TimeoutError(f"CDP command '{method}' timed out after {timeout:.1f}s")
         finally:
-            # this command owns its entry, whatever happened: a reply (the
-            # reader pops too, harmlessly), a timeout, a cancellation, or a
-            # command that never answers at all (B21)
+            # the command owns its entry: the reader pops a reply, this pops
+            # the other outcomes (timeout, cancellation, no answer at all)
             self._pending.pop(mid, None)
 
     async def close(self):
@@ -252,14 +243,12 @@ def clear_pidfile(path):
 
 
 def process_owns_browser(pid, port, profile):
-    """Is `pid` still the browser this module launched? (B5)
+    """Is `pid` still the browser this module launched?
 
-    A bare pid proves nothing - it can be reused by any process, and killing a
-    stranger's process is worse than losing ownership. Linux exposes the
-    command line, so require it to name this module's profile directory *and*
-    debugging port (both unique to our launch). Where that cannot be checked
-    the answer is no, which degrades to the pre-B5 behaviour instead of
-    guessing.
+    A bare pid proves nothing: it can be reused, and killing a stranger's
+    process is worse than losing ownership. The /proc command line must name
+    this module's profile directory and debugging port, both unique to our
+    launch. Where that cannot be read, the answer is no.
     """
     try:
         pid = int(pid)
@@ -308,11 +297,10 @@ async def stop_pid(pid, wait=3.0):
 
 
 async def stop_process(proc, wait=3.0):
-    """Terminate a process we started and make sure it is gone (B7).
+    """Terminate a process we started and make sure it is gone.
 
-    Used both when a launch never came up and when the browser is closed: a
-    terminate() that is ignored (or a process already gone) falls back to
-    kill(), and no exception escapes - the caller's own error matters more.
+    A terminate() that is ignored (or a process already gone) falls back to
+    kill(), and no exception escapes: the caller's own error matters more.
     """
     if proc is None:
         return
@@ -367,9 +355,8 @@ async def launch_browser(config, log, http, headless=None, deadline=None):
     )
     info = await probe(http, port, tries=20, delay=0.5, deadline=deadline)
     if info is None:
-        # B7: we started a browser that never became reachable. Leaving it
-        # running would keep a whole Chrome (and its profile lock) alive with
-        # nothing pointing at it.
+        # a browser that never became reachable must not stay running: it would
+        # keep a whole Chrome and its profile lock alive with nothing using it
         await stop_process(proc)
         if deadline is not None and time.monotonic() >= deadline:
             # the tool call's own budget cut the wait short: say so, and let
