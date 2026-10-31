@@ -68,6 +68,48 @@ def normalize_url(url):
     return url
 
 
+# Modifier aliases accepted in a chord ("Control+A", "cmd+a") -> canonical name
+_CHORD_MODIFIERS = {
+    "control": "control", "ctrl": "control",
+    "alt": "alt", "option": "alt",
+    "meta": "meta", "cmd": "meta", "command": "meta",
+    "win": "meta", "super": "meta",
+    "shift": "shift",
+}
+
+# press order of modifiers: down in this order, up in reverse. Any order is
+# valid on the wire; a fixed one keeps the event trace readable.
+MODIFIER_ORDER = ("control", "alt", "meta", "shift")
+
+
+def split_chord(text, extra=None):
+    """Split a key chord into (modifiers, key).
+
+    "Control+Shift+Tab", ("a", "control") and "cmd+a" all work: every part that
+    names a modifier is one, and the part that does not is the key. Raises
+    ValueError with a message meant for the caller.
+    """
+    parts = str(text or "").replace("+", " ").split()
+    if isinstance(extra, (list, tuple)):
+        extra = " ".join(str(item) for item in extra)
+    parts += str(extra or "").replace(",", " ").replace("+", " ").split()
+    if not parts:
+        raise ValueError("No key given.")
+    modifiers = []
+    keys = []
+    for part in parts:
+        canonical = _CHORD_MODIFIERS.get(part.lower())
+        if canonical is None:
+            keys.append(part)
+        elif canonical not in modifiers:
+            modifiers.append(canonical)
+    if not keys:
+        raise ValueError("No key given.")
+    if len(keys) > 1:
+        raise ValueError("One key per press, not " + " ".join(keys) + ".")
+    return [m for m in MODIFIER_ORDER if m in modifiers], keys[0]
+
+
 def restorable_url(url):
     """True if this tab's URL can be reopened after a relaunch.
 

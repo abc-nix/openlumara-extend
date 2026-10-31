@@ -52,6 +52,36 @@ KEY_MAP = {
 }
 
 
+# Modifier name -> (key, code, virtual key code, CDP modifiers bit). The bits
+# are Input.dispatchKeyEvent's: 1 Alt, 2 Control, 4 Meta, 8 Shift.
+MODIFIER_KEYS = {
+    "control": ("Control", "ControlLeft", 17, 2),
+    "alt": ("Alt", "AltLeft", 18, 1),
+    "meta": ("Meta", "MetaLeft", 91, 4),
+    "shift": ("Shift", "ShiftLeft", 16, 8),
+}
+
+
+def key_definition(name):
+    """(virtual key code, key, code) for one key name, or None.
+
+    KEY_MAP carries the named keys; a single letter or digit is addressed by
+    its character ("a", "7"), which is what a chord like Control+A needs. The
+    virtual key code of a letter is its upper-case ASCII value.
+    """
+    text = str(name or "").strip()
+    if not text:
+        return None
+    if text.lower() in KEY_MAP:
+        return KEY_MAP[text.lower()]
+    if len(text) == 1 and text.isascii() and (text.isalpha() or text.isdigit()):
+        if text.isalpha():
+            upper = text.upper()
+            return (ord(upper), text, "Key" + upper)
+        return (ord(text), text, "Digit" + text)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Targets (pure lookups)
 # ---------------------------------------------------------------------------
@@ -254,13 +284,70 @@ async def resolve_object_id(cdp_client, handle, sid):
     return res.get("object", {}).get("objectId")
 
 
-async def call_on(cdp_client, object_id, function_declaration, sid):
-    res = await cdp_client.cmd("Runtime.callFunctionOn", {
+async def call_on(cdp_client, object_id, function_declaration, sid, args=None):
+    """Run `function_declaration` on an element, by value.
+
+    `args` are serialised as plain values, so the function receives them as
+    ordinary JS arguments.
+    """
+    params = {
         "objectId": object_id,
         "functionDeclaration": function_declaration,
         "returnByValue": True,
-    }, sid)
+    }
+    if args is not None:
+        params["arguments"] = [{"value": arg} for arg in args]
+    res = await cdp_client.cmd("Runtime.callFunctionOn", params, sid)
     return res
+
+
+async def tag_name(cdp_client, object_id, sid):
+    """Upper-case tag name of an element ('' when it cannot be read)."""
+    try:
+        res = await call_on(cdp_client, object_id,
+                            "function(){ return this.tagName; }", sid)
+        return str((res.get("result") or {}).get("value") or "").upper()
+    except Exception:
+        return ""
+
+
+# A <select> is set through its native value setter plus input/change events,
+# the way a user pick reaches React/Vue (same trick as restore_page_state).
+# Matching order: exact label, exact value, then both case-insensitive.
+_SELECT_OPTION_JS = (
+    "function(wanted){"
+    "var want=String(wanted==null?'':wanted).trim();"
+    "var opts=Array.from(this.options||[]);"
+    "function norm(s){return String(s==null?'':s).trim();}"
+    "var hit=opts.find(function(o){return norm(o.text)===want;})"
+    "||opts.find(function(o){return norm(o.value)===want;})"
+    "||opts.find(function(o){return norm(o.text).toLowerCase()===want.toLowerCase();})"
+    "||opts.find(function(o){return norm(o.value).toLowerCase()===want.toLowerCase();});"
+    "if(!hit){return JSON.stringify({ok:false,"
+    "labels:opts.slice(0,5).map(function(o){return norm(o.text);})});}"
+    "var d=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value');"
+    "if(d&&d.set){d.set.call(this,hit.value);}else{this.value=hit.value;}"
+    "this.dispatchEvent(new Event('input',{bubbles:true}));"
+    "this.dispatchEvent(new Event('change',{bubbles:true}));"
+    "return JSON.stringify({ok:true,text:norm(hit.text),value:this.value});"
+    "}"
+)
+
+
+async def select_option(cdp_client, object_id, wanted, sid):
+    """Set a <select> to the option whose label or value matches `wanted`.
+
+    Returns {"ok": True, "text": ..., "value": ...} or {"ok": False,
+    "labels": [...]} with the first few labels; {} when the call itself fails.
+    """
+    try:
+        res = await call_on(cdp_client, object_id, _SELECT_OPTION_JS, sid,
+                            args=[str(wanted)])
+        value = (res.get("result") or {}).get("value")
+        data = json.loads(value) if value else {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 # ---------------------------------------------------------------------------

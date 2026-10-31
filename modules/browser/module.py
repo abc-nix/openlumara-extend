@@ -31,11 +31,12 @@ import channels.webui.api as webui
 # so edits to those three need a full server restart.
 from . import cdp, page
 from .cdp import CDPClient, CDPError, DEFAULT_PORT
-from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
+from .page import DEFAULT_SNAPSHOT_CHARS
 from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
                    headless_from_version, timeout_text, rejected_top_level_await,
-                   wrap_await, restorable_url, captured_active_index, untrusted)
+                   wrap_await, restorable_url, captured_active_index, untrusted,
+                   split_chord)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -1133,9 +1134,11 @@ class Browser(core.module.Module):
     async def type_text(self, target: str, text: str):
         """Types text into an element (input/textarea/contenteditable): focuses, clears, then types.
 
+        On a <select>, text picks the option whose label or value matches.
+
         Args:
             target: Element ref (e.g. @e5) or CSS selector.
-            text: The text to type.
+            text: The text to type, or the option to select.
         """
         await self._ensure_connection()
         sid = self._current_session()
@@ -1143,6 +1146,8 @@ class Browser(core.module.Module):
         object_id = await page.resolve_object_id(self._cdp, handle, sid)
         if not object_id:
             return self.result(f"Could not resolve element '{target}'.", success=False)
+        if await page.tag_name(self._cdp, object_id, sid) == "SELECT":
+            return await self._select_target_option(sid, object_id, target, text)
         # contenteditable has no select(): select the contents with a range, so
         # the Backspace below deletes the old text instead of leaving it in
         # front of what gets typed.
@@ -1166,37 +1171,91 @@ class Browser(core.module.Module):
         await self._cdp.cmd("Input.insertText", {"text": text}, sid)
         return self.result(f"Typed {len(text)} characters into {target}.")
 
+    async def _select_target_option(self, sid, object_id, target, wanted):
+        """Pick a <select> option by label or value (type_text's select branch)."""
+        picked = await page.select_option(self._cdp, object_id, wanted, sid)
+        if not picked:
+            return self.result(f"Could not set {target}.", success=False)
+        if picked.get("ok"):
+            return self.result(f"Selected '{picked.get('text')}' in {target}.")
+        labels = [(label[:12] + "\u2026") if len(label) > 12 else label
+                  for label in (picked.get("labels") or [])[:3]]
+        options = ", ".join(labels) or "none"
+        return self.result(
+            f"No option '{wanted}' in {target}. Options: {options}", success=False)
+
     @core.module.tool
-    async def press(self, key: str):
-        """Presses a keyboard key in the current tab (enter, tab, escape, arrows, f5, ...).
+    async def press(self, key: str, modifiers: str = None):
+        """Presses a keyboard key or a chord in the current tab (enter, tab, escape, arrows, f5, Control+A).
 
         Args:
-            key: The key name (lowercase, e.g. 'enter').
+            key: Key name (enter, tab, escape, arrows, a-z, 0-9, f5) or a chord like 'Control+A'.
+            modifiers: Modifiers held while pressing (e.g. 'control shift'); a chord in `key` works too.
         """
         await self._ensure_connection()
         sid = self._current_session()
-        key = key.strip().lower()
-        if key == "f5":
+        try:
+            held_names, name = split_chord(key, modifiers)
+        except ValueError as e:
+            return self.result(str(e), success=False)
+        if name.lower() == "f5":
+            if held_names:
+                return self.result("f5 cannot be combined with modifiers.", success=False)
             await self._cdp.cmd("Page.reload", {}, sid)
             return self.result("Reloaded the page (F5).")
-        if key not in KEY_MAP:
+        definition = page.key_definition(name)
+        if definition is None:
             return self.result(
-                f"Unsupported key '{key}'. Supported: {', '.join(sorted(KEY_MAP))}, f5.",
-                success=False,
+                f"Unsupported key '{name}'. Supported: a-z, 0-9, enter, tab, "
+                "escape, arrows, f5.", success=False,
             )
-        vk, key_str, code = KEY_MAP[key]
-        for ktype in ("keyDown", "keyUp"):
-            params = {"type": ktype, "key": key_str, "code": code,
-                      "windowsVirtualKeyCode": vk,
-                      "nativeVirtualKeyCode": vk}
-            # character keys need the `text` payload on keyDown or Chrome
-            # never reaches the keypress stage -> no implicit form submit
-            # on Enter, no space character insertion
-            if ktype == "keyDown" and key in ("enter", "space"):
-                params["text"] = "\r" if key == "enter" else " "
-                params["unmodifiedText"] = params["text"]
-            await self._cdp.cmd("Input.dispatchKeyEvent", params, sid)
-        return self.result(f"Pressed {key}.")
+        vk, key_str, code = definition
+        # character keys need the `text` payload on keyDown or Chrome never
+        # reaches the keypress stage -> no implicit form submit on Enter, no
+        # space insertion. A Control/Alt/Meta chord inserts no character.
+        mask = 0
+        for mod in held_names:
+            mask |= page.MODIFIER_KEYS[mod][3]
+        if len(key_str) == 1 and key_str.isalpha() and mask & (1 | 2 | 4):
+            # a Control/Alt/Meta chord reports the lower-case key, as Chrome
+            # does for a real Control+A press
+            key_str = key_str.lower()
+        text = None
+        if not mask & (1 | 2 | 4):
+            if key_str == "Enter":
+                text = "\r"
+            elif len(key_str) == 1:
+                text = key_str
+        live = 0
+        held = []
+        for mod in held_names:
+            mkey, mcode, mvk, mbit = page.MODIFIER_KEYS[mod]
+            live |= mbit
+            held.append((mkey, mcode, mvk, mbit))
+            await self._dispatch_key(sid, "keyDown", mkey, mcode, mvk, live)
+        try:
+            await self._dispatch_key(sid, "keyDown", key_str, code, vk, mask, text)
+            await self._dispatch_key(sid, "keyUp", key_str, code, vk, mask)
+        finally:
+            # release in reverse order, each event carrying only the modifiers
+            # still held at that moment
+            for mkey, mcode, mvk, mbit in reversed(held):
+                live &= ~mbit
+                await self._dispatch_key(sid, "keyUp", mkey, mcode, mvk, live)
+        prefix = "+".join(mod.capitalize() for mod in held_names)
+        shown = "Space" if key_str == " " else name
+        return self.result(f"Pressed {prefix + '+' if prefix else ''}{shown}.")
+
+    async def _dispatch_key(self, sid, ktype, key, code, vk, modifiers, text=None):
+        """One Input.dispatchKeyEvent; `text` only on a character key's keyDown."""
+        params = {"type": ktype, "key": key, "code": code,
+                  "windowsVirtualKeyCode": vk,
+                  "nativeVirtualKeyCode": vk,
+                  "modifiers": modifiers}
+        if text is not None:
+            params["text"] = text
+            params["unmodifiedText"] = text
+        await self._cdp.cmd("Input.dispatchKeyEvent", params, sid)
 
     @core.module.tool
     async def scroll(self, direction: str = "down", amount: int = 300):
