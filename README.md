@@ -12,9 +12,6 @@ module libraries expect, so the same tree can be installed on another machine:
 
 ## Layout
 
-A library repo must mirror OpenLumara's own folder layout — `core/module_manager.py`
-only picks entries up from these folders:
-
 | folder in this repo | installed as | entry file |
 |---|---|---|
 | `modules/<name>/` | user module (`user_modules/<name>`) | `module.py` |
@@ -22,66 +19,85 @@ only picks entries up from these folders:
 | `skills/<name>/` | skill | `SKILL.md` |
 | `themes/<name>.json` | webui theme | (json, optional `.css` sidecar) |
 
-A `module.py` sitting at the repo root, or in any other folder, is ignored.
-
-## How it is wired on this machine
-
-```
-~/git/openlumara/user_modules  ->  ~/git/openlumara-extend/modules
-```
-
-That symlink means editing a module through the usual
-`openlumara/user_modules/<name>/` path edits the files here directly (no copy,
-no sync step). Consequences:
-
-- OpenLumara's own checkout keeps `user_modules/` gitignored, so `git status`
-  there stays clean — this repo is the source of truth for module changes.
-- After editing `module.py`, a settings save reloads it; edits to helper files
-  (`cdp.py`, `page.py`, …) need a full server restart, not a reload.
-- Never copy `__pycache__/` in when moving a module; it is ignored anyway.
-
 ## Modules
 
-| module | notes |
+### browser
+
+A dedicated Chrome/Chromium window your AI can drive: it opens pages, clicks,
+types, fills forms, runs JavaScript and takes screenshots, and can read what
+the page logs and requests. It runs on its own profile — separate from your
+everyday browser — so sites you log in to once stay logged in.
+
+It drives a Chromium-based browser already installed on your system (Chrome,
+Chromium or Brave — detected automatically, or a path you set), so there is
+nothing extra to install or run.
+
+**Tools**
+
+| tool | what it does |
 |---|---|
-| `browser` | Chrome/Chromium over CDP. Open backlog in `modules/browser/REVIEW.md` (items B1–B25, phases in §9). |
-| `theme_gallery` | WebUI theme browser; see `BUGS.md` / `ELEMENTS.md` next to it. |
+| `open` / `close` / `status` | start (or attach to) the browser, quit it, or report what is connected and which tabs are open |
+| `navigate` | go to a URL in the current tab |
+| `back` | return to the previous page |
+| `scroll` | scroll the page up or down |
+| `snapshot` | read the page as a list of elements; interactive ones get `@e1`-style handles for clicking/typing |
+| `click` | click an element by handle or CSS selector |
+| `type_text` | type into a field, pick an option in a dropdown, or tick a checkbox |
+| `fill_form` | fill several fields in one call and report each one |
+| `press` | press a key or a combination (`Control+A`, `Shift+Tab`, `f5`) |
+| `screenshot` | capture the visible area or the whole page, PNG or JPEG, optionally with a labelled coordinate grid |
+| `evaluate` | run a snippet of JavaScript and return its result |
+| `console` | recent console messages and errors, filtered by severity or type |
+| `network_requests` | recent web requests, filtered by URL or kind; common background assets are hidden by default |
+| `get_images` | images on the page with their sizes; icons and duplicates are skipped |
+| `cookies` | cookies of the current site or a given domain |
+| `list_tabs` / `new_tab` / `switch_tab` / `close_tab` | manage tabs; each tab is marked as the one the AI drives and the one you are looking at |
+| `handle_dialog` | accept or dismiss an alert/confirm/prompt |
+| `cdp` | raw Chrome DevTools command, off by default |
 
-## Screenshot grid (browser module)
+**WebUI**
 
-The grid is drawn **onto the captured PNG** (`page.draw_grid`), never into the
-page. The old in-page canvas overlay needed a full-size canvas, which the
-browser refuses past 16000 px per dimension — exactly the tall full-page
-captures where a grid is most useful — and it briefly mutated the page the AI
-may inspect next.
+- A **browser tab in the sidebar**: connection status, browser and mode, the
+  open tabs with the one the AI drives and the one you are viewing, and
+  **Open**, **Close** and **Restart (headless ↔ visible)** buttons.
+- Restart keeps the open tabs, scroll positions and filled-in (non-secret)
+  form fields; browsing history and passwords are not restored.
+- **Screenshots** appear in the chat as preview cards you can open at full size.
+- A short **help** panel explains the buttons and the settings worth knowing.
 
-- Lines sit on document-coordinate multiples of the spacing; labels read as
-  document coordinates and the origin is the `region` the tool reports.
-- `grid` requires `format="png"`: jpeg + grid is refused rather than silently
-  changing the format.
-- Measured: **0.76 s** for a 1272x1305 capture, ~0.5 s per extra megapixel.
-- `full_page_max_height` (default 8000): Chrome paints the **whole page** for
-  `captureBeyondViewport` regardless of any clip (measured 2026-10-27 — an 8k
-  clip on a 40k page still ran past 10 s), so a taller page is refused up front
-  with its real height instead of stalling into the 15 s tool budget. A whole
-  Wikipedia article is ~40k px.
+### docprocess
 
-## Tests
+Converts documents — PDF, Office, EPUB, images — into Markdown or plain text,
+with OCR when needed. Conversions run as background jobs.
 
-The stateless helpers in `page.py` have a pure-stdlib suite: it stubs `core`
-and `aiohttp`, so it runs anywhere without touching the install, and it never
-imports the entry `module.py`.
+**Tools**
 
-```
-python3 -m unittest discover -s modules/browser/tests -v
-```
+| tool | what it does |
+|---|---|
+| `convert` | convert a file and write the result next to it (or where you ask); optional OCR mode |
+| `convert_status` | progress and results of running or finished conversions |
+| `vlm_models` | list the vision-capable models an OpenAI-compatible endpoint offers |
 
-## Conventions
+**WebUI**
 
-- One branch per fix phase (`browser/phase-1-settings`, …), squash-merged into
-  `master`; a bad phase is then one `git revert` away.
-- A docstring changes in the same commit as the behavior it describes.
-- Never commit credentials or local data — module settings live in
-  `openlumara/config.yml`, which stays in (and ignored by) the main checkout.
-- Module code follows the upstream template:
-  `modules/coder/templates/openlumara_module.py`.
+- Upgrades the **VLM model** field in the settings screen: one combobox that
+  lists the models served by the configured endpoint, with a vision/all filter
+  and a refresh button.
+
+### theme_gallery
+
+A development tool for looking at the WebUI's real components under different
+theme families and light/dark modes, side by side. It only reads theme data —
+it never applies a theme to your interface.
+
+**Tools**
+
+None.
+
+**WebUI**
+
+- A **theme gallery tab in the sidebar** that opens a full-screen preview: chat
+  messages, composer, tool cards, sidebars, modals, settings screens and form
+  controls, rendered under each theme family.
+- Browse by category, compare coverage across elements, and switch light/dark
+  without touching the app's actual appearance.
