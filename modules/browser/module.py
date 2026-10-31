@@ -36,7 +36,7 @@ from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
                    headless_from_version, timeout_text, rejected_top_level_await,
                    wrap_await, restorable_url, captured_active_index, untrusted,
-                   split_chord, checkbox_value, unique_images)
+                   split_chord, checkbox_value, unique_images, filter_requests)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -621,6 +621,8 @@ class Browser(core.module.Module):
                 entry = {
                     "method": req.get("method", "?"),
                     "url": url,
+                    # CDP resource type (Document, Script, Image, XHR, Fetch..)
+                    "type": params.get("type") or "Other",
                     "timestamp": params.get("timestamp"),
                     "status": None,  # annotated by the events below
                     "tab": self._target_of_session(sid),
@@ -1617,11 +1619,19 @@ class Browser(core.module.Module):
         return self.result(untrusted(entries, self._page_source()))
 
     @core.module.tool
-    async def network_requests(self, count: int = 20, clear: bool = False):
+    async def network_requests(self, count: int = 20, filter: str = None,
+                               types: str = None, static: bool = False,
+                               clear: bool = False):
         """Returns recent network requests (method + URL + status). Requires enable_network_monitoring.
 
+        Successful static resources are hidden unless `static` is on; the result
+        says how many were hidden, so nothing disappears silently.
+
         Args:
-            count: How many of the most recent entries to return (0 = none).
+            count: How many of the most recent entries to look at (0 = none).
+            filter: Only URLs matching this text or regular expression.
+            types: Only these resource types, e.g. 'xhr, document'.
+            static: Also list successful static resources (images, scripts, fonts).
             clear: Clear the buffer after reading.
         """
         if not self.config.get("enable_network_monitoring", False):
@@ -1630,12 +1640,19 @@ class Browser(core.module.Module):
                 success=False,
             )
         await self._ensure_connection()
-        entries = tail_entries(self._network_log, count)
+        everything = list(self._network_log)
         if clear:
             self._network_log.clear()
-        if not entries:
+        if not everything:
             return self.result("No network requests recorded.")
-        return self.result(untrusted(entries, self._page_source()))
+        # the filters see the whole buffer: a page's own requests are the
+        # oldest, and taking the last `count` first hid them from every filter
+        matched, hidden = filter_requests(everything, filter, types,
+                                          skip_static=not static)
+        shown = tail_entries(matched, count)
+        data = {"requests": shown, "shown": len(shown), "matched": len(matched),
+                "total": len(everything), "hidden": hidden}
+        return self.result(untrusted(data, self._page_source()))
 
     @core.module.tool
     async def get_images(self, min_size: int = 48, limit: int = 50):

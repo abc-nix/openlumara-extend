@@ -5,6 +5,7 @@ tests/test_util.py loads them directly.
 """
 
 import contextvars
+import re
 import secrets
 import string
 import time
@@ -192,6 +193,61 @@ def unique_images(entries, max_url=200):
             "height": int(entry.get("height") or 0),
         })
     return out
+
+
+# Resource types a page loads to render itself. Successful ones are noise in a
+# request list; a failed one (404 script, blocked image) is a real signal.
+STATIC_TYPES = {"image", "stylesheet", "font", "media", "manifest",
+                "texttrack", "prefetch", "signedexchange", "script"}
+
+
+def filter_requests(entries, pattern=None, types=None, skip_static=True):
+    """Requests to show, and how many each rule hid.
+
+    `pattern` is a regular expression on the URL (plain text when it does not
+    compile), `types` a comma string or list of CDP resource types. `skip_static`
+    hides a static resource only while its status is a success: a 404 script or
+    a failed image stays visible.
+    """
+    wanted = set()
+    if isinstance(types, str):
+        types = types.replace(",", " ").split()
+    for name in types or []:
+        name = str(name).strip().lower()
+        if name:
+            wanted.add(name)
+    matcher = None
+    if pattern:
+        try:
+            matcher = re.compile(str(pattern), re.IGNORECASE)
+        except re.error:
+            matcher = None
+    needle = str(pattern).lower() if (pattern and matcher is None) else None
+
+    kept = []
+    hidden = {"static": 0, "other": 0}
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            hidden["other"] += 1
+            continue
+        url = str(entry.get("url") or "")
+        if needle is not None and needle not in url.lower():
+            hidden["other"] += 1
+            continue
+        if matcher is not None and not matcher.search(url):
+            hidden["other"] += 1
+            continue
+        kind = str(entry.get("type") or "").lower()
+        if wanted and kind not in wanted:
+            hidden["other"] += 1
+            continue
+        status = entry.get("status")
+        ok = isinstance(status, int) and 0 < status < 400
+        if skip_static and kind in STATIC_TYPES and ok:
+            hidden["static"] += 1
+            continue
+        kept.append(entry)
+    return kept, hidden
 
 
 class Budget:
