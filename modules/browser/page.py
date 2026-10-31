@@ -1,17 +1,11 @@
 # -- AI GENERATED CODE (Qwen3.8-Flash-Next) :: (2026-10-07)
-"""
-Page/DOM operation helpers for the browser module (step-6 split of
-module.py; see README.md).
+"""Page and DOM helpers for one attached tab: element refs, the accessibility
+walker, screenshots with the grid annotation, image size parsing, viewport
+metrics, and tab-state capture/restore.
 
-Stateless helpers that operate on an attached tab: element refs, the
-accessibility-tree walker, screenshots (plus the grid annotation drawn onto
-the capture), image dimension parsing, viewport metrics, and tab-state
-capture/restore
-(restart headless<->visible). Every function receives what it needs
-explicitly (cdp client, session id, dirs, refs) — no module state.
-Dependency direction: module.py -> page.py. page.py imports nothing from
-cdp.py: a command's deadline is resolved inside cdp.cmd from util.CALL_BUDGET,
-so the tool call's one number reaches these helpers without being passed in.
+Every function takes what it needs (cdp client, session id, dirs, refs) - no
+module state. page.py never imports cdp.py: a command's deadline comes from
+util.CALL_BUDGET inside cdp.cmd.
 """
 
 import asyncio
@@ -63,14 +57,13 @@ KEY_MAP = {
 # ---------------------------------------------------------------------------
 
 async def list_page_targets(cdp_client):
-    """Page targets in the order Chrome reports them (stable across calls).
+    """Page targets in the order Chrome reports them, stable across calls.
 
-    Deliberately NOT sorted by `targetInfos[].attached` (B26): that flag only
-    says "a debugger is attached", so the order changed as soon as this module
-    attached to a second tab and `switch_tab(0)` no longer meant the tab
-    `list_tabs` showed first. What the callers need is one order that holds
-    from one call to the next; which tab is "current" is answered separately
-    (`active` in the tool output, `self._current_target`).
+    Not sorted by `attached`: that flag only says a debugger is attached, so
+    the order would change as soon as this module attached to a second tab and
+    `switch_tab(0)` stopped meaning what `list_tabs` showed first. Callers need
+    one order that holds from call to call; the tab we drive is
+    `self._current_target`.
     """
     res = await cdp_client.cmd("Target.getTargets")
     return [t for t in res.get("targetInfos", []) if t.get("type") == "page"]
@@ -118,16 +111,14 @@ async def is_active_tab(cdp_client, sid, timeout=None):
 
 
 async def active_targets(cdp_client, targets, attached=None):
-    """targetIds of the active tab(s): the tabs the user is looking at.
+    """targetIds of the active tab(s): the tab(s) the user is looking at.
 
-    Needs a session per tab: `attached` ones are reused, the rest are
-    attached without enabling Page/Runtime/Log/Accessibility - that is what
-    makes it ~1 ms per tab (measured 2026-10-31: 5 tabs, 5.7 ms) and leaves
-    no domain side effects on tabs the user is working in. Sessions it
-    opened itself are detached again (B19).
+    One session per tab: the ones in `attached` are reused, the rest are
+    attached without enabling any domain, so no event traffic is switched on
+    for tabs we do not drive. Sessions opened here are detached again.
 
-    Several ids when the browser has several windows (each owns one visible
-    tab, in report order); none when the window is minimised.
+    Several ids when the browser has several windows (one visible tab each, in
+    report order); none when the window is minimised.
     """
     attached = attached or {}
     found = []
@@ -334,17 +325,15 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
 async def viewport_metrics(cdp_client, sid, timeout=None):
     """Viewport and document size from Page.getLayoutMetrics. Dict or None.
 
-    Deliberately not page JS (B38): the page that makes a capture time out can
-    have its main thread blocked, and a guard value read through a blocked
-    thread tells us nothing. None therefore has to mean "unknown", and
-    module.screenshot refuses full-page captures on it rather than treating it
-    as "no limit".
+    Not page JS: the page that makes a capture time out can have its main
+    thread blocked, and a value read through a blocked thread tells us nothing.
+    None therefore means "unknown", and module.screenshot refuses full_page on
+    it instead of treating it as no limit.
 
-    Units, per the protocol: the `css*` fields are CSS pixels; the deprecated
-    layoutViewport/visualViewport/contentSize are DEVICE pixels. The last is
-    the raster size of a full-page capture, which is what the pixel cap, the
-    grid and `region` need. `docW`/`docH` stay in CSS pixels - that is the
-    space refs and scroll offsets use.
+    Units per the protocol: `css*` fields are CSS pixels; the deprecated
+    layoutViewport/contentSize are device pixels, the raster size a capture
+    produces (what the pixel cap, the grid and `region` need). `docW`/`docH`
+    stay in CSS pixels, the space refs and scroll offsets use.
     """
     try:
         res = await cdp_client.cmd("Page.getLayoutMetrics", {}, sid, timeout=timeout)
@@ -438,15 +427,13 @@ def image_size(raw, fmt):
 # ---------------------------------------------------------------------------
 # Grid annotation (drawn onto the captured PNG, never into the page)
 # ---------------------------------------------------------------------------
-# 2026-10-27: replaces the in-page canvas overlay. That overlay refused tall
-# pages by design (canvas guard: >16000 px in either dimension), i.e. exactly
-# the full-page captures where a grid is most useful, and it mutated the page
-# the AI may inspect next. Drawing on the PNG instead has no size limit beyond
-# RAM and keeps the page untouched. Measured cost with the stdlib path below:
-# ~0.7 s for a 1272x1305 viewport capture, ~0.15 s per additional megapixel.
+# Drawn on the PNG: a page canvas has a size guard on exactly the tall
+# full-page captures a grid is for, and mutating the page would change what the
+# AI inspects next. Cost is decode/draw/encode, ~0.15 s per megapixel plus a
+# fixed viewport cost.
 #
-# Grid => PNG: 1 px lines survive PNG losslessly; JPEG would need a decoder.
-# `module.screenshot` refuses (grid + jpeg) rather than picking a format.
+# Grid => PNG only: 1 px lines survive losslessly, JPEG would need a decoder.
+# module.screenshot refuses grid + jpeg instead of picking a format.
 
 _GRID_RED = (224, 0, 0)
 
@@ -683,11 +670,15 @@ async def capture_page_state(cdp_client, sid):
 
 
 async def restore_page_state(cdp_client, sid, state):
-    """Re-inject captured form values + scroll position into a loaded tab.
+    """Re-inject captured form values and scroll position into a loaded tab.
 
-    Uses native value setters + input/change events so React/Vue inputs
-    notice the programmatic fill; applied to querySelectorAll matches so
-    radio groups work. Best-effort per selector.
+    Native value setters plus input/change events, so React/Vue inputs notice
+    the programmatic fill; best-effort per selector.
+
+    Known limit: a radio/checkbox group without ids is captured as one selector
+    per member (all identical), and every member is rewritten on restore, so
+    "the last captured entry wins" - such a group can come back with the wrong
+    option, or none, selected.
     """
     if not state:
         return False
