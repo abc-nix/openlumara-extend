@@ -1,21 +1,15 @@
 # -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-26)
-"""
-Small pure helpers shared by module.py: URL normalisation for navigate/new_tab,
-safe tail-slicing of the console/network deques, and the per-tool-call time
-budget.
-
-Kept out of page.py (DOM/screenshot work) so they need no core/aiohttp stubs and
-can be tested directly - see tests/test_util.py.
+"""Pure helpers shared by module.py: URL normalisation, tail slicing of the log
+deques, and the per-tool-call time budget. No core/aiohttp imports, so
+tests/test_util.py loads them directly.
 """
 
 import contextvars
 import time
 import urllib.parse
 
-# Cost of the grid annotation drawn onto a PNG (decode + draw + encode),
-# measured on this module's own saved captures - real Chrome PNGs are mostly
-# filter-4 (Paeth) rows, so decode_png's Python loop dominates: ~0.85 s/Mpx
-# (1272x1305 -> 1.6 s, 1257x2952 -> 3.1 s).
+# Grid annotation cost, mostly decoding: Chrome's PNGs are mostly Paeth-filtered
+# rows, which decode_png's Python loop walks per byte (~0.85 s per megapixel).
 GRID_COST_S_PER_MPX = 0.85
 
 # schemes navigate/new_tab accept as-is; anything else gets https:// prefixed
@@ -54,14 +48,12 @@ def restorable_url(url):
 
 
 def captured_active_index(targets, active_id):
-    """Index of the active tab inside the CAPTURED list, or None.
+    """Index of the active tab inside the captured list, or None.
 
-    `_capture_state` walks every page target but keeps only restorable ones.
-    Numbering the active tab over the whole target list (B6) and then
-    indexing the filtered list restored a different tab whenever a chrome://
-    or devtools tab sat between the active one and the end of the list.
-    None = the active tab is not captured at all (chrome://), and the caller
-    falls back to the first tab.
+    The captured list keeps only restorable pages, so its indices are not the
+    target list's: a chrome:// tab before the active one shifts it. None means
+    the active tab is not captured at all, and the caller falls back to the
+    first tab.
     """
     index = 0
     for target in targets:
@@ -89,16 +81,9 @@ def tail_entries(buffer, count):
 class Budget:
     """One deadline for a whole tool call.
 
-    The framework cancels any tool call running past core.tool_timeout and the
-    model then sees only "Tool timed out after Ns" (core/toolcalls.py:229).
-    A browser tool issues several CDP commands back to back, so the budget is
-    taken once at tool entry and every command gets what is left of it: the
-    call always finishes inside the framework's number, and reports *that*
-    number, so there is exactly one timeout to raise (Settings -> Core -> Tool
-    Timeout) instead of a module-private one the caller has never heard of.
-
-    The deadline starts when the tool starts, which also covers the work that
-    happens before any CDP call (launching Chrome costs 1-3 s).
+    Taken at tool entry, so the work before the first CDP call (launching
+    Chrome) is covered too; every command then gets what is left of it, and the
+    call answers before core cancels it at core.tool_timeout.
     """
 
     __slots__ = ("total", "_end")
@@ -120,21 +105,18 @@ class Budget:
         return max(0.0, self.total - self.left())
 
 
-# Budget of the tool call that is running right now (set by module._guarded).
-# A ContextVar, not an attribute on the module: the module object is shared by
-# every caller, and two tool calls running at the same time must not see each
-# other's deadline.
+# Budget of the tool call running right now (set by module._guarded). A context
+# var, not a module attribute: concurrent calls must not see each other's
+# deadline.
 CALL_BUDGET = contextvars.ContextVar("browser_call_budget", default=None)
 
 
 def tool_budget(total, reserve=0.5):
-    """Deadline for one tool call, from the framework's `total` seconds.
+    """Deadline for one tool call: the framework's `total` minus a reserve.
 
-    A slice of `total` is held back so the module answers *before* core's own
-    timer fires: core starts counting before the tool body runs and the answer
-    still has to travel back. The slice shrinks with very small totals
-    (`min(reserve, total * 0.2)`) so the budget is always shorter than the
-    call, even if someone sets tool_timeout to one second.
+    The reserve is what lets the module answer before core's timer fires (the
+    answer still has to travel back); it shrinks with tiny totals so the budget
+    stays below the call even at tool_timeout = 1s.
     """
     total = max(1.0, float(total))
     return Budget(total - min(float(reserve), total * 0.2))
@@ -150,8 +132,7 @@ def resolve_timeout(timeout, budget=None, fallback=10.0):
     """
     if timeout is None:
         timeout = budget.left() if budget is not None else fallback
-    # never hand a command a timeout of zero: wait_for would raise at once
-    # with a message that reads like a bug rather than an exhausted budget
+    # wait_for(0) raises at once, which reads like a bug rather than a spent budget
     return max(0.1, float(timeout))
 
 
@@ -173,12 +154,9 @@ def grid_fits(width, height, seconds_left):
 def first_capture_window(seconds_left, full_page):
     """How long the first capture command may take.
 
-    A viewport capture is the reliable one (it has never been seen to stall) and
-    gets everything that is left. A full-page capture can stall Chrome on some
-    documents (B43: three hangs on one example.com document, ~14.5 s each,
-    while the same page captured in a fresh tab) and used to eat the whole call
-    doing it. Giving it half the call leaves the other half for a viewport
-    fallback, so a stall still answers with an image instead of with nothing.
+    A viewport capture gets everything that is left. A full-page capture can
+    stall Chrome on some documents, so it gets half the call: the other half is
+    kept for a viewport fallback, and a stall still answers with an image.
     """
     try:
         left = max(0.0, float(seconds_left))
@@ -205,23 +183,21 @@ def capture_fits(width, height, max_pixels):
 
 
 def timeout_text(text):
-    """The short message for a call that ran out of the framework's budget (B40).
+    """Message for a call that ran out of the framework's budget.
 
     `text` is the failure itself ("CDP command 'X' timed out after 14.5s"). Names
-    the setting, never a module-private number: `core.tool_timeout` is the only
-    timeout the caller can raise, and pointing at anything else sends them to a
-    setting that does not help (that was B40).
+    Settings > Core > Tool Timeout, the only timeout a caller can raise; a
+    module-private number would send them to a setting that does not help.
     """
     return f"{text}. Retry, or raise Settings > Core > Tool Timeout."
 
 
 def rejected_top_level_await(details):
-    """Did Chrome reject the expression because of a top-level `await` (B30)?
+    """Did Chrome reject the expression because of a top-level `await`?
 
     `Runtime.evaluate` runs the string as a script, where `await` is a syntax
-    error no matter that `awaitPromise` is on. The answer is a SyntaxError
-    whose text names await, which is what separates it from every other
-    exception the page can throw.
+    error even with awaitPromise on. A SyntaxError naming await is what
+    separates it from any exception the page itself can throw.
     """
     if not details:
         return False
@@ -231,25 +207,20 @@ def rejected_top_level_await(details):
 
 
 def wrap_await(expression):
-    """Wrap an expression so a top-level `await` becomes legal (B30).
+    """Wrap an expression so a top-level `await` becomes legal.
 
-    Kept as `return (<expression>)` so an expression keeps its value. The
-    newline matters: it stops a trailing `//` comment from swallowing the
-    closing bracket.
+    `return (<expression>)` keeps the value. The newline matters: it stops a
+    trailing `//` comment from swallowing the closing bracket.
     """
     return "(async () => { return (" + str(expression) + "\n); })()"
 
 
 def headless_from_version(info):
-    """Was the browser that answered /json/version headless? (B33, corrected)
+    """Was the browser that answered /json/version headless?
 
-    The "Browser" product string is not enough. Measured 2026-10-29 with
-    Chrome 156 and `--headless=new`: /json/version answers
-    "Browser": "Chrome/156.0.8078.73" while its User-Agent still says
-    HeadlessChrome - so the product-string check reported a headless browser
-    as visible, the exact error B33 was meant to end. The UA is the browser's
-    own claim about itself and wins; the product string stays as the fallback
-    for builds whose UA says nothing either way.
+    The User-Agent wins: Chrome 156 with --headless=new still answers
+    "Browser": "Chrome/156..." there. The product string is the fallback for
+    builds whose UA says nothing either way.
     """
     if not info:
         return None
@@ -267,11 +238,9 @@ def headless_from_version(info):
 def headless_from_product(product):
     """Was `product` (CDP /json/version "Browser") running headless?
 
-    Chrome reports "HeadlessChrome/120.0…" in headless mode and "Chrome/120.0…"
-    otherwise, so the running browser states its own mode. The `headless`
-    setting only predicts what the *next launch* would use and says nothing at
-    all about a browser we merely attached to - trust the string when we have
-    it, return None when we don't.
+    Chrome says "HeadlessChrome/…" in headless mode and "Chrome/…" otherwise.
+    The `headless` setting only predicts the next launch, so a browser we
+    merely attached to is judged by this string; None when it is unusable.
     """
     text = str(product or "").strip()
     if not text:
@@ -280,11 +249,11 @@ def headless_from_product(product):
 
 
 def drop_target(attached, current_target, target_id):
-    """Forget a tab that died (Target.targetDestroyed / targetCrashed).
+    """Forget a tab that died (targetDestroyed / targetCrashed).
 
-    Drops its session id so a later attach creates a fresh one instead of
-    reusing a dead sessionId (which answers -32001 forever). Returns the
-    current target to keep: None when the current tab was the one that died.
+    Drops its session id, so a later attach gets a fresh one instead of one
+    that answers -32001 forever. Returns the current target to keep: None when
+    the tab that died was the current one.
     """
     if not target_id:
         return current_target
