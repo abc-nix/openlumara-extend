@@ -36,7 +36,7 @@ function browserPanelStore() {
 
 const BROWSER_PANEL_CLOSED = {
     connected: false, browser_running: false, owned_process: false,
-    browser: null, current_tab: null, tab_count: null,
+    browser: null, current_tab: null, active_tab: null, tab_count: null,
 };
 
 const BROWSER_PANEL = {

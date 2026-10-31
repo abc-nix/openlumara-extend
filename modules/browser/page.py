@@ -89,6 +89,74 @@ def find_target(targets, target):
 
 
 # ---------------------------------------------------------------------------
+# The user's tab (who is looking at what)
+# ---------------------------------------------------------------------------
+
+async def visibility_state(cdp_client, sid, timeout=None):
+    """'visible', 'hidden', or None when it cannot be read.
+
+    document.visibilityState describes the TAB (a background tab reports
+    "hidden"), unlike document.hasFocus(), which is false whenever the
+    browser window is not the focused window - the usual case when the user
+    is chatting in the webui. None and "hidden" must not be confused: the
+    caller says different things about a tab it knows is in the background
+    and about one whose state it could not read (a stalled page hangs this
+    evaluate too).
+    """
+    try:
+        res = await cdp_client.cmd("Runtime.evaluate", {
+            "expression": "document.visibilityState", "returnByValue": True,
+        }, sid, timeout=timeout)
+        return res.get("result", {}).get("value")
+    except Exception:
+        return None
+
+
+async def is_active_tab(cdp_client, sid, timeout=None):
+    """True if that tab is the active one: the tab the user is looking at."""
+    return await visibility_state(cdp_client, sid, timeout=timeout) == "visible"
+
+
+async def active_targets(cdp_client, targets, attached=None):
+    """targetIds of the active tab(s): the tabs the user is looking at.
+
+    Needs a session per tab: `attached` ones are reused, the rest are
+    attached without enabling Page/Runtime/Log/Accessibility - that is what
+    makes it ~1 ms per tab (measured 2026-10-31: 5 tabs, 5.7 ms) and leaves
+    no domain side effects on tabs the user is working in. Sessions it
+    opened itself are detached again (B19).
+
+    Several ids when the browser has several windows (each owns one visible
+    tab, in report order); none when the window is minimised.
+    """
+    attached = attached or {}
+    found = []
+    for target in targets:
+        tid = target.get("targetId")
+        if not tid:
+            continue
+        sid = attached.get(tid)
+        opened = sid is None
+        try:
+            if opened:
+                res = await cdp_client.cmd("Target.attachToTarget",
+                                           {"targetId": tid, "flatten": True})
+                sid = res["sessionId"]
+            if await is_active_tab(cdp_client, sid):
+                found.append(tid)
+        except Exception:
+            continue
+        finally:
+            if opened and sid:
+                try:
+                    await cdp_client.cmd("Target.detachFromTarget",
+                                         {"sessionId": sid})
+                except Exception:
+                    pass
+    return found
+
+
+# ---------------------------------------------------------------------------
 # Accessibility snapshot (pure data transform)
 # ---------------------------------------------------------------------------
 

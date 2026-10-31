@@ -179,6 +179,135 @@ class ListPageTargetsTests(unittest.TestCase):
         self.assertEqual([t["targetId"] for t in targets], ["B", "A"])
 
 
+class _VisibilityCDP:
+    """Answers attach / evaluate / detach, one visibility state per target."""
+
+    def __init__(self, states=None, fail_attach=(), fail_eval=()):
+        self.states = states or {}
+        self.fail_attach = set(fail_attach)
+        self.fail_eval = set(fail_eval)
+        self.sessions = {}          # sessionId -> targetId
+        self.calls = []             # (method, targetId, sessionId)
+
+    async def cmd(self, method, params=None, session_id=None, timeout=None):
+        params = params or {}
+        self.calls.append((method, params.get("targetId"), session_id))
+        if method == "Target.attachToTarget":
+            tid = params["targetId"]
+            if tid in self.fail_attach:
+                raise RuntimeError("cannot attach")
+            self.sessions["sid-" + tid] = tid
+            return {"sessionId": "sid-" + tid}
+        if method == "Runtime.evaluate":
+            tid = self.sessions[session_id]
+            if tid in self.fail_eval:
+                raise RuntimeError("evaluation failed")
+            return {"result": {"value": self.states.get(tid, "hidden")}}
+        if method == "Target.detachFromTarget":
+            return {}
+        raise AssertionError(method)
+
+
+def _page_targets(*ids):
+    return [{"targetId": i, "type": "page", "url": "https://x.test/"} for i in ids]
+
+
+class ActiveTabTests(unittest.TestCase):
+    """The active tab: the one the user is looking at (visibilityState)."""
+
+    def test_visible_tab_is_the_active_one(self):
+        import asyncio
+        cdp = _VisibilityCDP({"A": "visible"})
+        found = asyncio.run(page.active_targets(cdp, _page_targets("A", "B")))
+        self.assertEqual(found, ["A"])
+
+    def test_several_windows_report_every_active_tab(self):
+        import asyncio
+        cdp = _VisibilityCDP({"A": "visible", "B": "visible"})
+        found = asyncio.run(page.active_targets(cdp, _page_targets("A", "B")))
+        self.assertEqual(found, ["A", "B"])
+
+    def test_sessions_it_opened_are_detached_again(self):
+        import asyncio
+        cdp = _VisibilityCDP()
+        asyncio.run(page.active_targets(cdp, _page_targets("A")))
+        self.assertEqual([c[0] for c in cdp.calls],
+                         ["Target.attachToTarget", "Runtime.evaluate",
+                          "Target.detachFromTarget"])
+
+    def test_our_own_session_is_reused_and_kept(self):
+        # the tab this module drives already has a session: no attach, no
+        # detach, and no domain enables on a tab the user is working in
+        import asyncio
+        cdp = _VisibilityCDP({"A": "visible"})
+        cdp.sessions["sid-A"] = "A"          # the session the module already has
+        found = asyncio.run(page.active_targets(cdp, _page_targets("A"),
+                                               {"A": "sid-A"}))
+        self.assertEqual(found, ["A"])
+        self.assertEqual([c[0] for c in cdp.calls], ["Runtime.evaluate"])
+
+    def test_attach_failure_skips_that_tab(self):
+        import asyncio
+        cdp = _VisibilityCDP({"B": "visible"}, fail_attach=("A",))
+        found = asyncio.run(page.active_targets(cdp, _page_targets("A", "B")))
+        self.assertEqual(found, ["B"])
+
+    def test_eval_failure_reads_as_not_active(self):
+        import asyncio
+        cdp = _VisibilityCDP({"A": "visible"}, fail_eval=("A",))
+        self.assertEqual(
+            asyncio.run(page.active_targets(cdp, _page_targets("A"))), [])
+
+    def test_minimised_window_has_no_active_tab(self):
+        import asyncio
+        cdp = _VisibilityCDP()
+        self.assertEqual(
+            asyncio.run(page.active_targets(cdp, _page_targets("A", "B"))), [])
+
+    def test_is_active_tab_reads_the_state(self):
+        import asyncio
+
+        class One:
+            def __init__(self, value):
+                self.value = value
+
+            async def cmd(self, method, params=None, session_id=None, **kw):
+                return {"result": {"value": self.value}}
+
+        self.assertTrue(asyncio.run(page.is_active_tab(One("visible"), "sid")))
+        self.assertFalse(asyncio.run(page.is_active_tab(One("hidden"), "sid")))
+
+    def test_is_active_tab_swallows_errors(self):
+        import asyncio
+
+        class Broken:
+            async def cmd(self, *a, **k):
+                raise RuntimeError("gone")
+
+        self.assertFalse(asyncio.run(page.is_active_tab(Broken(), "sid")))
+
+    def test_visibility_state_distinguishes_hidden_from_unknown(self):
+        # "hidden" is a fact about the tab, None is "could not read it": the
+        # screenshot timeout text must not blame the background for a stalled
+        # page whose evaluate also hung
+        import asyncio
+
+        class One:
+            def __init__(self, value):
+                self.value = value
+
+            async def cmd(self, method, params=None, session_id=None, **kw):
+                return {"result": {"value": self.value}}
+
+        class Broken:
+            async def cmd(self, *a, **k):
+                raise RuntimeError("gone")
+
+        self.assertEqual(
+            asyncio.run(page.visibility_state(One("hidden"), "sid")), "hidden")
+        self.assertIsNone(asyncio.run(page.visibility_state(Broken(), "sid")))
+
+
 class ViewportMetricsTests(unittest.TestCase):
     """B38: the metrics must come from CDP, in the right units."""
 

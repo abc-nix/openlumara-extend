@@ -386,14 +386,19 @@ class Browser(core.module.Module):
             mpx = 25.0
         return int(max(1.0, mpx) * 1_000_000)
 
-    def _capture_failed_text(self, what):
-        """Message for a capture that outlived its window (B43)."""
-        return (
-            f"The {what} capture did not finish inside the {self._tool_timeout():.1f}s "
-            f"tool timeout (Settings > Core > Tool Timeout, minus the small pause this "
-            f"module keeps so it can answer instead of being cut off). Chrome was still "
-            f"painting or stalled: reload the tab (press f5) and retry, or raise that "
-            f"setting.")
+    def _capture_failed_text(self, what, background=False):
+        """Short message for a capture that outlived its window.
+
+        A tab that is not the active one is painted from scratch just for the
+        capture (74 ms while active, over 25 s in the background, measured
+        2026-10-31 on a Wikipedia page), so that case names the cause and the
+        one command that fixes it. Everything else keeps the reload advice.
+        """
+        if background:
+            return (f"The {what} screenshot timed out. This tab is not the active "
+                    f"one: switch_tab to activate it, or increase the Tool Timeout.")
+        return (f"The {what} screenshot timed out. The page was still painting: "
+                f"reload the tab (f5) and retry, or increase the Tool Timeout.")
 
     def _tool_timeout(self):
         """The framework's per-tool-call ceiling (config.yml -> core.tool_timeout).
@@ -452,6 +457,19 @@ class Browser(core.module.Module):
         """The URL that tab is on, as last reported by Chrome (None if unknown)."""
         tid = self._target_of_session(sid)
         return self._target_url.get(tid) if tid else None
+
+    async def _active_target_ids(self, targets=None):
+        """targetIds of the tab(s) the user is looking at right now.
+
+        A probe is ~1 ms per tab (attach without domain enables, one
+        evaluate, detach), cheap enough to answer on every call. Caching it
+        for a couple of seconds was tried and went wrong: list_tabs named the
+        tab from before the last new_tab, which is exactly the case this
+        field exists for. Pass `targets` when the caller already fetched them.
+        """
+        if targets is None:
+            targets = await page.list_page_targets(self._cdp)
+        return set(await page.active_targets(self._cdp, targets, self._attached))
 
     def _is_connected(self):
         """True if we have a live CDP connection and an attached tab."""
@@ -692,10 +710,7 @@ class Browser(core.module.Module):
         data/browser/last_state.json (crash-recovery aid, future use)."""
         targets = await page.list_page_targets(self._cdp)
         tabs = []
-        # B6: number the active tab in the captured list, not in the full
-        # target list - skipped chrome:// and devtools tabs still occupy a
-        # slot in Chrome's own order.
-        active_index = captured_active_index(targets, self._current_target)
+        active_hits = []             # (targetId, index in the captured list)
         for t in targets:
             tid = t["targetId"]
             url = t.get("url", "")
@@ -703,8 +718,23 @@ class Browser(core.module.Module):
                 continue  # chrome://, devtools://, extensions: not reopenable
             await self._attach_target(tid)
             sid = self._attached.get(tid)
+            if sid and await page.is_active_tab(self._cdp, sid):
+                active_hits.append((tid, len(tabs)))
             state = await page.capture_page_state(self._cdp, sid) if sid else None
             tabs.append({"url": url, "title": t.get("title", ""), "state": state})
+        # Restore the tab the user is looking at, not the one this module
+        # happens to drive - they differ as soon as the user clicks another
+        # tab. Several visible tabs mean several windows: the one this module
+        # was driving wins when it is among them.
+        # B6: the index belongs to the captured list, never the target list -
+        # skipped chrome:// and devtools tabs still occupy a slot in Chrome's
+        # own order.
+        active_index = next((i for tid, i in active_hits
+                             if tid == self._current_target), None)
+        if active_index is None and active_hits:
+            active_index = active_hits[0][1]
+        if active_index is None:
+            active_index = captured_active_index(targets, self._current_target)
         window = await page.get_window_bounds(
             self._cdp, self._attached.get(self._current_target))
         snapshot = {"tabs": tabs, "active_index": active_index or 0,
@@ -796,10 +826,14 @@ class Browser(core.module.Module):
         await self._ensure_connection()
         targets = await page.list_page_targets(self._cdp)
         current = None
+        active = None
+        active_ids = await self._active_target_ids(targets)
         for t in targets:
+            info = {"title": t.get("title", ""), "url": t.get("url", "")}
             if t.get("targetId") == self._current_target:
-                current = {"title": t.get("title", ""), "url": t.get("url", "")}
-                break
+                current = info
+            if active is None and t.get("targetId") in active_ids:
+                active = info
         return self.result({
             "connected": True,
             "owned_process": self._owns_browser(),
@@ -809,13 +843,18 @@ class Browser(core.module.Module):
             "headless": self._headless_actual(),
             "tool_timeout": self._tool_timeout(),
             "current_tab": current,
+            # the tab the user is looking at, read from the page itself
+            # (document.visibilityState); None when the window is minimised.
+            # It equals current_tab until the user clicks another tab.
+            "active_tab": active,
             "tabs": [
-                # `active` is OUR current tab, not CDP's targetInfo.attached
-                # (which only says "a debugger session is attached", true for
-                # every tab we have attached to)
+                # `current` is the tab this module drives, not CDP's
+                # targetInfo.attached (which only says "a debugger session is
+                # attached", true for every tab we have attached to)
                 {"id": t.get("targetId"), "title": t.get("title", ""),
                  "url": t.get("url", ""),
-                 "active": t.get("targetId") == self._current_target}
+                 "current": t.get("targetId") == self._current_target,
+                 "active": t.get("targetId") in active_ids}
                 for t in targets
             ],
         })
@@ -843,21 +882,25 @@ class Browser(core.module.Module):
         if not self._started or self._http is None:
             return {"connected": False, "browser_running": False,
                     "owned_process": False, "browser": None,
-                    "current_tab": None, "tab_count": None, "headless": None}
+                    "current_tab": None, "active_tab": None,
+                    "tab_count": None, "headless": None}
 
         connected = self._is_connected()
         browser = None
         current_tab = None
+        active_tab = None
         tab_count = None
 
         if connected:
             targets = await page.list_page_targets(self._cdp)
             tab_count = len(targets)
+            active_ids = await self._active_target_ids(targets)
             for t in targets:
+                info = {"title": t.get("title", ""), "url": t.get("url", "")}
                 if t.get("targetId") == self._current_target:
-                    current_tab = {"title": t.get("title", ""),
-                                   "url": t.get("url", "")}
-                    break
+                    current_tab = info
+                if active_tab is None and t.get("targetId") in active_ids:
+                    active_tab = info
             if self._browser_info:
                 browser = self._browser_info.get("Browser")
             browser_running = True
@@ -874,6 +917,9 @@ class Browser(core.module.Module):
             "owned_process": self._owns_browser(),
             "browser": browser,
             "current_tab": current_tab,
+            # the tab the user is looking at; equals current_tab until they
+            # click another one, None when the window is minimised
+            "active_tab": active_tab,
             "tab_count": tab_count,
             # the running browser's real mode (the same answer the status tool
             # gives), unknown (None) when it cannot be read at all
@@ -1269,6 +1315,14 @@ class Browser(core.module.Module):
         origin_x = 0 if full_page else int(round(doc_origin_x * scale))
         origin_y = 0 if full_page else int(round(doc_origin_y * scale))
 
+        # Is that tab the active one? Read before the capture, because it is
+        # only used to explain a timeout and the answer has to be there when
+        # the capture gives up: a background tab is painted from scratch just
+        # for the capture (74 ms active vs >25 s in the background, measured
+        # 2026-10-31). None = could not read it (a stalled page hangs even
+        # this evaluate), and then no claim is made about the cause.
+        background = await page.visibility_state(self._cdp, sid, timeout=1.0) == "hidden"
+
         # a full-page capture gets part of the call, not all of it (B43): if
         # Chrome stalls on this document, the rest of the time is still usable
         window = first_capture_window(budget.left(), full_page)
@@ -1280,7 +1334,10 @@ class Browser(core.module.Module):
         except TimeoutError as e:
             self.log("browser", f"screenshot: {core.detail_error(e)}")
             if not full_page:
-                return self.result(self._capture_failed_text("viewport"), success=False)
+                return self.result(
+                    self._capture_failed_text("viewport", background=background),
+                    success=False,
+                )
             # Chrome did not answer the full-page capture: use what the call
             # still has and return the viewport, saying exactly that
             fallback_note = (
@@ -1294,7 +1351,10 @@ class Browser(core.module.Module):
                     full_page=False, fmt=fmt, quality=quality)
             except TimeoutError as e2:
                 self.log("browser", f"screenshot: {core.detail_error(e2)}")
-                return self.result(self._capture_failed_text("full-page"), success=False)
+                return self.result(
+                    self._capture_failed_text("full-page", background=background),
+                    success=False,
+                )
             # what was written is a viewport capture: region and `full_page`
             # have to describe the image, not the request
             full_page = False
@@ -1521,12 +1581,18 @@ class Browser(core.module.Module):
         """Lists all open tabs (pages) in the controlled browser."""
         await self._ensure_connection()
         targets = await page.list_page_targets(self._cdp)
+        active = await self._active_target_ids(targets)
         return self.result([
             {
                 "id": t.get("targetId"),
                 "title": t.get("title", ""),
                 "url": t.get("url", ""),
+                # current = the tab this module drives (the word Playwright MCP
+                # uses); active = the tab the user is looking at (the field
+                # chrome.tabs.Tab gives the tab selected in its window). They
+                # differ as soon as the user clicks another tab.
                 "current": t.get("targetId") == self._current_target,
+                "active": t.get("targetId") in active,
             }
             for t in targets
         ])

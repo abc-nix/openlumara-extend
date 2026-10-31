@@ -14,6 +14,7 @@ import types
 import unittest
 from collections import deque
 from pathlib import Path
+from unittest import mock
 
 MODULE_DIR = Path(__file__).resolve().parents[1]
 PKG = "_browser_module_pkg"
@@ -298,6 +299,92 @@ class EvaluateAwaitTests(unittest.TestCase):
         result, calls = self._run("1")
         self.assertEqual(result["data"], 1)
         self.assertEqual(calls, ["1"])
+
+
+class ActiveTabTests(unittest.TestCase):
+    """list_tabs/status mark the active tab (what the user is looking at) next
+    to the current one (the tab this module drives) - the vocabulary of
+    chrome.tabs.Tab and Playwright MCP."""
+
+    TARGETS = [
+        {"targetId": "T1", "type": "page", "title": "A", "url": "https://a.test/"},
+        {"targetId": "T2", "type": "page", "title": "B", "url": "https://b.test/"},
+    ]
+
+    def _run(self, active_ids, tool):
+        browser = make_browser(attached={"T1": "S1", "T2": "S2"})
+        browser._current_target = "T1"          # the tab the module drives
+        browser._cdp = None
+        browser._headless_actual = lambda: False
+        browser._tool_timeout = lambda: 15.0
+        browser._owns_browser = lambda: False
+
+        async def fake_connect():
+            return True
+
+        async def fake_targets(cdp_client):
+            return [dict(t) for t in self.TARGETS]
+
+        async def fake_active(cdp_client, targets, attached=None):
+            return list(active_ids)
+
+        browser._ensure_connection = fake_connect
+        with mock.patch.object(module.page, "list_page_targets", fake_targets), \
+                mock.patch.object(module.page, "active_targets", fake_active):
+            return asyncio.run(
+                getattr(module.Browser, tool).__wrapped__(browser))
+
+    def test_list_tabs_marks_current_and_active(self):
+        rows = {r["id"]: r for r in self._run({"T2"}, "list_tabs")["data"]}
+        self.assertTrue(rows["T1"]["current"])
+        self.assertFalse(rows["T1"]["active"])
+        self.assertTrue(rows["T2"]["active"])
+        self.assertFalse(rows["T2"]["current"])
+
+    def test_they_match_when_the_user_does_nothing(self):
+        rows = {r["id"]: r for r in self._run({"T1"}, "list_tabs")["data"]}
+        self.assertTrue(rows["T1"]["current"] and rows["T1"]["active"])
+        self.assertFalse(rows["T2"]["active"])
+
+    def test_status_names_both_tabs(self):
+        data = self._run({"T2"}, "status")["data"]
+        self.assertEqual(data["current_tab"]["url"], "https://a.test/")
+        self.assertEqual(data["active_tab"]["url"], "https://b.test/")
+        self.assertEqual([t["active"] for t in data["tabs"]], [False, True])
+        self.assertEqual([t["current"] for t in data["tabs"]], [True, False])
+
+    def test_minimised_window_has_no_active_tab(self):
+        # nothing reports "visible", so only the current tab is known
+        data = self._run(set(), "status")["data"]
+        self.assertIsNone(data["active_tab"])
+
+
+class CaptureFailedTextTests(unittest.TestCase):
+    """A capture timeout names the cause and the fix that fits it."""
+
+    def _text(self, background):
+        browser = make_browser()
+        browser._tool_timeout = lambda: 30.0
+        return module.Browser._capture_failed_text(
+            browser, "viewport", background=background)
+
+    def test_background_tab_points_at_switch_tab(self):
+        text = self._text(True)
+        self.assertIn("switch_tab", text)
+        self.assertIn("not the active one", text)
+        self.assertNotIn("reload the tab", text)
+
+    def test_a_stalled_page_keeps_the_reload_advice(self):
+        text = self._text(False)
+        self.assertIn("reload the tab", text)
+        self.assertNotIn("switch_tab", text)
+
+    def test_both_stay_short(self):
+        # user rule 2026-10-31: no explanations, name the cause and the fix
+        for background in (True, False):
+            text = self._text(background)
+            self.assertLessEqual(len(text), 140, text)
+            self.assertIn("Tool Timeout", text)
 
 
 if __name__ == "__main__":
