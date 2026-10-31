@@ -89,6 +89,7 @@ def _load_module():
 
 _load_module()
 module = importlib.import_module(f"{PKG}.module")
+cdp_mod = importlib.import_module(f"{PKG}.cdp")
 
 
 def make_browser(attached=None, urls=None, config_values=None):
@@ -258,13 +259,19 @@ class DialogScopeTests(unittest.TestCase):
 class _AwaitRejectingCDP:
     """Answers like Chrome does for a script with a top-level await."""
 
-    def __init__(self):
+    def __init__(self, reject_repl=False):
         self.calls = []
+        self.params = []
+        self.reject_repl = reject_repl
 
     async def cmd(self, method, params=None, session_id=None, timeout=None):
-        expression = (params or {}).get("expression", "")
+        params = params or {}
+        expression = params.get("expression", "")
         self.calls.append(expression)
-        if "(async () =>" in expression:
+        self.params.append(dict(params))
+        if self.reject_repl and params.get("replMode"):
+            raise cdp_mod.CDPError("-32602 Invalid parameters: replMode")
+        if params.get("replMode") or "(async () =>" in expression:
             return {"result": {"value": 42}}
         if "await" in expression:
             description = ("SyntaxError: await is only valid in async functions "
@@ -275,9 +282,9 @@ class _AwaitRejectingCDP:
 
 
 class EvaluateAwaitTests(unittest.TestCase):
-    """B30: a top-level await is retried wrapped, instead of failing."""
+    """A top-level await is retried in REPL mode, instead of failing."""
 
-    def _run(self, expression):
+    def _run(self, expression, reject_repl=False):
         browser = make_browser()
 
         async def fake_connect():
@@ -285,18 +292,33 @@ class EvaluateAwaitTests(unittest.TestCase):
 
         browser._ensure_connection = fake_connect
         browser._current_session = lambda: "S1"
-        browser._cdp = _AwaitRejectingCDP()
+        browser._cdp = _AwaitRejectingCDP(reject_repl=reject_repl)
         result = asyncio.run(module.Browser.evaluate.__wrapped__(browser, expression))
-        return result, browser._cdp.calls
+        return result, browser._cdp.calls, browser._cdp.params
 
-    def test_top_level_await_is_retried_wrapped(self):
-        result, calls = self._run("await Promise.resolve(42)")
+    def test_top_level_await_is_retried_in_repl_mode(self):
+        result, calls, params = self._run("await Promise.resolve(42)")
         self.assertEqual(result["data"], 42)
         self.assertEqual(len(calls), 2)
-        self.assertTrue(calls[1].startswith("(async () =>"))
+        self.assertTrue(params[1].get("replMode"))
+
+    def test_statement_body_reaches_the_browser_unchanged(self):
+        # the retry used to wrap the input as `return (await p; 2)`, which is
+        # a syntax error of its own: the body must be resent as written
+        expression = "await Promise.resolve(1); 2"
+        result, calls, _ = self._run(expression)
+        self.assertEqual(result["data"], 42)
+        self.assertEqual(calls, [expression, expression])
+
+    def test_browser_without_repl_mode_falls_back_to_wrapping(self):
+        result, calls, _ = self._run("await Promise.resolve(42)", reject_repl=True)
+        self.assertEqual(result["data"], 42)
+        # plain attempt, rejected REPL attempt, then the wrapped expression
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(calls[2].startswith("(async () =>"))
 
     def test_plain_expression_is_sent_once_and_untouched(self):
-        result, calls = self._run("1")
+        result, calls, _ = self._run("1")
         self.assertEqual(result["data"], 1)
         self.assertEqual(calls, ["1"])
 

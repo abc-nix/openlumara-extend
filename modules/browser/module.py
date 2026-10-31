@@ -1433,6 +1433,9 @@ class Browser(core.module.Module):
     async def evaluate(self, expression: str):
         """Evaluates JavaScript in the current tab and returns the result.
 
+        A top-level `await` is supported: the expression is retried in Chrome's
+        REPL mode, which does not await a promise left as the last statement.
+
         Args:
             expression: JavaScript expression to evaluate (e.g. 'document.title').
         """
@@ -1448,10 +1451,21 @@ class Browser(core.module.Module):
         }
         res = await self._cdp.cmd("Runtime.evaluate", params, sid)
         if rejected_top_level_await(res.get("exceptionDetails")):
-            # a script can't use `await` at its top level. Same call,
-            # wrapped once - the caller should not have to know to wrap it.
-            params["expression"] = wrap_await(expression)
-            res = await self._cdp.cmd("Runtime.evaluate", params, sid)
+            # a script has no top-level await, but Chrome's REPL mode does:
+            # the same text is retried as a console statement, so a statement
+            # body ("await p; 2") runs too and the last statement's value comes
+            # back. REPL mode ignores awaitPromise, so a promise left as the
+            # last statement is not awaited - why it is only used for a retry.
+            repl = dict(params, replMode=True)
+            try:
+                res = await self._cdp.cmd("Runtime.evaluate", repl, sid)
+            except CDPError as e:
+                if "replMode" not in str(e):
+                    raise
+                # older build without REPL mode: wrap the expression instead;
+                # that shape only accepts a single expression
+                wrapped = dict(params, expression=wrap_await(expression))
+                res = await self._cdp.cmd("Runtime.evaluate", wrapped, sid)
         if res.get("exceptionDetails"):
             exc = res["exceptionDetails"].get("exception", {})
             return self.result(
