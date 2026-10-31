@@ -14,6 +14,7 @@ import functools
 import json
 import os
 import time
+import urllib.parse
 from collections import deque
 from datetime import datetime
 
@@ -34,7 +35,7 @@ from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
 from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
                    headless_from_version, timeout_text, rejected_top_level_await,
-                   wrap_await, restorable_url, captured_active_index)
+                   wrap_await, restorable_url, captured_active_index, untrusted)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -420,6 +421,12 @@ class Browser(core.module.Module):
         """The URL that tab is on, as last reported by Chrome (None if unknown)."""
         tid = self._target_of_session(sid)
         return self._target_url.get(tid) if tid else None
+
+    def _page_source(self):
+        """Provenance for a fence: 'webpage:<host>' of the tab being driven."""
+        url = self._target_url.get(self._current_target) or ""
+        host = urllib.parse.urlparse(url).hostname
+        return f"webpage:{host}" if host else "webpage:unknown"
 
     async def _active_target_ids(self, targets=None):
         """targetIds of the tab(s) the user is looking at right now.
@@ -1063,13 +1070,13 @@ class Browser(core.module.Module):
             snapshot = snapshot[:limit]
             snapshot += f"\n\n[truncated - full snapshot saved to {full_path}]" if full_path else "\n\n[truncated]"
 
-        return self.result({
+        return self.result(untrusted({
             "snapshot": snapshot,
             "url": current_url,
             "title": title,
             "truncated": truncated,
             "full_path": full_path,
-        })
+        }, self._page_source()))
 
     @core.module.tool
     async def click(self, target: str):
@@ -1453,7 +1460,12 @@ class Browser(core.module.Module):
             )
         result = res.get("result", {})
         if "value" in result:
-            return self.result(result["value"])
+            value = result["value"]
+            # a string is page prose the model may read as text, so it is
+            # fenced like any other page content; scalars and objects are not
+            if isinstance(value, str):
+                return self.result(untrusted(value, self._page_source()))
+            return self.result(value)
         return self.result(result.get("description", "undefined"))
 
     @core.module.tool
@@ -1468,7 +1480,9 @@ class Browser(core.module.Module):
         entries = tail_entries(self._console_log, count)
         if clear:
             self._console_log.clear()
-        return self.result(entries if entries else "No console output recorded.")
+        if not entries:
+            return self.result("No console output recorded.")
+        return self.result(untrusted(entries, self._page_source()))
 
     @core.module.tool
     async def network_requests(self, count: int = 20, clear: bool = False):
@@ -1487,7 +1501,9 @@ class Browser(core.module.Module):
         entries = tail_entries(self._network_log, count)
         if clear:
             self._network_log.clear()
-        return self.result(entries if entries else "No network requests recorded.")
+        if not entries:
+            return self.result("No network requests recorded.")
+        return self.result(untrusted(entries, self._page_source()))
 
     @core.module.tool
     async def get_images(self):
@@ -1500,7 +1516,10 @@ class Browser(core.module.Module):
             ),
             "returnByValue": True,
         }, sid)
-        return self.result(res.get("result", {}).get("value", []))
+        images = res.get("result", {}).get("value", []) or []
+        if not images:
+            return self.result([])
+        return self.result(untrusted(images, self._page_source()))
 
     @core.module.tool
     async def cookies(self, domain: str = None):
