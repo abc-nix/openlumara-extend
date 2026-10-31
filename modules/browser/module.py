@@ -26,6 +26,8 @@ import aiohttp
 # channel were disabled.
 import channels.webui.api as webui
 
+# A module reload re-executes this file only: cdp/page/util stay in sys.modules,
+# so edits to those three need a full server restart.
 from . import cdp, page
 from .cdp import CDPClient, CDPError, DEFAULT_PORT
 from .page import KEY_MAP, DEFAULT_SNAPSHOT_CHARS
