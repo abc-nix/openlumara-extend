@@ -1085,28 +1085,42 @@ class Browser(core.module.Module):
             await self._cdp.cmd("DOM.scrollIntoViewIfNeeded", handle, sid)
         except Exception:
             pass
+        # The mouse click lands on the box centre, so both the box and where it
+        # sits decide whether a click can land at all: hidden elements have no
+        # box, and off-canvas ones sit outside the viewport.
+        cx = cy = None
         try:
             box = await self._cdp.cmd("DOM.getBoxModel", handle, sid)
             quad = box.get("model", {}).get("border", [])
-            if quad and len(quad) >= 8:
-                xs = [quad[i] for i in range(0, 8, 2)]
-                ys = [quad[i] for i in range(1, 8, 2)]
-                cx = int(sum(xs) / 4)
-                cy = int(sum(ys) / 4)
-                for etype in ("mousePressed", "mouseReleased"):
-                    await self._cdp.cmd("Input.dispatchMouseEvent", {
-                        "type": etype, "x": cx, "y": cy,
-                        "button": "left", "clickCount": 1,
-                    }, sid)
-                return self.result(f"Clicked {target} at ({cx}, {cy}).")
         except Exception:
-            pass
-        # Fallback: JS click
+            quad = []
+        if len(quad) >= 8:
+            xs = [quad[i] for i in range(0, 8, 2)]
+            ys = [quad[i] for i in range(1, 8, 2)]
+            cx, cy = int(sum(xs) / 4), int(sum(ys) / 4)
+
+        reason = "no layout box (hidden?)"
+        if cx is not None:
+            size = await page.viewport_size(self._cdp, sid)
+            if size and 0 <= cx < size[0] and 0 <= cy < size[1]:
+                try:
+                    for etype in ("mousePressed", "mouseReleased"):
+                        await self._cdp.cmd("Input.dispatchMouseEvent", {
+                            "type": etype, "x": cx, "y": cy,
+                            "button": "left", "clickCount": 1,
+                        }, sid)
+                    return self.result(f"Clicked {target} at ({cx}, {cy}).")
+                except Exception:
+                    reason = f"mouse click failed at ({cx}, {cy})"
+            else:
+                reason = f"off-screen at ({cx}, {cy})"
+
+        # Fallback: JS click, which bypasses hit-testing - say when it is used
         object_id = await page.resolve_object_id(self._cdp, handle, sid)
         if not object_id:
             return self.result(f"Could not resolve element '{target}'.", success=False)
         await page.call_on(self._cdp, object_id, "function(){ this.click(); }", sid)
-        return self.result(f"Clicked {target} (via JS).")
+        return self.result(f"Clicked {target} via JS - {reason}.")
 
     @core.module.tool
     async def type_text(self, target: str, text: str):

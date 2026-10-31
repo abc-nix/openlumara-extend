@@ -322,6 +322,18 @@ async def capture_screenshot(cdp_client, sid, screenshots_dir,
     return path, raw
 
 
+async def viewport_size(cdp_client, sid):
+    """(innerWidth, innerHeight) of the tab's viewport, or None."""
+    try:
+        res = await cdp_client.cmd("Runtime.evaluate", {
+            "expression": "innerWidth + ',' + innerHeight",
+            "returnByValue": True}, sid)
+        w, h = str(res.get("result", {}).get("value", "")).split(",")
+        return float(w), float(h)
+    except Exception:
+        return None
+
+
 async def viewport_metrics(cdp_client, sid, timeout=None):
     """Viewport and document size from Page.getLayoutMetrics. Dict or None.
 

@@ -308,6 +308,29 @@ class ActiveTabTests(unittest.TestCase):
         self.assertIsNone(asyncio.run(page.visibility_state(Broken(), "sid")))
 
 
+class ViewportSizeTests(unittest.TestCase):
+    """The click tool needs the viewport to know if a box centre is inside it."""
+
+    def test_returns_width_and_height(self):
+        import asyncio
+
+        class One:
+            async def cmd(self, *a, **k):
+                return {"result": {"value": "1272,1305"}}
+
+        self.assertEqual(asyncio.run(page.viewport_size(One(), "sid")),
+                         (1272.0, 1305.0))
+
+    def test_unreadable_is_none(self):
+        import asyncio
+
+        class Broken:
+            async def cmd(self, *a, **k):
+                raise RuntimeError("gone")
+
+        self.assertIsNone(asyncio.run(page.viewport_size(Broken(), "sid")))
+
+
 class ViewportMetricsTests(unittest.TestCase):
     """B38: the metrics must come from CDP, in the right units."""
 
