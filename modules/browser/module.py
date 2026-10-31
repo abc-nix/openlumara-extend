@@ -475,6 +475,21 @@ class Browser(core.module.Module):
         return bool(self._cdp and self._cdp.ws and not self._cdp.ws.closed
                     and self._current_target)
 
+    def _forget_browser_state(self):
+        """Drop everything tied to the browser connection we are leaving.
+
+        Called before a new CDP client is built. The console and network buffers
+        belong to the browser that produced them: after a relaunch they would
+        answer console()/network_requests() with the dead browser's entries.
+        """
+        self._attached = {}
+        self._current_target = None
+        self._refs_by_tab.clear()
+        self._pending_dialogs.clear()   # a new connection has no dialogs
+        self._net_pending.clear()
+        self._console_log.clear()
+        self._network_log.clear()
+
     async def _ensure_connection(self):
         """Make sure we have a live CDP connection + an attached tab."""
         if self._is_connected():
@@ -499,12 +514,7 @@ class Browser(core.module.Module):
                         f"--remote-debugging-port={self._port()}."
                     )
             self._browser_info = info
-            # a fresh connection invalidates any previous tab sessions
-            self._attached = {}
-            self._current_target = None
-            self._refs_by_tab.clear()
-            self._pending_dialogs.clear()   # a new connection has no dialogs
-            self._net_pending.clear()
+            self._forget_browser_state()
             self._cdp = CDPClient(
                 self._http, info["webSocketDebuggerUrl"],
                 self._on_cdp_event, self.log,

@@ -301,6 +301,29 @@ class EvaluateAwaitTests(unittest.TestCase):
         self.assertEqual(calls, ["1"])
 
 
+class ForgetBrowserStateTests(unittest.TestCase):
+    """A new connection must not answer with the leaving browser's state."""
+
+    def test_sessions_refs_and_log_buffers_are_dropped(self):
+        browser = make_browser(attached={"T1": "S1"},
+                               urls={"T1": "https://a.test/"})
+        browser._console_log.append({"type": "log", "text": "from the old browser"})
+        browser._network_log.append({"url": "https://a.test/x.js"})
+        browser._refs_by_tab["T1"] = {"@e1": 1}
+        browser._net_pending["r1"] = {"url": "https://a.test/x.js"}
+        browser._pending_dialogs["T1"] = {"type": "alert"}
+
+        browser._forget_browser_state()
+
+        self.assertEqual(browser._attached, {})
+        self.assertIsNone(browser._current_target)
+        self.assertEqual(browser._refs_by_tab, {})
+        self.assertEqual(browser._pending_dialogs, {})
+        self.assertEqual(browser._net_pending, {})
+        self.assertEqual(list(browser._console_log), [])
+        self.assertEqual(list(browser._network_log), [])
+
+
 class ActiveTabTests(unittest.TestCase):
     """list_tabs/status mark the active tab (what the user is looking at) next
     to the current one (the tab this module drives) - the vocabulary of
