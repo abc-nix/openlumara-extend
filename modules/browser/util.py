@@ -11,6 +11,10 @@ import string
 import time
 import urllib.parse
 
+# network-log URL display cap: data: URLs and analytics query strings can be
+# many KB and would bloat the 500-entry deque and the model's context
+MAX_URL_LEN = 200
+
 # Grid annotation cost, mostly decoding: Chrome's PNGs are mostly Paeth-filtered
 # rows, which decode_png's Python loop walks per byte (~0.85 s per megapixel).
 GRID_COST_S_PER_MPX = 0.85
