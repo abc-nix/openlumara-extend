@@ -250,6 +250,54 @@ def filter_requests(entries, pattern=None, types=None, skip_static=True):
     return kept, hidden
 
 
+# Console message type -> severity rank. A level names the floor: "info" keeps
+# info, warnings and errors (what Playwright's console tool does); "debug"
+# keeps everything. An unknown type is ranked as info so nothing is hidden
+# just because CDP added a new one.
+CONSOLE_LEVELS = {"debug": 0, "info": 1, "warning": 2, "error": 3}
+CONSOLE_RANKS = {
+    "debug": 0, "verbose": 0, "profile": 0, "profileend": 0, "trace": 0,
+    "log": 1, "info": 1, "dir": 1, "dirxml": 1, "table": 1, "count": 1,
+    "timeend": 1, "startgroup": 1, "startgroupcollapsed": 1, "endgroup": 1,
+    "clear": 1,
+    "warning": 2, "warn": 2,
+    "error": 3, "exception": 3, "assert": 3,
+}
+
+
+def filter_console(entries, level="info", types=None):
+    """Console entries at or above `level`, and how many each rule hid.
+
+    `types` is an exact message-type filter (CDP's own names, case-insensitive),
+    the knob chrome-devtools-mcp exposes; `level` is the severity floor that
+    Playwright's console tool uses.
+    """
+    name = str(level or "info").strip().lower()
+    floor = CONSOLE_LEVELS.get({"warn": "warning"}.get(name, name), 1)
+    wanted = set()
+    if isinstance(types, str):
+        types = types.replace(",", " ").split()
+    for name in types or []:
+        name = str(name).strip().lower()
+        if name:
+            wanted.add(name)
+    kept = []
+    hidden = {"level": 0, "type": 0}
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            hidden["type"] += 1
+            continue
+        kind = str(entry.get("type") or "").lower()
+        if wanted and kind not in wanted:
+            hidden["type"] += 1
+            continue
+        if CONSOLE_RANKS.get(kind, 1) < floor:
+            hidden["level"] += 1
+            continue
+        kept.append(entry)
+    return kept, hidden
+
+
 class Budget:
     """One deadline for a whole tool call.
 

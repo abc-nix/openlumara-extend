@@ -36,7 +36,8 @@ from .util import (normalize_url, tail_entries, grid_fits, capture_fits,
                    first_capture_window, tool_budget, CALL_BUDGET, drop_target,
                    headless_from_version, timeout_text, rejected_top_level_await,
                    wrap_await, restorable_url, captured_active_index, untrusted,
-                   split_chord, checkbox_value, unique_images, filter_requests)
+                   split_chord, checkbox_value, unique_images, filter_requests,
+                   filter_console)
 
 # network-log URL display cap: data: URLs and analytics query strings can be
 # many KB and would bloat the 500-entry deque and the model's context
@@ -1603,20 +1604,30 @@ class Browser(core.module.Module):
         return self.result(result.get("description", "undefined"))
 
     @core.module.tool
-    async def console(self, count: int = 20, clear: bool = False):
+    async def console(self, count: int = 20, level: str = "info",
+                      types: str = None, clear: bool = False):
         """Returns recent console messages, errors, and uncaught exceptions from all tabs.
 
+        Debug/verbose chatter is hidden by default; the result says how many
+        entries it looked at and hid instead of dropping them silently.
+
         Args:
-            count: How many of the most recent entries to return (0 = none).
+            count: How many of the most recent matching entries (0 = none).
+            level: Severity floor: debug, info (default), warning or error.
+            types: Only these message types, e.g. 'error, warning'.
             clear: Clear the buffer after reading.
         """
         await self._ensure_connection()
-        entries = tail_entries(self._console_log, count)
+        everything = list(self._console_log)
         if clear:
             self._console_log.clear()
-        if not entries:
+        if not everything:
             return self.result("No console output recorded.")
-        return self.result(untrusted(entries, self._page_source()))
+        matched, hidden = filter_console(everything, level, types)
+        shown = tail_entries(matched, count)
+        data = {"messages": shown, "shown": len(shown), "matched": len(matched),
+                "total": len(everything), "hidden": hidden, "level": level}
+        return self.result(untrusted(data, self._page_source()))
 
     @core.module.tool
     async def network_requests(self, count: int = 20, filter: str = None,
