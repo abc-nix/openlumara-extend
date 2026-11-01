@@ -1,0 +1,468 @@
+/* -- AI GENERATED CODE (deepseek-v4.1-flash-1017-maya-s) :: 2026-11-01 harness:OpenLumara
+   chat_nav sidebar panel. Panel body is ~242px wide (288px sidebar minus the
+   46px tab strip), so everything here is compact and wraps where needed. */
+
+.chat-nav {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 7px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+/* --- title bar (mirrors the editor tab's header) --- */
+
+.cn-header {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 0 4px;
+}
+
+.cn-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-secondary, #999);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cn-sub {
+    margin-left: auto;
+    font-size: 0.66rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* --- search box --- */
+
+.cn-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
+}
+
+.cn-search:focus-within {
+    border-color: var(--accent);
+}
+
+.cn-search-icon svg {
+    display: block;
+    width: 13px;
+    height: 13px;
+    color: var(--text-muted);
+}
+
+.cn-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 0;
+    border: none;
+    outline: none;
+    background: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.78rem;
+}
+
+.cn-input::placeholder {
+    color: var(--text-muted);
+}
+
+.cn-clear {
+    display: flex;
+    padding: 2px;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.cn-clear svg {
+    width: 12px;
+    height: 12px;
+}
+
+.cn-clear:hover {
+    color: var(--text-primary);
+}
+
+/* --- kind chips --- */
+
+.cn-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+
+.cn-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.66rem;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.cn-chip:hover {
+    color: var(--text-primary);
+}
+
+.cn-chip.on {
+    border-color: var(--accent);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.07));
+    color: var(--accent);
+}
+
+.cn-count {
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- results status line --- */
+
+.cn-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 14px;
+    font-size: 0.66rem;
+    color: var(--text-muted);
+}
+
+.cn-navbtns {
+    display: flex;
+    gap: 1px;
+    margin-left: auto;
+}
+
+.cn-navbtns button {
+    display: flex;
+    padding: 1px;
+    border: none;
+    border-radius: 3px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.cn-navbtns button:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
+    color: var(--text-primary);
+}
+
+.cn-navbtns svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* --- list (outline or results) --- */
+
+.cn-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.cn-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.cn-block,
+.cn-hit {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    padding: 4px 6px;
+    border: none;
+    border-left: 2px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: inherit;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cn-block:hover,
+.cn-hit:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+}
+
+.cn-block.active,
+.cn-hit.active {
+    border-left-color: var(--accent);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
+}
+
+.cn-line1 {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.64rem;
+    color: var(--text-muted);
+}
+
+.cn-ord {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
+}
+
+.cn-role {
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.cn-block.user .cn-role {
+    color: var(--accent);
+}
+
+.cn-ticks {
+    margin-left: auto;
+    opacity: 0.8;
+    white-space: nowrap;
+}
+
+/* preview text: two lines max, so a row stays short */
+.cn-prev {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.75rem;
+    line-height: 1.28;
+    color: var(--text-secondary);
+}
+
+/* relative block size, a tiny conversation waveform */
+.cn-len {
+    height: 2px;
+    border-radius: 2px;
+    background: var(--bg-tertiary, rgba(255, 255, 255, 0.07));
+    overflow: hidden;
+}
+
+.cn-len span {
+    display: block;
+    height: 100%;
+    background: var(--text-muted);
+    opacity: 0.45;
+}
+
+.cn-block.user .cn-len span {
+    background: var(--accent);
+    opacity: 0.55;
+}
+
+.cn-snippet {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.74rem;
+    line-height: 1.3;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.cn-snippet mark {
+    background: none;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.cn-empty {
+    padding: 8px 6px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* --- highlight applied inside the chat after a jump --- */
+
+/* the zero-size anchor that carries data-cn-msg on each message */
+.cn-msg-anchor {
+    display: none;
+}
+
+/*
+ * the other occurrences of the term in the message: the theme's accent,
+ * knocked back so it reads on light and dark themes alike. The grey line is
+ * the fallback for browsers without color-mix(); the tinted one wins wherever
+ * it parses, because ::highlight() accepts no opacity property.
+ */
+::highlight(chat-nav-hit) {
+    background-color: rgba(140, 140, 150, 0.35);
+    background-color: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+/* the occurrence the bar is currently on */
+::highlight(chat-nav-current) {
+    background-color: var(--accent);
+    color: var(--bg-primary);
+}
+
+#messages .turn.cn-flash {
+    animation: cn-flash 1s ease-out;
+}
+
+@keyframes cn-flash {
+    0% {
+        box-shadow: inset 0 0 0 2px var(--accent);
+    }
+    100% {
+        box-shadow: inset 0 0 0 2px transparent;
+    }
+}
+
+/* ==================== find bar ==================== */
+/*
+ * floats under the chat header, inside the below_header slot. The layer is
+ * zero-height on purpose: it anchors the bar without taking flow space or
+ * swallowing clicks on the message area underneath.
+ */
+.cn-find-layer {
+    position: relative;
+    flex: none;
+    height: 0;
+    z-index: 40;
+}
+
+.cn-findbar {
+    position: absolute;
+    top: 6px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 250px;
+    max-width: 330px;
+    padding: 3px 4px 3px 8px;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.cn-find-icon svg {
+    display: block;
+    width: 13px;
+    height: 13px;
+    color: var(--text-muted);
+}
+
+.cn-find-input {
+    flex: 1;
+    min-width: 0;
+    width: 150px;
+    padding: 4px 0;
+    border: none;
+    outline: none;
+    background: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.78rem;
+}
+
+.cn-find-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* match position / total, from the kinds that are enabled */
+.cn-find-count {
+    flex: none;
+    min-width: 2.6em;
+    padding: 0 4px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.cn-find-nav {
+    display: flex;
+    gap: 1px;
+}
+
+.cn-find-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: var(--text-secondary, var(--text-muted));
+    cursor: pointer;
+}
+
+.cn-find-btn:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
+    color: var(--text-primary);
+}
+
+.cn-find-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.cn-find-btn:disabled:hover {
+    background: none;
+    color: var(--text-secondary, var(--text-muted));
+}
+
+.cn-find-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.cn-find-sep {
+    width: 1px;
+    height: 16px;
+    flex: none;
+    margin: 0 2px;
+    background: var(--border-color);
+}
+
+/* mobile: the chat is the full width, so the bar claims it (minus a margin) */
+@media (max-width: 768px) {
+    .cn-findbar {
+        top: 5px;
+        left: 8px;
+        right: 8px;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .cn-find-input {
+        width: auto;
+    }
+}

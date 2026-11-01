@@ -1,0 +1,94 @@
+{# -- AI GENERATED CODE (deepseek-v4.1-flash-1017-maya-s) :: 2026-11-01 harness:OpenLumara
+   chat_nav sidebar tab: block outline of the open chat + hit list.
+   The engine (index, query, filters, hits, jumping) lives in the shared
+   chatNav store; this component only owns the outline window and the scroll
+   spy. See assets/js/chat_nav.js. #}
+
+<div class="chat-nav" x-data="CHAT_NAV_PANEL" x-intersect.enter="opened()">
+
+    {# title bar, like the editor tab: the search box sits below it #}
+    <div class="cn-header">
+        <span class="cn-title">Chat Nav</span>
+        <span class="cn-sub" x-text="$store.chatNav.blockCount + ($store.chatNav.blockCount === 1 ? ' block' : ' blocks')"></span>
+    </div>
+
+    {# search box: Enter/Shift+Enter walk the hits, Escape clears #}
+    <div class="cn-search">
+        <span class="cn-search-icon">{% include 'svg/search.svg' %}</span>
+        <input type="text" class="cn-input" x-model="$store.chatNav.query"
+            placeholder="Search this chat"
+            spellcheck="false" autocomplete="off"
+            @input="$store.chatNav.setQuery($event.target.value, false)"
+            @keydown.enter.prevent="$store.chatNav.next($event.shiftKey)"
+            @keydown.escape.prevent="$store.chatNav.clear()">
+        <button type="button" class="cn-clear" x-show="$store.chatNav.query" title="Clear search"
+            @click="$store.chatNav.clear()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+
+    {# kind filters: what counts as a match. counts appear once a query is typed #}
+    <div class="cn-chips">
+        <template x-for="chip in $store.chatNav.chips" :key="chip.kind">
+            <button type="button" class="cn-chip" :class="{ 'on': $store.chatNav.filters[chip.kind] }"
+                :title="chip.hint" @click="$store.chatNav.toggle(chip.kind)">
+                <span x-text="chip.label"></span>
+                <span class="cn-count" x-show="$store.chatNav.counts[chip.kind]"
+                    x-text="$store.chatNav.counts[chip.kind]"></span>
+            </button>
+        </template>
+    </div>
+
+    {# results status: match count, hidden matches, prev/next #}
+    <div class="cn-status" x-show="$store.chatNav.query.trim()">
+        <span x-text="$store.chatNav.statusText()"></span>
+        <span class="cn-navbtns" x-show="$store.chatNav.results.length > 1">
+            <button type="button" title="Previous match (Shift+Enter)" @click="$store.chatNav.next(true)">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            </button>
+            <button type="button" title="Next match (Enter)" @click="$store.chatNav.next(false)">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+        </span>
+    </div>
+
+    <div class="cn-list" x-ref="list">
+        {# outline: one row per block (user message or whole assistant chain) #}
+        <template x-if="!$store.chatNav.query.trim()">
+            <div class="cn-rows">
+                <template x-for="row in visibleBlocks" :key="row.index">
+                    <button type="button" class="cn-block" :class="{ 'active': row.index === activeBlock, 'user': row.role === 'user' }"
+                        :data-block="row.index" @click="$store.chatNav.jumpTo(row.index)">
+                        <div class="cn-line1">
+                            <span class="cn-ord" x-text="row.ordinal"></span>
+                            <span class="cn-role" x-text="row.role === 'user' ? 'You' : 'AI'"></span>
+                            <span class="cn-ticks" x-show="row.tools" x-text="row.tools + ' tool'"></span>
+                        </div>
+                        <div class="cn-prev" x-text="row.preview"></div>
+                        <div class="cn-len"><span :style="'width: ' + row.width"></span></div>
+                    </button>
+                </template>
+                <div class="cn-empty" x-show="!visibleBlocks.length" x-text="emptyOutlineText()"></div>
+            </div>
+        </template>
+
+        {# results: one row per hit, clicking a hit jumps to its block #}
+        <template x-if="$store.chatNav.query.trim()">
+            <div class="cn-rows">
+                <template x-for="(hit, index) in $store.chatNav.results" :key="hit.key">
+                    <button type="button" class="cn-hit" :class="{ 'active': index === $store.chatNav.activeHit }"
+                        :data-hit="index" @click="$store.chatNav.openHit(index)">
+                        <div class="cn-line1">
+                            <span class="cn-ord" x-text="'#' + hit.ordinal"></span>
+                            <span class="cn-role" x-text="hit.role"></span>
+                            <span class="cn-ticks" x-text="hit.kind"></span>
+                        </div>
+                        <div class="cn-snippet" x-html="hit.html"></div>
+                    </button>
+                </template>
+                <div class="cn-empty" x-show="!$store.chatNav.results.length"
+                    x-text="$store.chatNav.emptyText()"></div>
+            </div>
+        </template>
+    </div>
+</div>

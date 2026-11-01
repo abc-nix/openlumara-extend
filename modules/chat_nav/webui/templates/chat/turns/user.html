@@ -1,0 +1,12 @@
+{# -- AI GENERATED CODE (deepseek-v4.1-flash-1017-maya-s) :: 2026-11-01 harness:OpenLumara
+   message anchor for chat_nav, injected through the below_message slot of a
+   user message. The value is Alpine-bound (:data-cn-msg), not a Jinja value,
+   because `message` only exists client-side inside the chat's x-for scope.
+
+   It is the only DOM address a search hit can rely on: it lets a hit find the
+   exact message element and land on one specific occurrence of the term
+   instead of the block's first one. #}
+
+{% macro below_message(ctx) %}
+<span class="cn-msg-anchor" :data-cn-msg="message.index"></span>
+{% endmacro %}

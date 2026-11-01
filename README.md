@@ -65,6 +65,46 @@ nothing extra to install or run.
 - **Screenshots** appear in the chat as preview cards you can open at full size.
 - A short **help** panel explains the buttons and the settings worth knowing.
 
+### chat_nav
+
+Search and navigate the open chat. A sidebar tab mirrors the conversation as a
+block outline, and a floating find bar searches the whole session — including
+the messages the browser's own find cannot reach, because the webui only
+renders the turns near the viewport and leaves the rest as placeholders.
+
+It works entirely on the chat the webui already holds in memory: no backend,
+no index server.
+
+**Tools**
+
+None.
+
+**WebUI**
+
+- A **chat nav tab in the sidebar**: the block count, a search box, kind chips
+  and the outline — one row per block (a message of yours, or a whole assistant
+  chain) with a two-line preview, its tool count and a length bar. The row you
+  are reading is followed while you scroll; clicking any row jumps there.
+- A **find bar** under the chat header: field, `position / total` counter,
+  previous/next arrows, close button. Enter / Shift+Enter walk the matches, Esc
+  closes it, and the query is kept for the next time it opens.
+- **Kind chips** decide what is searched: your messages and the assistant's
+  answers by default, plus reasoning, tool calls/results and command output if
+  you turn them on. Only the enabled kinds are counted, so a search that only
+  hits tool output reports no matches instead of noise.
+- **Per occurrence**: hits step through each occurrence of a word; the current
+  one is painted in the accent colour and the rest grey, and matches in
+  messages that render later light up as you scroll to them.
+- Jumps reuse the webui's own lazy mounting, centre on the matched text and
+  flash the block.
+
+**Settings**
+
+`search_per_occurrence` (one hit per occurrence), `highlight_seconds` (`0` keeps
+the highlight until the search changes), `take_over_ctrl_f` (Ctrl+F opens the
+find bar; the sidebar and modals keep the native find) and the per-kind search
+defaults.
+
 ### docprocess
 
 Converts documents — PDF, Office, EPUB, images — into Markdown or plain text,

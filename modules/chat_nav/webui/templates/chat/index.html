@@ -1,0 +1,59 @@
+{# -- AI GENERATED CODE (deepseek-v4.1-flash-1017-maya-s) :: 2026-11-01 harness:OpenLumara
+   floating find bar for the open chat, mounted in the below_header slot (the
+   same hook the windows module uses for its IE toolbar). Logic lives in
+   assets/js/chat_nav.js (CHAT_NAV_FINDBAR + the shared chatNav store); this
+   file is only the markup and the module settings handed over as data
+   attributes, since module_config is available to templates but not to js.
+
+   Ctrl+F is handled in js: it opens this bar instead of the browser's find
+   while the chat is in focus (setting take_over_ctrl_f). #}
+
+{% macro below_header() %}
+<div class="cn-find-layer" x-data="CHAT_NAV_FINDBAR"
+    data-max-results="{{ module_config.get('max_results', 200) }}"
+    data-tool-limit="{{ module_config.get('tool_output_index_limit', 4000) }}"
+    data-highlight="{{ 1 if module_config.get('highlight_in_chat', True) else 0 }}"
+    data-highlight-seconds="{{ module_config.get('highlight_seconds', 0) }}"
+    data-ctrl-f="{{ 1 if module_config.get('take_over_ctrl_f', True) else 0 }}"
+    data-per-occurrence="{{ 1 if module_config.get('search_per_occurrence', True) else 0 }}"
+    data-default-user="{{ 1 if module_config.get('search_user_by_default', True) else 0 }}"
+    data-default-answer="{{ 1 if module_config.get('search_answers_by_default', True) else 0 }}"
+    data-default-process="{{ 1 if module_config.get('search_process_by_default', False) else 0 }}"
+    data-default-tools="{{ 1 if module_config.get('search_tools_by_default', False) else 0 }}"
+    data-default-commands="{{ 1 if module_config.get('search_commands_by_default', False) else 0 }}">
+
+    <div class="cn-findbar" role="search" aria-label="Find in chat"
+        x-show="open" x-cloak x-transition.opacity.duration.100ms>
+
+        <span class="cn-find-icon">{% include 'svg/search.svg' %}</span>
+
+        <input type="text" class="cn-find-input" x-model="$store.chatNav.query"
+            placeholder="Search this chat" spellcheck="false" autocomplete="off"
+            @input="$store.chatNav.setQuery($event.target.value, true)"
+            @keydown.enter.prevent="$store.chatNav.next($event.shiftKey)"
+            @keydown.escape.prevent="closeBar()">
+
+        <span class="cn-find-count" x-show="$store.chatNav.query.trim()"
+            x-text="$store.chatNav.counterText()"></span>
+
+        <span class="cn-find-nav">
+            <button type="button" class="cn-find-btn" title="Previous match (Shift+Enter)"
+                :disabled="!$store.chatNav.results.length"
+                @click="$store.chatNav.next(true)">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            </button>
+            <button type="button" class="cn-find-btn" title="Next match (Enter)"
+                :disabled="!$store.chatNav.results.length"
+                @click="$store.chatNav.next(false)">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+        </span>
+
+        <span class="cn-find-sep"></span>
+
+        <button type="button" class="cn-find-btn cn-find-close" title="Close (Esc)" @click="closeBar()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+</div>
+{% endmacro %}

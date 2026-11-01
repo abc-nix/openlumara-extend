@@ -1,0 +1,11 @@
+{# -- AI GENERATED CODE (deepseek-v4.1-flash-1017-maya-s) :: 2026-11-01 harness:OpenLumara
+   message anchor for chat_nav, injected through the below_message slot of an
+   assistant (final) message. Same trick as chat/turns/user.html: the value is
+   Alpine-bound because `message` is an x-for variable, not a Jinja one.
+
+   final_messages render one element per message, so data-cn-msg holds that
+   message's raw history index and a hit can address its own message. #}
+
+{% macro below_message(ctx) %}
+<span class="cn-msg-anchor" :data-cn-msg="message.index"></span>
+{% endmacro %}
