@@ -68,7 +68,7 @@ class Libreta(core.module.Module):
         },
         "notes_block_edit": {
             "default": True,
-            "description": "Notes view: clicking a block turns it into a small source editor in place (one pane, no split). Off: Notes view is read-only and editing happens in Code view.",
+            "description": "Notes view is one continuous live-preview editor (Obsidian style): the file stays markdown, formatting renders in place and syntax markers show only on the line being edited. Off: Notes view is a read-only page and editing happens in Code view. (The key keeps its old name so existing configs stay valid.)",
         },
         "preview_chars": {
             "default": 140,

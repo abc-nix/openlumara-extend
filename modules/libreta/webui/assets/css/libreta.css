@@ -604,99 +604,75 @@ body[data-lb] .lb-cover { display: flex; }
 .lb-iconbtn.on { color: var(--accent); }
 
 /* ==========================================================================
-   code view: CodeMirror (vendored, lazy-loaded)
-   ========================================================================== */
+   editor: CodeMirror 6 (vendored bundle, lazy-loaded)
+   ==========================================================================
+   The live-preview engine keys its styling off --atomic-editor-*; the rules
+   below map those onto the shell's own theme variables. The doubled selectors
+   are deliberate: atomic.css is injected after this file at runtime, so a plain
+   class tie would go to it. */
 .lb-editor {
     min-height: 100%;
     box-sizing: border-box;
     padding: 10px 0 72px;
 }
 
-.lb-editor .CodeMirror {
+.lb-cover .lb-editor .atomic-cm-editor {
     height: auto;
     min-height: 60vh;
-    background: transparent;
-    color: var(--text-primary);
+    --atomic-editor-fg: var(--text-primary);
+    --atomic-editor-fg-muted: var(--text-muted);
+    --atomic-editor-fg-faint: var(--text-muted);
+    --atomic-editor-bg: transparent;
+    --atomic-editor-bg-panel: var(--bg-secondary);
+    --atomic-editor-bg-surface: var(--bg-secondary);
+    --atomic-editor-border: var(--border-color);
+    --atomic-editor-accent: var(--accent);
+    --atomic-editor-accent-bright: var(--accent);
+    --atomic-editor-accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+    --atomic-editor-link: var(--accent);
+    --atomic-editor-link-hover: var(--accent);
+    --atomic-editor-code-bg: var(--bg-secondary);
+    --atomic-editor-selection-bg: color-mix(in srgb, var(--accent) 24%, transparent);
+    --atomic-editor-font: var(--lb-prose-font, inherit);
+    --atomic-editor-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --atomic-editor-body-size: 15.5px;
+    --atomic-editor-body-leading: 1.75;
+    --atomic-editor-measure: 70ch;
+}
+
+.lb-cover .lb-editor .cm-scroller { overflow: visible; }
+.lb-cover .lb-editor .cm-content { padding: 6px 0 72px; }
+
+/* code view and the split view's source pane: monospace + gutter */
+.lb-cover .lb-editor--code .cm-content {
+    max-width: none;
+    margin: 0;
+    padding-inline: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12.5px;
     line-height: 1.6;
 }
 
-.lb-editor .CodeMirror-scroll { min-height: 60vh; }
+.lb-cover .lb-editor--code .cm-line { padding-left: 8px; padding-right: 18px; }
 
-.lb-editor .CodeMirror-lines { padding: 4px 0; }
-.lb-editor .CodeMirror-line { padding-left: 8px; padding-right: 18px; }
-
-.lb-editor .CodeMirror-gutters {
+.lb-cover .lb-editor--code .cm-gutters {
     background: var(--bg-primary);
     border-right: 1px solid var(--border-color);
 }
 
-.lb-editor .CodeMirror-linenumber { color: var(--text-muted); opacity: .75; }
+.lb-cover .lb-editor--code .cm-lineNumbers .cm-gutterElement { opacity: .75; }
 
-.lb-editor .CodeMirror-cursor { border-left: 2px solid var(--text-primary); }
+/* notes live preview: the reading column */
+.lb-cover .lb-editor--prose .cm-content {
+    max-width: 70ch;
+    font-size: 15.5px;
+    line-height: 1.75;
+}
 
-.lb-editor .CodeMirror-activeline-background { background: var(--bg-secondary); }
+.lb-cover .lb-editor--prose .cm-line { padding: 0 4px; }
 
-.lb-editor .CodeMirror-focused .CodeMirror-selected,
-.lb-editor .CodeMirror-selected { background: rgba(127, 127, 127, 0.28); }
-
-/* ---- lumara dark tokens (mirrors codeeditor's palette so libreta keeps
-   colour even when that module is retired) ---- */
-.lb-editor .cm-s-lumara.CodeMirror { background: transparent; color: var(--text-primary); }
-.lb-editor .cm-s-lumara .cm-keyword { color: #ff7b72; }
-.lb-editor .cm-s-lumara .cm-atom,
-.lb-editor .cm-s-lumara .cm-number { color: #79c0ff; }
-.lb-editor .cm-s-lumara .cm-def { color: #d2a8ff; }
-.lb-editor .cm-s-lumara .cm-variable { color: var(--text-primary); }
-.lb-editor .cm-s-lumara .cm-variable-2 { color: #ffa657; }
-.lb-editor .cm-s-lumara .cm-variable-3,
-.lb-editor .cm-s-lumara .cm-type { color: #7ee787; }
-.lb-editor .cm-s-lumara .cm-property,
-.lb-editor .cm-s-lumara .cm-attribute { color: #79c0ff; }
-.lb-editor .cm-s-lumara .cm-operator { color: #ff7b72; }
-.lb-editor .cm-s-lumara .cm-comment { color: #8b949e; font-style: italic; }
-.lb-editor .cm-s-lumara .cm-string,
-.lb-editor .cm-s-lumara .cm-string-2 { color: #a5d6ff; }
-.lb-editor .cm-s-lumara .cm-meta { color: #8b949e; }
-.lb-editor .cm-s-lumara .cm-qualifier { color: #7ee787; }
-.lb-editor .cm-s-lumara .cm-builtin { color: #ffa657; }
-.lb-editor .cm-s-lumara .cm-bracket { color: var(--text-primary); }
-.lb-editor .cm-s-lumara .cm-tag { color: #7ee787; }
-.lb-editor .cm-s-lumara .cm-header { color: #79c0ff; font-weight: 600; }
-.lb-editor .cm-s-lumara .cm-quote { color: #7ee787; }
-.lb-editor .cm-s-lumara .cm-hr { color: #6e7681; }
-.lb-editor .cm-s-lumara .cm-link { color: #79c0ff; text-decoration: underline; }
-.lb-editor .cm-s-lumara .cm-strikethrough { text-decoration: line-through; }
-.lb-editor .cm-s-lumara .cm-error { color: #ff7b72; }
-
-/* ---- lumara light tokens ---- */
-.lb-editor .cm-s-lumara-light.CodeMirror { background: transparent; color: var(--text-primary); }
-.lb-editor .cm-s-lumara-light .cm-keyword { color: #d73a49; }
-.lb-editor .cm-s-lumara-light .cm-atom,
-.lb-editor .cm-s-lumara-light .cm-number { color: #005cc5; }
-.lb-editor .cm-s-lumara-light .cm-def { color: #6f42c1; }
-.lb-editor .cm-s-lumara-light .cm-variable { color: var(--text-primary); }
-.lb-editor .cm-s-lumara-light .cm-variable-2 { color: #e36209; }
-.lb-editor .cm-s-lumara-light .cm-variable-3,
-.lb-editor .cm-s-lumara-light .cm-type { color: #22863a; }
-.lb-editor .cm-s-lumara-light .cm-property,
-.lb-editor .cm-s-lumara-light .cm-attribute { color: #005cc5; }
-.lb-editor .cm-s-lumara-light .cm-operator { color: #d73a49; }
-.lb-editor .cm-s-lumara-light .cm-comment { color: #6a737d; font-style: italic; }
-.lb-editor .cm-s-lumara-light .cm-string,
-.lb-editor .cm-s-lumara-light .cm-string-2 { color: #032f62; }
-.lb-editor .cm-s-lumara-light .cm-meta { color: #6a737d; }
-.lb-editor .cm-s-lumara-light .cm-qualifier { color: #22863a; }
-.lb-editor .cm-s-lumara-light .cm-builtin { color: #e36209; }
-.lb-editor .cm-s-lumara-light .cm-bracket { color: var(--text-primary); }
-.lb-editor .cm-s-lumara-light .cm-tag { color: #22863a; }
-.lb-editor .cm-s-lumara-light .cm-header { color: #005cc5; font-weight: 600; }
-.lb-editor .cm-s-lumara-light .cm-quote { color: #22863a; }
-.lb-editor .cm-s-lumara-light .cm-hr { color: #9aa0a6; }
-.lb-editor .cm-s-lumara-light .cm-link { color: #005cc5; text-decoration: underline; }
-.lb-editor .cm-s-lumara-light .cm-strikethrough { text-decoration: line-through; }
-.lb-editor .cm-s-lumara-light .cm-error { color: #b31d28; }
+/* the split view scrolls inside its own pane */
+.lb-docwrap.split .lb-editor { height: 100%; overflow: auto; }
 
 /* ==========================================================================
    save conflict banner + small buttons
@@ -948,51 +924,3 @@ body[data-lb] .lb-cover { display: flex; }
 .lb-row:hover .lb-row-danger,
 .lb-row:focus-within .lb-row-danger { display: flex; }
 .lb-row-danger:hover { color: #ff5f7a; background: var(--bg-primary); }
-
-/* ==========================================================================
-   notes mode: click-to-edit blocks (one pane, no split)
-   ========================================================================== */
-.lb-blk {
-    position: relative;
-    margin: 0 -8px;
-    padding: 2px 8px;
-    border-radius: 8px;
-    transition: background .12s ease, box-shadow .12s ease;
-    cursor: text;
-}
-
-/* no hover box: the block only marks itself while it is being edited */
-.lb-blk.editing {
-    background: var(--bg-secondary);
-    box-shadow: inset 0 0 0 1px var(--accent);
-    cursor: auto;
-}
-
-/* empty block / empty file: still clickable, with a hint */
-.lb-blk-view:empty::before {
-    content: "Click to write\2026";
-    color: var(--text-muted);
-}
-
-.lb-blk-view:empty { min-height: 1.6em; }
-
-/* block wrappers would otherwise stop margins from collapsing */
-.lb-blk-view > :first-child { margin-top: 0; }
-.lb-blk-view > :last-child { margin-bottom: 0; }
-
-.lb-blk-edit { padding: 2px 0; }
-
-.lb-blk-edit .CodeMirror {
-    height: auto;
-    min-height: 2.4em;
-    background: transparent;
-    color: var(--text-primary);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 14px;
-    line-height: 1.7;
-}
-
-.lb-blk-edit .CodeMirror-lines { padding: 2px 0; }
-
-/* the block editor follows the app theme */
-.lb-blk-edit .cm-s-lumara.CodeMirror { color: var(--text-primary); border: none; }

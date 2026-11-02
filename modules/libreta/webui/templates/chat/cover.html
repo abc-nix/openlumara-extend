@@ -38,7 +38,7 @@
             <button type="button" class="lb-mode" role="tab"
                 :class="{ on: $store.libretaView.modeOf() === 'notes' }"
                 :disabled="!$store.libretaView.proseOf()"
-                title="Rendered notes" @click="$store.libretaView.setMode('notes')">Notes</button>
+                title="Notes — live preview while you type" @click="$store.libretaView.setMode('notes')">Notes</button>
             <button type="button" class="lb-mode" role="tab"
                 :class="{ on: $store.libretaView.modeOf() === 'code' }"
                 title="Source / code" @click="$store.libretaView.setMode('code')">Code</button>
@@ -48,8 +48,8 @@
             x-show="$store.libretaView.modeOf() === 'notes' &amp;&amp; $store.libretaView.proseOf()"
             :class="{ on: $store.libretaView.split }"
             :title="$store.libretaView.split
-                ? 'Split view on — source and preview side by side'
-                : 'Split view — edit the source with a live preview'"
+                ? 'Split view on — markdown source and rendered preview side by side'
+                : 'Split view — edit raw source beside a rendered preview'"
             @click="$store.libretaView.toggleSplit()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
         </button>
@@ -106,38 +106,18 @@
         </div>
 
         <div class="lb-docwrap" :class="{ split: $store.libretaView.splitActive() }">
-            {# notes view: one pane. With block editing on, every block is its own
-               clickable element so only that block swaps into a source editor. #}
-            <div class="lb-doc" x-show="$store.libretaView.modeOf() === 'notes'">
-                <template x-if="!$store.libretaView.blockModeOn()">
-                    <div x-html="$store.libretaView.htmlOf()"></div>
-                </template>
-
-                <template x-if="$store.libretaView.blockModeOn()">
-                    <div class="lb-blocks">
-                        <template x-for="(blk, idx) in $store.libretaView.blocksOf()" :key="idx + ':' + blk.start">
-                            <div class="lb-blk"
-                                :class="{ editing: $store.libretaView.editingIndex() === idx }"
-                                title="Click to edit this block"
-                                @click="$store.libretaView.blockClick($event, idx)">
-                                <template x-if="$store.libretaView.editingIndex() !== idx">
-                                    <div class="lb-blk-view" x-html="blk.html"></div>
-                                </template>
-                                <template x-if="$store.libretaView.editingIndex() === idx">
-                                    <div class="lb-blk-edit" :id="'lb-blk-' + idx"
-                                        x-init="$store.libretaView.mountBlockEditor(idx)"></div>
-                                </template>
-                            </div>
-                        </template>
-                    </div>
-                </template>
+            {# notes view: with live preview on, the editor itself renders the note
+               (one pane, Obsidian style). Off, or when the bundle cannot load,
+               this is a read-only rendered page. #}
+            <div class="lb-doc" x-show="$store.libretaView.modeOf() === 'notes' &amp;&amp; !$store.libretaView.livePreviewOn()">
+                <div x-html="$store.libretaView.htmlOf()"></div>
             </div>
 
-            {# CodeMirror host: visible in Code mode, and in Notes mode while the
-               split view is on. Always in the DOM so it can measure itself;
-               syncEditor refreshes it after the layout changes. #}
+            {# CodeMirror 6 host: Code mode, Notes live preview, and split-view
+               source. Always in the DOM so it can measure itself. #}
             <div class="lb-editor" id="lb-editor-host"
-                x-show="($store.libretaView.modeOf() === 'code' || $store.libretaView.splitActive()) &amp;&amp; !$store.libretaView.cmFailed"></div>
+                :class="$store.libretaView.livePreviewOn() ? 'lb-editor--prose' : 'lb-editor--code'"
+                x-show="($store.libretaView.modeOf() === 'code' || $store.libretaView.livePreviewOn() || $store.libretaView.splitActive()) &amp;&amp; !$store.libretaView.cmFailed"></div>
 
             {# fallback when the vendored editor cannot load #}
             <div class="lb-code"

@@ -180,31 +180,23 @@ const LB_ICONS = {
     file: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
 };
 
-/* ---- CodeMirror (vendored under webui/assets/vendor/, lazy) ----
+/* ---- CodeMirror 6 (vendored bundle, lazy) ----
 
-   The code view is a real editor, like Geany: numbers and wrap stay while you
-type. Vendored and lazy-loaded exactly the way codeeditor does it (vendor/
-sits outside assets/css+assets/js, so the channel never force-loads it). */
-const LB_CM_BASE = "/ext-assets/libreta/vendor/codemirror/";
+   One engine for both views. Code mode is a source editor with a gutter;
+   Notes mode is the same editor carrying an Obsidian-style live preview: the
+document stays plain markdown and the syntax markers are hidden while the
+   caret is elsewhere (no split pane, no block swapping). The bundle is built
+   once and vendored — see webui/assets/vendor/cm6/README.md for the recipe. */
+const LB_CM6_BASE = "/ext-assets/libreta/vendor/cm6/";
+const LB_CM6_CSS = ["atomic.css"];
+const LB_CM6_JS = ["cm6.min.js"];
 
-const LB_CM_CSS = ["lib/codemirror.css"];
-
-const LB_CM_JS = [
-    "lib/codemirror.js",
-    "mode/xml/xml.js",
-    "mode/javascript/javascript.js",
-    "mode/css/css.js",
-    "mode/htmlmixed/htmlmixed.js",
-    "mode/markdown/markdown.js",
-    "mode/python/python.js",
-    "mode/shell/shell.js",
-    "mode/yaml/yaml.js",
-    "mode/toml/toml.js",
-];
-
-let LB_CM_LOAD = null;
-let LB_CM = null;     // the live code editor (one doc per open tab)
-let LB_BLK_CM = null; // the small in-place editor used by Notes block editing
+let LB_CM6_LOAD = null;
+let LB_CM6 = null;            // the vendored namespace (window.LibretaCM)
+let LB_VIEW = null;           // one EditorView; documents are swapped per tab
+const LB_STATES = new Map();  // tab key -> EditorState (deliberately outside Alpine's proxy)
+const LB_SCROLL = new Map();  // tab key -> scrollTop
+const LB_COMP = { wrap: null, numbers: null, lang: null, preview: null };
 
 function lbLoadScript(src) {
     return new Promise((resolve, reject) => {
@@ -227,114 +219,94 @@ function lbLoadCss(href) {
     });
 }
 
-function lbLoadCodeMirror() {
-    if (!LB_CM_LOAD) {
-        LB_CM_LOAD = (async () => {
-            for (const file of LB_CM_CSS) await lbLoadCss(LB_CM_BASE + file);
-            // sequential: script order is dependency order here
-            for (const file of LB_CM_JS) await lbLoadScript(LB_CM_BASE + file);
+function lbLoadCm6() {
+    if (!LB_CM6_LOAD) {
+        LB_CM6_LOAD = (async () => {
+            for (const file of LB_CM6_CSS) await lbLoadCss(LB_CM6_BASE + file);
+            for (const file of LB_CM6_JS) await lbLoadScript(LB_CM6_BASE + file);
+            LB_CM6 = window.LibretaCM;
+            if (!LB_CM6) throw new Error("the editor bundle did not register LibretaCM");
+            LB_COMP.wrap = new LB_CM6.Compartment();
+            LB_COMP.numbers = new LB_CM6.Compartment();
+            LB_COMP.lang = new LB_CM6.Compartment();
+            LB_COMP.preview = new LB_CM6.Compartment();
         })();
     }
-    return LB_CM_LOAD;
+    return LB_CM6_LOAD;
 }
 
-// extension -> CodeMirror mode. anything unmatched opens as plain text.
-const LB_CM_MODE_BY_EXT = {
-    py: "python", js: "javascript", mjs: "javascript", cjs: "javascript",
-    json: "application/json", jsx: "javascript",
-    css: "css", scss: "css",
-    html: "htmlmixed", htm: "htmlmixed", xml: "xml", svg: "xml",
-    md: "markdown", markdown: "markdown", mdx: "markdown",
-    sh: "shell", bash: "shell", zsh: "shell",
-    yml: "yaml", yaml: "yaml", toml: "toml",
-};
-
-function lbCmMode(path) {
-    const ext = String(path || "").split(".").pop().toLowerCase();
-    return LB_CM_MODE_BY_EXT[ext] || null;
+function lbExtensionOf(path) {
+    return String(path || "").split(".").pop().toLowerCase();
 }
 
-function lbCmTheme() {
-    try {
-        const theme = Alpine.store("theme");
-        return theme && theme.mode === "light" ? "lumara-light" : "lumara";
-    } catch (e) {
-        return "lumara";
-    }
+// colours ride on CSS variables, so the editor follows the app theme without a
+// reconfigure on every theme switch.
+function lbCm6Theme() {
+    const CM = LB_CM6;
+    return CM.EditorView.theme({
+        "&": { minHeight: "100%", backgroundColor: "transparent", color: "var(--text-primary)" },
+        "&.cm-focused": { outline: "none" },
+        ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.7" },
+        ".cm-content": { padding: "6px 0 72px", caretColor: "var(--text-primary)" },
+        ".cm-gutters": {
+            backgroundColor: "transparent",
+            border: "none",
+            color: "var(--text-muted)",
+        },
+        ".cm-gutterElement": { padding: "0 8px" },
+        ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--text-primary) 5%, transparent)" },
+        ".cm-activeLineGutter": { backgroundColor: "transparent" },
+        ".cm-cursor": { borderLeftWidth: "2px", borderLeftColor: "var(--text-primary)" },
+        ".cm-selectionBackground": { backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent)" },
+        "&.cm-focused .cm-selectionBackground": { backgroundColor: "color-mix(in srgb, var(--accent) 30%, transparent)" },
+        ".cm-line": { padding: "0 10px" },
+        ".cm-panels": { backgroundColor: "var(--bg-secondary)", color: "var(--text-primary)" },
+    }, { dark: false });
 }
 
-/* ---- Notes mode: split the source into editable blocks ----
+function lbCm6Extensions() {
+    const CM = LB_CM6;
+    return [
+        CM.history(),
+        CM.drawSelection(),
+        CM.highlightActiveLine(),
+        CM.libretaHighlight,
+        CM.keymap.of([
+            ...CM.defaultKeymap,
+            ...CM.historyKeymap,
+            CM.indentWithTab,
+            { key: "Mod-s", run: () => { LIBRETA_VIEW.save(); return true; } },
+        ]),
+        // atomic.css is scoped under this class
+        CM.EditorView.editorAttributes.of({ class: "atomic-cm-editor" }),
+        CM.EditorView.updateListener.of((update) => {
+            const tab = LIBRETA_VIEW.activeTab();
+            if (!tab) return;
+            // the view is the source of truth for the open buffer; keep the
+            // per-tab state (outside the reactive store) in step
+            LB_STATES.set(tab.key, update.state);
+            if (!update.docChanged) return;
+            tab.dirty = true;
+            if (tab.mode === "notes" && LIBRETA_VIEW.split) LIBRETA_VIEW.schedulePreview(tab);
+        }),
+        lbCm6Theme(),
+        LB_COMP.wrap.of([]),
+        LB_COMP.numbers.of([]),
+        LB_COMP.lang.of([]),
+        LB_COMP.preview.of([]),
+    ];
+}
 
-   Line-based (no AST): a block ends at a blank line or at the start of
-   another top-level construct (heading / fence / list / quote). Rendering
-   each block's own source with the markdown renderer gives the same HTML a
-   whole-document render would, so a block can be edited and re-rendered
-   without ever rebuilding the rest of the file. BUGS: a table counts as a
-   paragraph block (still renders correctly, just thicker). */
-function lbBlocks(source) {
-    const lines = String(source === undefined || source === null ? "" : source).split("\n");
-    const blocks = [];
-    let index = 0;
-
-    const isBlank = (line) => line.trim() === "";
-    const isFence = (line) => /^\s{0,3}(?:```|~~~)/.test(line);
-    const isHeading = (line) => /^\s{0,3}#{1,6}\s/.test(line);
-    const isItem = (line) => /^\s{0,3}(?:[-*+]|\d{1,3}[.)])\s+/.test(line);
-    const isQuote = (line) => /^\s{0,3}>/.test(line);
-
-    while (index < lines.length) {
-        if (isBlank(lines[index])) {
-            index++;
-            continue;
-        }
-
-        const start = index;
-
-        if (isFence(lines[index])) {
-            index++;
-            while (index < lines.length && !isFence(lines[index])) index++;
-            if (index < lines.length) index++;   // closing fence
-        } else if (isHeading(lines[index])) {
-            index++;
-        } else if (isItem(lines[index]) || isQuote(lines[index])) {
-            const listish = isItem(lines[index]);
-            index++;
-            while (index < lines.length) {
-                const line = lines[index];
-                if (isBlank(line)) {
-                    const next = lines[index + 1];
-                    if (next === undefined) break;
-                    if (listish ? (isItem(next) || /^\s{2,}/.test(next)) : isQuote(next)) {
-                        index++;
-                        continue;
-                    }
-                    break;
-                }
-                if (listish ? (isItem(line) || /^\s{2,}/.test(line)) : isQuote(line)) {
-                    index++;
-                    continue;
-                }
-                break;
-            }
-        } else {
-            index++;
-            while (
-                index < lines.length &&
-                !isBlank(lines[index]) && !isHeading(lines[index]) && !isFence(lines[index]) &&
-                !isItem(lines[index]) && !isQuote(lines[index])
-            ) index++;
-        }
-
-        const text = lines.slice(start, index).join("\n");
-        blocks.push({ start: start, end: index - 1, text: text, html: lbRender(text) });
-    }
-
-    // an empty (or all-blank) file still needs one block to click into
-    if (!blocks.length) {
-        blocks.push({ start: 0, end: Math.max(lines.length - 1, 0), text: lines.join("\n"), html: "" });
-    }
-
-    return blocks;
+// one EditorState per tab: undo history, cursor and fold state stay separate
+function lbStateFor(tab) {
+    let state = LB_STATES.get(tab.key);
+    if (state) return state;
+    state = LB_CM6.EditorState.create({
+        doc: tab.content || "",
+        extensions: lbCm6Extensions(),
+    });
+    LB_STATES.set(tab.key, state);
+    return state;
 }
 
 /* --------------------------------------------------------- store: recents/pins */
@@ -395,7 +367,7 @@ const LIBRETA_VIEW = {
     busy: false,
     error: "",
     autowrap: true,
-    notesBlockEdit: true,  // notes mode: click a block to edit it in place
+    notesLivePreview: true,  // notes mode: one live-preview editor (config key notes_block_edit)
     split: false,          // notes mode: source + live preview side by side
     lineNumbers: true,     // interface preference (localStorage), not a config setting
     editorReady: false,
@@ -416,8 +388,7 @@ const LIBRETA_VIEW = {
         if (!tab) return;
         tab.wrap = !this.wrapOn();
         this.persist();
-        if (LB_CM) LB_CM.setOption("lineWrapping", this.wrapOn());
-        requestAnimationFrame(() => { try { if (LB_CM) LB_CM.refresh(); } catch (e) { /* not mounted */ } });
+        this.applyEditorOptions(tab);
     },
 
     // notes mode + split: the editor and the rendered preview share the stage
@@ -449,8 +420,7 @@ const LIBRETA_VIEW = {
     setLineNumbers(on) {
         this.lineNumbers = !!on;
         lbWriteJson("libreta.lineNumbers", this.lineNumbers);
-        if (LB_CM) LB_CM.setOption("lineNumbers", this.lineNumbers);
-        requestAnimationFrame(() => { try { if (LB_CM) LB_CM.refresh(); } catch (e) { /* not mounted */ } });
+        this.applyEditorOptions(this.activeTab());
     },
 
     /* ---- persistence ---- */
@@ -513,20 +483,18 @@ const LIBRETA_VIEW = {
         try {
             const data = await simpleApiFetch("/api/ext/libreta/settings");
             this.autowrap = !!(data.values && data.values.code_autowrap);
-            this.notesBlockEdit = !(data.values && data.values.notes_block_edit === false);
+            this.notesLivePreview = !(data.values && data.values.notes_block_edit === false);
         } catch (e) {
             /* keep the built-in default */
         }
     },
 
-    /* ---- CodeMirror lifecycle ---- */
-    // load the vendored CodeMirror library once (shared by Code mode and the
-    // Notes block editor)
+    /* ---- CodeMirror 6 lifecycle ---- */
     async ensureLibrary() {
-        if (typeof CodeMirror !== "undefined") return true;
+        if (LB_CM6) return true;
         if (this.cmFailed) return false;
         try {
-            await lbLoadCodeMirror();
+            await lbLoadCm6();
             return true;
         } catch (e) {
             this.cmFailed = true;
@@ -536,192 +504,98 @@ const LIBRETA_VIEW = {
     },
 
     async ensureEditor(host) {
-        if (LB_CM) return true;
+        if (LB_VIEW) return true;
         if (!(await this.ensureLibrary())) return false;
         if (!host) return false;
 
-        LB_CM = CodeMirror(host, {
-            value: "",
-            mode: null,
-            theme: lbCmTheme(),
-            lineNumbers: this.lineNumbers,
-            lineWrapping: this.wrapOn(),
-            tabSize: 4,
-            indentUnit: 4,
-            styleActiveLine: true,
-            readOnly: false,
-            extraKeys: {
-                "Ctrl-S": () => Alpine.store("libretaView").save(),
-                "Cmd-S": () => Alpine.store("libretaView").save(),
-            },
+        LB_VIEW = new LB_CM6.EditorView({
+            parent: host,
+            state: LB_CM6.EditorState.create({ doc: "", extensions: lbCm6Extensions() }),
         });
-
-        LB_CM.on("change", () => {
-            if (this._silent) return;
-            const tab = this.activeTab();
-            if (!tab) return;
-            tab.dirty = true;
-            // split view: keep the rendered pane in step with the source pane
-            if (tab.mode === "notes" && this.split) this.schedulePreview(tab);
-        });
-
-        // CodeMirror renders a zero-width space inside EMPTY lines as a caret
-        // placeholder, and browsers copy it silently. Take over the copy so
-        // blank lines never turn into invisible characters in another file.
-        LB_CM.on("copy", (cm, event) => {
-            const text = cm.getSelection();
-            if (!text) return;
-            try {
-                event.clipboardData.setData("text/plain", text.replace(/\u200b/g, ""));
-                event.preventDefault();
-            } catch (e) { /* let the browser copy normally */ }
-        });
-
-        window.addEventListener("theme-changed", () => {
-            if (LB_CM) LB_CM.setOption("theme", lbCmTheme());
-        });
-
         this.editorReady = true;
         return true;
+    },
+
+    // free a tab's buffer (fresh load) so its undo history starts over
+    dropEditorState(tab) {
+        if (!tab) return;
+        LB_STATES.delete(tab.key);
+        LB_SCROLL.delete(tab.key);
+    },
+
+    // the element that actually scrolls the document. With the editor growing
+    // inside the cover stage (no fixed height), CM6's own scroller never
+    // scrolls, so walk up to the first ancestor that does.
+    scrollBox() {
+        let node = LB_VIEW ? LB_VIEW.scrollDOM : null;
+        while (node && node.scrollHeight <= node.clientHeight + 1) node = node.parentElement;
+        return node || null;
+    },
+
+    // remember the visible buffer + scroll before switching documents
+    stashView() {
+        if (!LB_VIEW || !LB_CM6) return;
+        const tab = this.activeTab();
+        if (!tab) return;
+        LB_STATES.set(tab.key, LB_VIEW.state);
+        const box = this.scrollBox();
+        LB_SCROLL.set(tab.key, box ? box.scrollTop : 0);
     },
 
     // the buffer that should be saved/rendered: the live doc when the tab has one
     sourceOf(tab) {
         if (!tab) return "";
-        return tab.doc ? tab.doc.getValue() : (tab.content || "");
+        const state = LB_STATES.get(tab.key);
+        return state ? state.doc.toString() : (tab.content || "");
+    },
+
+    /* ---- notes mode: one live-preview editor (Obsidian style) ---- */
+    livePreviewOn() {
+        const tab = this.activeTab();
+        return !!tab && tab.mode === "notes" && tab.prose && tab.loaded
+            && !!this.notesLivePreview && !this.split && !this.cmFailed;
+    },
+
+    applyEditorOptions(tab) {
+        if (!LB_VIEW || !LB_CM6) return;
+        if (!tab) tab = this.activeTab();
+        if (!tab) return;
+
+        const CM = LB_CM6;
+        const numbers = tab.mode === "notes" ? false : this.lineNumbers;
+        const languages = tab.prose ? CM.markdownSupport() : CM.languageForExt(lbExtensionOf(tab.path));
+        const preview = this.livePreviewOn()
+            ? [CM.inlinePreview({}), CM.tables({}), CM.imageBlocks()]
+            : [];
+
+        LB_VIEW.dispatch({
+            effects: [
+                LB_COMP.wrap.reconfigure(this.wrapOn() ? CM.EditorView.lineWrapping : []),
+                LB_COMP.numbers.reconfigure(numbers ? CM.lineNumbers() : []),
+                LB_COMP.lang.reconfigure(languages || []),
+                LB_COMP.preview.reconfigure(preview),
+            ],
+        });
     },
 
     async syncEditor() {
         const tab = this.activeTab();
         if (!tab) return;
 
-        // the editor is visible in Code mode, and in Notes mode while split is on
-        const wantEditor = tab.mode === "code" || (tab.mode === "notes" && tab.prose && this.split);
-        if (!wantEditor) return;
-
         const host = document.getElementById("lb-editor-host");
         if (!(await this.ensureEditor(host))) return;
 
-        // one doc per tab: swapDoc keeps each file's undo history separate
-        this._silent = true;
-        try {
-            if (!tab.doc) tab.doc = CodeMirror.Doc(tab.content || "", lbCmMode(tab.path));
-            LB_CM.swapDoc(tab.doc);
-        } finally {
-            this._silent = false;
-        }
+        LB_VIEW.setState(lbStateFor(tab));
+        this.applyEditorOptions(tab);
 
-        LB_CM.setOption("mode", lbCmMode(tab.path));
-        LB_CM.setOption("lineWrapping", this.wrapOn());
-        LB_CM.setOption("lineNumbers", this.lineNumbers);
-        LB_CM.setOption("theme", lbCmTheme());
-
-        // the host may have been hidden (notes mode) when the editor was made
-        requestAnimationFrame(() => { try { LB_CM.refresh(); } catch (e) { /* not mounted */ } });
-        setTimeout(() => { try { LB_CM.refresh(); } catch (e) { /* not mounted */ } }, 120);
-    },
-
-    /* ---- notes mode: one block at a time (CM5, no split) ---- */
-    blockModeOn() {
-        const tab = this.activeTab();
-        return !!tab && tab.mode === "notes" && tab.prose && tab.loaded
-            && this.notesBlockEdit && !this.cmFailed;
-    },
-
-    blocksOf() {
-        const tab = this.activeTab();
-        return tab && tab.blocks ? tab.blocks : [];
-    },
-
-    editingIndex() {
-        const tab = this.activeTab();
-        return tab && typeof tab.editing === "number" ? tab.editing : -1;
-    },
-
-    ensureBlocks(tab) {
-        if (!tab) return;
-        const source = this.sourceOf(tab);
-        if (tab.blocksSource === source) return;
-        tab.blocksSource = source;
-        tab.blocks = lbBlocks(source);
-        tab.editing = -1;
-    },
-
-    blockClick(event, index) {
-        if (!this.blockModeOn()) return;
-        // links stay links
-        if (event && event.target && event.target.closest && event.target.closest("a")) return;
-        if (this.editingIndex() === index) return;
-
-        this.commitBlockEdit();
-        const tab = this.activeTab();
-        if (tab) tab.editing = index;
-    },
-
-    async mountBlockEditor(index) {
-        const tab = this.activeTab();
-        if (!tab || !tab.blocks || !tab.blocks[index]) return;
-
-        const host = document.getElementById("lb-blk-" + index);
-        if (!host) return;
-        if (!(await this.ensureLibrary())) return;
-
-        LB_BLK_CM = CodeMirror(host, {
-            value: tab.blocks[index].text,
-            mode: "markdown",
-            theme: lbCmTheme(),
-            lineNumbers: false,
-            lineWrapping: true,
-            tabSize: 4,
-            extraKeys: {
-                Esc: () => this.commitBlockEdit(),
-                "Ctrl-S": () => { this.commitBlockEdit(); this.save(); },
-                "Ctrl-Enter": () => this.commitBlockEdit(),
-            },
+        // the host may have been hidden while the editor measured itself
+        requestAnimationFrame(() => {
+            if (!LB_VIEW) return;
+            try { LB_VIEW.requestMeasure(); } catch (e) { /* not mounted */ }
+            const top = LB_SCROLL.get(tab.key);
+            const box = this.scrollBox();
+            if (box) box.scrollTop = typeof top === "number" ? top : 0;
         });
-
-        LB_BLK_CM.focus();
-    },
-
-    destroyBlockEditor() {
-        const tab = this.activeTab();
-        if (tab) tab.editing = -1;
-        LB_BLK_CM = null;   // the host element is removed by Alpine
-    },
-
-    commitBlockEdit() {
-        const tab = this.activeTab();
-        if (!tab || this._blockBusy) return;
-
-        const index = this.editingIndex();
-        if (index < 0 || !LB_BLK_CM) { this.destroyBlockEditor(); return; }
-
-        this._blockBusy = true;
-        try {
-            const block = tab.blocks ? tab.blocks[index] : null;
-            const text = LB_BLK_CM.getValue();
-            this.destroyBlockEditor();
-            if (!block || text === block.text) return;
-
-            const lines = this.sourceOf(tab).split("\n");
-            lines.splice(block.start, block.end - block.start + 1, ...text.split("\n"));
-            const next = lines.join("\n");
-
-            tab.content = next;
-            if (tab.doc) {
-                // keep the Code-mode buffer in step with the block edit
-                this._silent = true;
-                tab.doc.setValue(next);
-                this._silent = false;
-            }
-            tab.html = lbRender(next);
-            tab.dirty = true;
-
-            tab.blocksSource = null;
-            this.ensureBlocks(tab);
-        } finally {
-            this._blockBusy = false;
-        }
     },
 
     dirtyOf() {
@@ -797,6 +671,7 @@ const LIBRETA_VIEW = {
     },
 
     hide() {
+        this.stashView();
         this.isOpen = false;
         try { delete document.body.dataset.lb; } catch (e) { /* no body yet */ }
         this.persist();
@@ -805,6 +680,7 @@ const LIBRETA_VIEW = {
     /* ---- documents ---- */
     async open(workspace, path, mode) {
         const key = workspace + "|" + path;
+        this.stashView();
         this.show();
 
         if (this.tabs.some((tab) => tab.key === key)) {
@@ -822,13 +698,13 @@ const LIBRETA_VIEW = {
     },
 
     async activate(key) {
+        this.stashView();
         this.active = key;
         this.persist();
         const tab = this.activeTab();
         if (!tab) return;
         if (!tab.loaded) await this.load(tab);   // load() syncs the editor itself
         else await this.syncEditor();
-        if (tab.mode === "notes") this.ensureBlocks(tab);
     },
 
     async load(tab) {
@@ -847,12 +723,9 @@ const LIBRETA_VIEW = {
             tab.parent = data.parent || "";
             tab.loaded = true;
             tab.dirty = false;
-            tab.doc = null;                       // fresh buffer; undo history starts here
+            this.dropEditorState(tab);            // fresh buffer; undo history starts here
             tab.codeHtml = lbCodeHtml(tab.content, tab.path);
-            if (tab.mode === "notes") {
-                tab.html = lbRender(tab.content);
-                this.ensureBlocks(tab);
-            }
+            if (tab.mode === "notes") tab.html = lbRender(tab.content);
         } catch (e) {
             tab.error = lbErr(e);
             this.error = tab.error;
@@ -873,17 +746,15 @@ const LIBRETA_VIEW = {
         const tab = this.activeTab();
         if (!tab) return;
         if (mode === "notes" && !tab.prose) return;
+        this.stashView();   // keep the buffer and scroll while the editor is rebuilt
 
         // carry the editor buffer across the switch: notes mode renders what the
         // doc currently holds, not the stale tab.content
-        if (mode === "notes" && tab.loaded) {
-            tab.html = lbRender(this.sourceOf(tab));
-            this.ensureBlocks(tab);
-        }
+        if (mode === "notes" && tab.loaded) tab.html = lbRender(this.sourceOf(tab));
 
         tab.mode = mode;
         this.persist();
-        if (mode === "code" || (mode === "notes" && this.split)) this.syncEditor();
+        this.syncEditor();
     },
 
     close(key, force) {
@@ -899,6 +770,8 @@ const LIBRETA_VIEW = {
         }
 
         this.pendingClose = null;
+        LB_STATES.delete(key);
+        LB_SCROLL.delete(key);
         this.tabs.splice(index, 1);
         if (this.active === key) {
             const next = this.tabs[Math.min(index, this.tabs.length - 1)];
@@ -926,6 +799,10 @@ const LIBRETA_VIEW = {
         if (tab.mode === "notes" && !tab.prose) tab.mode = "code";
 
         const key = tab.workspace + "|" + newPath;
+        const movedState = LB_STATES.get(oldKey);
+        if (movedState) { LB_STATES.delete(oldKey); LB_STATES.set(key, movedState); }
+        const movedScroll = LB_SCROLL.get(oldKey);
+        if (movedScroll !== undefined) { LB_SCROLL.delete(oldKey); LB_SCROLL.set(key, movedScroll); }
         if (this.active === oldKey) this.active = key;
         tab.key = key;
         this.persist();

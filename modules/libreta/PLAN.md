@@ -7,102 +7,86 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
 
 | # | Decision |
 |---|---|
-| 1 | **No AI tools in libreta.** The `editor` module stays the AI's file backend. libreta is user-facing only, so notes and code keep exactly one tool vocabulary. |
-| 2 | **One data model: real files.** Direct sandboxed file I/O, no `StorageDict` mirror. Notes stay at `data/notes/**/*.md` — no migration. |
-| 3 | **Notes is just a workspace.** Single source of truth: `editor.workspaces`. libreta inherits that list, so what the UI can browse == what the AI can read/write. |
-| 4 | `editor.enable_webui_extension: false` later, so only libreta's tree exists while editor keeps all its tools. |
-| 5 | **codeeditor is retired by libreta** once code mode reaches parity (CodeMirror + keymaps + quick-open). Not yet. |
+| 1 | **No AI tools in libreta.** The `editor` module stays the AI's file backend, so notes and code keep exactly one tool vocabulary. |
+| 2 | **One data model: real files.** Direct sandboxed file I/O, no `StorageDict` mirror. |
+| 3 | **Notes is just a workspace.** Single source of truth: `editor.workspaces`. |
+| 4 | `editor.enable_webui_extension: false` later, so only libreta's tree exists while editor keeps its tools. |
+| 5 | **codeeditor is retired by libreta** once code mode reaches parity (quick-open, keymaps, syntax gate). Not yet. |
 | 6 | Name: `libreta`; module lives here (`user_modules/libreta` via the extend symlink). |
+| 7 | **CodeMirror 6** is the editor engine for both views. The bundle in `webui/assets/vendor/cm6/` is built once with esbuild and vendored — no npm at runtime. CodeMirror 5 is not shipped by this module. |
+| 8 | **Raw markdown is the source of truth.** Live-preview decorations are view-only; saves round-trip byte-identically. |
 
 ## Status
 
-- **P0a — done (read-only).** Sidebar tab with **Files / Recent / Pinned /
-Options**, workspace tree, full-window reading cover with document tabs,
-rendered markdown, pins and recents persisted server-side.
-- **P0a.1 — done.** Options tab writes module settings to `config.yml`
-  (autowrap, show hidden, inherit folders, size/snippet/limit numbers, default
-  tab). `code_autowrap` (default on) wraps long lines in Code view; the
-document bar toggles it per file and that override survives a reload.
-- **P0b — done.** Code view is CodeMirror 5 (vendored), so line numbers and wrap
-stay while editing; per-tab undo docs; `Ctrl/⌘+S`; dirty tabs; close prompt;
-**mtime-guarded save** with a conflict banner (Reload from disk / Overwrite);
-create / rename / delete ("+" in the Files header, hover actions on file rows).
-Notes mode has an optional **split view** (source left, live preview right).
+- **P0a — done.** Sidebar tab with Files / Recent / Pinned / Options, workspace
+  tree, full-window cover with document tabs, rendered markdown, pins and
+  recents persisted server-side.
+- **P0a.1 — done.** Options writes module settings to `config.yml`;
+  `code_autowrap` (default on) with a per-file override.
+- **P0b — done.** Code view with line numbers, wrap toggle, per-tab undo, dirty
+  tabs, `Ctrl/⌘+S`, close prompt, **mtime-guarded save** with a conflict banner,
+  create / rename / delete.
+- **P0c — done (CM6 migration).** Notes mode is one continuous **live-preview**
+  editor (Obsidian style): markdown stays the text, formatting renders in place,
+  markers appear only on the caret's line. Split view survives as an optional
+  escape hatch; block-by-block editing is removed. Code view moved to CM6 too.
+- **P3 — not started.** Wikilinks + backlinks, tags/properties, callouts,
+  attachments, in-vault search.
 
-- **P0c — next.** Notes mode without the split, Obsidian-style: one pane. Real
-  route is CodeMirror 6 + a markdown live-preview decoration set (syntax markers
-  hidden around the caret only). CM5 cannot collapse arbitrary marker ranges
-  safely, so this is a dependency swap, not a tweak.
-- **P0c / P2 — not started.** Vendored CodeMirror, keymaps, quick-open, then
-retire codeeditor.
-- **P3 — not started.** Wikilinks + backlinks, tags/frontmatter, callouts,
-attachments, in-vault search.
+## Editor bundle
+
+`webui/assets/vendor/cm6/` — 612 KB raw / 217 KB gzipped IIFE (`window.LibretaCM`):
+CodeMirror 6 core + markdown + code languages + the MIT live-preview engine
+(`@plannotator/atomic-editor`) with its frontmatter parser. Rebuild recipe and
+versions are in `vendor/cm6/README.md`. React is external, not included.
+
+The editor keeps one `EditorState` per tab **outside** the Alpine store (CM6
+rejects proxied extensions); line numbers, wrap, language and live preview are
+`Compartment`s reconfigured per tab.
 
 ## Enabling it
 
 ```yaml
-# config.yml
 user_modules:
   enabled:
-  - libreta            # add
+  - libreta
 
-# the notes folder as a workspace (also puts it in the AI's system prompt)
 user_modules:
   settings:
     editor:
       workspaces:
       - ... existing entries ...
-      - /home/abc/git/openlumara/data/notes   # add
+      - /home/abc/Documents/Notes
 ```
 
-Then restart. If the notes folder is not added, libreta still works — it just
-shows whatever workspaces the editor module already has.
+Then restart. Without a notes workspace libreta still works; it shows whatever
+workspaces the editor module already has.
 
 ## Files
 
 ```
-module.py     settings + /api/ext/libreta routes (no tools, no user-file writes)
-files.py      framework-free file layer: containment, listing, reading, snippets
-tests/        unit tests for the file layer (throwaway vaults in /tmp)
+module.py                        settings + /api/ext/libreta routes (no tools)
+files.py                         containment, listing, reading, writing, trash
+tests/                           52 unit tests (throwaway vaults in /tmp)
 webui/templates/sidebars/libreta.html (+ .svg)   the tab
 webui/templates/chat/index.html                  claims the below_header slot
 webui/templates/chat/cover.html                  the reading cover
-webui/assets/css/libreta.css                     all styling (theme vars only)
+webui/assets/css/libreta.css                     styling (theme vars only)
 webui/assets/js/libreta.js                       stores + panel component
+webui/assets/vendor/cm6/                         CM6 bundle, atomic.css, README, licenses
 ```
 
-Routes: `workspaces` · `tree` · `read` · `preview` (POST) · `settings` ·
-`settings/save` (POST) · `state` · `state/open` (POST) · `state/pin` (POST) ·
-`state/forget` (POST).
-
-Settings are written through the `ConfigManager` (not `ModuleConfig.set()`, which
-no-ops when a key is missing from `config.yml`) and only a whitelist of keys can
-be written: booleans, clamped numbers, and `default_side_tab`.
-
-## What P0a does NOT do
-
-- **Cannot write a user file.** The only disk write is `data/libreta_state.json`
-  (recents/pins).
-- No editing, no new note, no rename/delete, no CodeMirror, no wikilinks.
-- `show_hidden` only affects the tree; dotfiles stay hidden by default.
-- Symlinks are refused (both when resolving and when listing) — a deliberate
-  safety choice, not a limitation to work around silently.
+Routes: `workspaces` · `tree` · `read` · `save` · `preview` · `create` ·
+`mkdir` · `rename` · `delete` · `trash` (+ restore/purge/empty) · `settings` ·
+`settings/save` · `state*`.
 
 ## Known limitations to revisit
 
-1. Workspaces are named by their **folder basename**; two configured workspaces
-   with the same basename are ambiguous (recents/pins store the name).
-2. The tree is fetched one level per request; a 100k-file workspace is fine, but
-   the *filter* box only matches rows already expanded.
-3. `read` accepts up to `max_read_bytes` (1 MB). Larger files are refused rather
-   than windowed; windowing belongs to P0b.
-4. Escape closes the cover even if a core modal is open on top.
-
-## Next (P0b) design notes
-
-- `save` route: POST `{workspace, path, content, mtime}` → 409 on mtime mismatch
-  (`{"error": "changed on disk"}`), so the AI's `editor_edit` and the UI can
-  share a file without one silently clobbering the other.
-- Per-tab dirty state + close prompt; autosave off by default.
-- Notes/Code switch also decides the *write* surface (markdown source vs plain source)
-  — v1 edits raw text in both modes; live preview editing comes with CodeMirror.
+1. Folder rename/delete is refused by the backend.
+2. Trash has no “restore all” and shows the current workspace only.
+3. `read` refuses files larger than `max_read_bytes` (1 MB) instead of windowing.
+4. Wiki links are supported by the engine but not wired to the vault.
+5. Relative image paths resolve against the page URL, not the workspace.
+6. No find-in-note panel.
+7. core `notes` module still enabled although unused; `codeeditor` still ships
+   its own CM5 vendor (retire both once libreta covers them).
