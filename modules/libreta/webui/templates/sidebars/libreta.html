@@ -1,0 +1,417 @@
+{# libreta sidebar tab: title row + Files / Recent / Pinned, one body each.
+   Logic lives in assets/js/libreta.js (global LIBRETA_PANEL). #}
+<div class="lb-panel" x-data="LIBRETA_PANEL" x-intersect.enter="onShow()">
+
+    <div class="lb-head">
+        <span class="lb-title">Libreta</span>
+        <span class="lb-hint" x-show="sideTab === 'files'" x-text="wsName()"></span>
+    </div>
+
+    <div class="lb-subtabs" role="tablist">
+        <button type="button" class="lb-subtab" role="tab"
+            :class="{ on: sideTab === 'files' }"
+            :aria-selected="sideTab === 'files'"
+            title="Files" @click="setSideTab('files')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        </button>
+        <button type="button" class="lb-subtab" role="tab"
+            :class="{ on: sideTab === 'recent' }"
+            :aria-selected="sideTab === 'recent'"
+            title="Recent" @click="setSideTab('recent')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        </button>
+        <button type="button" class="lb-subtab" role="tab"
+            :class="{ on: sideTab === 'pinned' }"
+            :aria-selected="sideTab === 'pinned'"
+            title="Pinned" @click="setSideTab('pinned')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z"/></svg>
+        </button>
+        <button type="button" class="lb-subtab" role="tab"
+            x-show="opts.values.use_trash !== false"
+            :class="{ on: sideTab === 'trash' }"
+            :aria-selected="sideTab === 'trash'"
+            title="Trash" @click="setSideTab('trash')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+        <button type="button" class="lb-subtab" role="tab"
+            :class="{ on: sideTab === 'options' }"
+            :aria-selected="sideTab === 'options'"
+            title="Options" @click="setSideTab('options')">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
+    </div>
+
+    <div class="lb-body">
+
+        {# ---------------- files ---------------- #}
+        <div class="lb-sec" x-show="sideTab === 'files'">
+            <div class="lb-wsrow">
+                <select class="lb-wspick" x-show="workspaces.length > 1" :value="wsIndex"
+                    title="Workspace" @change="selectWorkspace($event.target.value)">
+                    <template x-for="(ws, i) in workspaces" :key="ws.name + '-' + i">
+                        <option :value="i" x-text="ws.name"></option>
+                    </template>
+                </select>
+                <span class="lb-wsname" x-show="workspaces.length <= 1" x-text="wsName()"></span>
+                <button type="button" class="lb-iconbtn" title="New file" @click="askCreate()">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button type="button" class="lb-iconbtn" title="Reload" @click="reload()">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><polyline points="21 3 21 9 15 9"/></svg>
+                </button>
+            </div>
+
+            <div class="lb-filter">
+                <input class="lb-input" type="text" x-model="filter" spellcheck="false"
+                    autocomplete="off" placeholder="Filter files">
+            </div>
+
+            {# in-app create / rename / delete. No window.prompt/confirm anywhere:
+               native dialogs can be auto-answered by the environment, which made
+               a rename silently do nothing and a delete run without asking. #}
+            <div class="lb-inline" x-show="dialog">
+                <template x-if="dialog && (dialog.kind === 'create' || dialog.kind === 'folder')">
+                    <div>
+                        <div class="lb-inline-label"
+                            x-text="(dialog.kind === 'folder' ? 'New folder in ' : 'New file in ') + wsName() + (dialog.parent ? '/' + dialog.parent : '')"></div>
+                        <input class="lb-input" type="text" x-model="dialog.value"
+                            x-init="$nextTick(() => $el.focus())"
+                            @keydown.enter.prevent="submitDialog()"
+                            @keydown.escape.prevent="cancelDialog()">
+                        <div class="lb-inline-actions">
+                            <button type="button" class="lb-btn lb-btn-sm" @click="submitDialog()"
+                                x-text="dialog.kind === 'folder' ? 'Create folder' : 'Create'"></button>
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" @click="cancelDialog()">Cancel</button>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="dialog && dialog.kind === 'rename'">
+                    <div>
+                        <div class="lb-inline-label" x-text="'Rename ' + dialog.row.name"></div>
+                        <input class="lb-input" type="text" x-model="dialog.value"
+                            x-init="$nextTick(() => $el.focus())"
+                            @keydown.enter.prevent="submitDialog()"
+                            @keydown.escape.prevent="cancelDialog()">
+                        <div class="lb-inline-actions">
+                            <button type="button" class="lb-btn lb-btn-sm" @click="submitDialog()">Rename</button>
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" @click="cancelDialog()">Cancel</button>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="dialog && dialog.kind === 'delete'">
+                    <div>
+                        <div class="lb-inline-label">Move to trash</div>
+                        <div class="lb-inline-file" x-text="dialog.row.path"></div>
+                        <div class="lb-inline-actions">
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-danger"
+                                @click="submitDialog()">Move to trash</button>
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" @click="cancelDialog()">Cancel</button>
+                        </div>
+                        <div class="lb-opt-hint">Nothing is erased: the file moves to <code>.libreta-trash</code> inside the workspace, so it can be recovered.</div>
+                    </div>
+                </template>
+
+                <template x-if="dialog && dialog.kind === 'delete-permanent'">
+                    <div>
+                        <div class="lb-inline-label">Delete permanently</div>
+                        <div class="lb-inline-file" x-text="dialog.row.path"></div>
+                        <div class="lb-inline-actions">
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-danger"
+                                @click="submitDialog()">Delete</button>
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" @click="cancelDialog()">Cancel</button>
+                        </div>
+                        <div class="lb-opt-hint">This removes the file from disk and cannot be undone.</div>
+                    </div>
+                </template>
+            </div>
+
+            <div class="lb-inline-note" x-show="afterAction" x-text="afterAction"></div>
+
+            <div class="lb-tree" @contextmenu.prevent.self="openMenu($event, null)">
+                <template x-for="row in visibleRows()" :key="row.key">
+                    <div class="lb-row" role="button" tabindex="0"
+                        :class="{ dir: row.is_dir, open: row.open }"
+                        :style="'padding-left:' + rowPad(row) + 'px'"
+                        :title="row.path"
+                        @click="rowClick(row)"
+                        @keydown.enter.prevent="rowClick(row)"
+                        @contextmenu.prevent="openMenu($event, row)">
+                        <span class="lb-row-icon" x-html="rowIcon(row)"></span>
+                        <span class="lb-row-name" x-text="row.name"></span>
+                        {# quick delete: follows the trash setting (trash when on, permanent when off).
+                           The context menu also offers the explicit permanent option. #}
+                        <button type="button" class="lb-row-danger" x-show="!row.is_dir"
+                            title="Delete" @click.stop="askDelete(row)">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </div>
+                </template>
+                <div class="lb-empty" x-show="!visibleRows().length" x-text="treeEmpty()"></div>
+            </div>
+        </div>
+
+        {# ---------------- recent ---------------- #}
+        <div class="lb-sec" x-show="sideTab === 'recent'">
+            <div class="lb-cards">
+                <template x-for="card in recentCards" :key="card.key">
+                    <div class="lb-card" :class="{ missing: card.missing }"
+                        :title="card.workspace + '/' + card.path" @click="openCard(card)">
+                        <div class="lb-card-top">
+                            <span class="lb-card-name" x-text="card.name"></span>
+                            <span class="lb-card-md" x-show="card.mode === 'notes'">md</span>
+                        </div>
+                        <div class="lb-card-meta" x-text="card.meta"></div>
+                        <div class="lb-card-snip" x-text="card.snippet || card.note"></div>
+                        <button type="button" class="lb-card-x" title="Remove from recents"
+                            @click.stop="forgetCard(card, 'recent')">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </template>
+                <div class="lb-empty" x-show="!recentCards.length"
+                    x-text="cardsLoading ? 'loading…' : 'No files opened yet.'"></div>
+            </div>
+        </div>
+
+        {# ---------------- pinned ---------------- #}
+        <div class="lb-sec" x-show="sideTab === 'pinned'">
+            <div class="lb-cards">
+                <template x-for="card in pinnedCards" :key="card.key">
+                    <div class="lb-card" :class="{ missing: card.missing }"
+                        :title="card.workspace + '/' + card.path" @click="openCard(card)">
+                        <div class="lb-card-top">
+                            <span class="lb-card-name" x-text="card.name"></span>
+                            <span class="lb-card-md" x-show="card.mode === 'notes'">md</span>
+                        </div>
+                        <div class="lb-card-meta" x-text="card.meta"></div>
+                        <div class="lb-card-snip" x-text="card.snippet || card.note"></div>
+                        <button type="button" class="lb-card-x" title="Unpin"
+                            @click.stop="forgetCard(card, 'pinned')">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </template>
+                <div class="lb-empty" x-show="!pinnedCards.length"
+                    x-text="cardsLoading ? 'loading…' : 'Pin a file with the star in its header.'"></div>
+            </div>
+        </div>
+
+        {# ---------------- trash ---------------- #}
+        <div class="lb-sec" x-show="sideTab === 'trash'">
+            <div class="lb-trash-head">
+                <span class="lb-trash-count"
+                    x-text="trashLoading ? 'loading…' : (trashEntries.length + (trashEntries.length === 1 ? ' file' : ' files'))"></span>
+                <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" x-show="trashEntries.length"
+                    @click="askEmptyTrash()">Empty trash</button>
+            </div>
+
+            {# trash confirmations (in-app, never native) #}
+            <div class="lb-inline" x-show="dialog && (dialog.kind === 'purge' || dialog.kind === 'empty')">
+                <template x-if="dialog && dialog.kind === 'purge'">
+                    <div>
+                        <div class="lb-inline-label">Delete permanently</div>
+                        <div class="lb-inline-file" x-text="dialog.entry.original"></div>
+                        <div class="lb-inline-actions">
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-danger" @click="submitDialog()">Delete</button>
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" @click="cancelDialog()">Cancel</button>
+                        </div>
+                        <div class="lb-opt-hint">This cannot be undone.</div>
+                    </div>
+                </template>
+
+                <template x-if="dialog && dialog.kind === 'empty'">
+                    <div>
+                        <div class="lb-inline-label">Empty the trash</div>
+                        <div class="lb-inline-file" x-text="trashEntries.length + ' file(s), permanently'"></div>
+                        <div class="lb-inline-actions">
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-danger" @click="submitDialog()">Empty trash</button>
+                            <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" @click="cancelDialog()">Cancel</button>
+                        </div>
+                        <div class="lb-opt-hint">This cannot be undone.</div>
+                    </div>
+                </template>
+            </div>
+
+            <div class="lb-inline-note" x-show="afterAction" x-text="afterAction"></div>
+
+            <div class="lb-trash-list">
+                <template x-for="entry in trashEntries" :key="entry.trashed">
+                    <div class="lb-trash-row">
+                        <div class="lb-trash-main">
+                            <span class="lb-trash-name" x-text="entry.name"></span>
+                            <span class="lb-trash-path" x-text="entry.original"></span>
+                            <span class="lb-trash-meta" x-text="entry.when + ' · ' + entry.sizeLabel"></span>
+                        </div>
+                        <div class="lb-trash-actions">
+                            <button type="button" class="lb-btn lb-btn-sm" @click="restoreEntry(entry)">Restore</button>
+                            <button type="button" class="lb-iconbtn" title="Delete permanently"
+                                @click="askPurge(entry)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+                <div class="lb-empty" x-show="!trashEntries.length && !trashLoading">The trash is empty.</div>
+            </div>
+        </div>
+
+        {# ---------------- options ---------------- #}
+        <div class="lb-sec" x-show="sideTab === 'options'">
+            <div class="lb-opts">
+                <div class="lb-empty" x-show="opts.loading && !opts.loaded">loading…</div>
+
+                <template x-if="opts.loaded">
+                    <div class="lb-opts-form">
+
+                        <div class="lb-opt-title">Reading</div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input type="checkbox" class="lb-check" x-model="opts.values.code_autowrap">
+                                <span>Autowrap long lines</span>
+                            </label>
+                            <div class="lb-opt-hint">Applies to Code view. Each document can override it from its header.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input type="checkbox" class="lb-check"
+                                    :checked="$store.libretaView.lineNumbers"
+                                    @change="$store.libretaView.setLineNumbers($event.target.checked)">
+                                <span>Show line numbers</span>
+                            </label>
+                            <div class="lb-opt-hint">Interface only — saved in this browser's storage, never in config.yml, so it stays out of the Settings screen.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input type="checkbox" class="lb-check" x-model="opts.values.notes_block_edit">
+                                <span>Edit notes by block</span>
+                            </label>
+                            <div class="lb-opt-hint">Notes view: click a block to edit it in place (one pane). Off: Notes view is read-only and edits happen in Code view.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-maxread">Largest file to open</label>
+                            <input id="lb-opt-maxread" type="number" class="lb-input" min="1024" step="1024"
+                                x-model.number="opts.values.max_read_bytes">
+                            <div class="lb-opt-hint">bytes — bigger files are refused instead of freezing the view.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-snippet">Card snippet length</label>
+                            <input id="lb-opt-snippet" type="number" class="lb-input" min="40" max="1000" step="10"
+                                x-model.number="opts.values.preview_chars">
+                            <div class="lb-opt-hint">characters shown on Recent and Pinned cards.</div>
+                        </div>
+
+                        <div class="lb-opt-title">Files</div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input type="checkbox" class="lb-check" x-model="opts.values.show_hidden">
+                                <span>Show hidden files</span>
+                            </label>
+                            <div class="lb-opt-hint">dot-files and dot-folders in the tree.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input type="checkbox" class="lb-check" x-model="opts.values.use_trash">
+                                <span>Use a trashcan folder</span>
+                            </label>
+                            <div class="lb-opt-hint">On: deleting moves the file to <code>.libreta-trash</code> and the Trash tab appears. Off: deleting is permanent.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input type="checkbox" class="lb-check" x-model="opts.values.inherit_from_editor">
+                                <span>Use the editor module's folders</span>
+                            </label>
+                            <div class="lb-opt-hint">On: the same folders the AI can reach. Off: this module's own workspaces setting.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-label">Folders</label>
+                            <div class="lb-opt-hint" x-text="opts.inherited
+                                ? 'Inherited from the editor module — change them in Settings or editor.workspaces.'
+                                : 'From this module\'s workspaces setting.'"></div>
+                            <template x-for="ws in opts.workspaces" :key="ws.path">
+                                <div class="lb-ws-line">
+                                    <span class="lb-ws-name" x-text="ws.name"></span>
+                                    <span class="lb-ws-path" :title="ws.path" x-text="ws.path"></span>
+                                    <span class="lb-ws-miss" x-show="!ws.exists" title="folder does not exist">missing</span>
+                                </div>
+                            </template>
+                            <div class="lb-opt-hint" x-show="!opts.workspaces.length">No folders configured.</div>
+                        </div>
+
+                        <div class="lb-opt-title">History</div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-recent">Recent limit</label>
+                            <input id="lb-opt-recent" type="number" class="lb-input" min="1" max="200"
+                                x-model.number="opts.values.recent_max">
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-pinned">Pinned limit</label>
+                            <input id="lb-opt-pinned" type="number" class="lb-input" min="1" max="200"
+                                x-model.number="opts.values.pinned_max">
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-default">Default tab</label>
+                            <select id="lb-opt-default" class="lb-wspick" x-model="opts.values.default_side_tab">
+                                <option value="files">Files</option>
+                                <option value="recent">Recent</option>
+                                <option value="pinned">Pinned</option>
+                            </select>
+                            <div class="lb-opt-hint">used the first time this browser opens Libreta.</div>
+                        </div>
+
+                        <div class="lb-opts-actions">
+                            <button type="button" class="lb-btn" @click="saveOptions()"
+                                :disabled="opts.saving"
+                                x-text="opts.saving ? 'Saving…' : 'Save'"
+                                title="Save these settings to config.yml"></button>
+                            <span class="lb-opt-status" x-text="opts.status"></span>
+                        </div>
+
+                        <div class="lb-opt-hint">These live in config.yml under user_modules → settings → libreta, so they also show up in the Settings screen.</div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+    </div>
+
+    {# right-click menu: position:fixed so the panel's overflow never clips it;
+       closes on any outside click or Escape (same model as the editor's tree) #}
+    <template x-if="menu.open">
+        <div class="lb-menu" :style="`left: ${menu.x}px; top: ${menu.y}px`"
+            @click.window="closeMenu()" @keydown.escape.window="closeMenu()">
+            <button type="button" class="lb-menu-item"
+                @click="menuAction((row) => askCreate(row))">New file</button>
+            <button type="button" class="lb-menu-item"
+                @click="menuAction((row) => askNewFolder(row))">New folder</button>
+            <hr class="lb-menu-sep">
+            <button type="button" class="lb-menu-item" x-show="menu.row && !menu.row.is_dir"
+                @click="menuAction((row) => askRename(row))">Rename</button>
+            <button type="button" class="lb-menu-item" x-show="menu.row"
+                @click="menuAction((row) => copyPath(row))">Copy path</button>
+            <button type="button" class="lb-menu-item" x-show="menu.row && !menu.row.is_dir"
+                x-text="$store.libretaData.isPinned(wsName(), menu.row ? menu.row.path : '') ? 'Unpin' : 'Pin'"
+                @click="menuAction((row) => toggleRowPin(row))"></button>
+            <hr class="lb-menu-sep" x-show="menu.row && !menu.row.is_dir">
+            {# trash is the default path; permanent delete is the advanced option #}
+            <button type="button" class="lb-menu-item danger"
+                x-show="menu.row && !menu.row.is_dir && opts.values.use_trash !== false"
+                @click="menuAction((row) => askTrash(row))">Move to trash</button>
+            <button type="button" class="lb-menu-item danger" x-show="menu.row && !menu.row.is_dir"
+                @click="menuAction((row) => askPermanentDelete(row))">Delete</button>
+        </div>
+    </template>
+</div>

@@ -1,0 +1,8 @@
+{# libreta — mirrors core chat/index.html only to claim the `below_header`
+   slot, where the reading cover is mounted inside #chat-window (same trick
+   theme_gallery and testbench use). Includes MUST be module-prefixed: the
+   jinja loader resolves core templates first, then a PrefixLoader keyed by
+   module name, so an unprefixed path can never land inside this module. #}
+{% macro below_header() %}
+{% include 'libreta/chat/cover.html' %}
+{% endmacro %}
