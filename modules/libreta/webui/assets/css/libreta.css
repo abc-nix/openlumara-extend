@@ -252,14 +252,33 @@ body[data-lb] .lb-cover { display: flex; }
     padding: 6px 8px 0;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+    min-width: 0;
+}
+
+/* the tab strip is the only part that scrolls when there are many tabs */
+.lb-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow-x: auto;
     scrollbar-width: thin;
+}
+
+.lb-tabbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    padding-left: 8px;
 }
 
 .lb-tab {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 0 0 auto;
     max-width: 210px;
     padding: 6px 8px 6px 10px;
     border: 1px solid transparent;
@@ -642,6 +661,17 @@ body[data-lb] .lb-cover { display: flex; }
 
 .lb-cover .lb-editor .cm-scroller { overflow: visible; }
 .lb-cover .lb-editor .cm-content { padding: 6px 0 72px; }
+
+/* Native selection on purpose (drawSelection is off): CM6's selection layer
+   sits behind the content, so opaque line backgrounds — fenced code, table
+   widgets — painted over it and the highlight vanished. The browser's own
+   ::selection draws above backgrounds. */
+.lb-cover .lb-editor .cm-content::selection,
+.lb-cover .lb-editor .cm-content ::selection {
+    background-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+
 
 /* code view and the split view's source pane: monospace + gutter */
 .lb-cover .lb-editor--code .cm-content {

@@ -25,6 +25,14 @@ function lbErr(error) {
     return String(error || "unknown error");
 }
 
+/* The reactive store. Everything that is not a store method itself (the CM6
+   update listener, the keymap) must go through this: the module-level const
+   holds the raw tab objects, and mutating those bypasses Alpine's proxy — no
+   dirty dot, no save button, no live-preview refresh. */
+function lbStore() {
+    try { return Alpine.store("libretaView"); } catch (e) { return null; }
+}
+
 function lbReadRaw(key, fallback) {
     try {
         const raw = localStorage.getItem(key);
@@ -268,26 +276,32 @@ function lbCm6Extensions() {
     const CM = LB_CM6;
     return [
         CM.history(),
-        CM.drawSelection(),
+        // native selection on purpose: CM6's drawSelection paints in a layer
+        // *behind* the content, so opaque line backgrounds (fenced code) hide
+        // it. The browser's own ::selection draws above backgrounds.
         CM.highlightActiveLine(),
         CM.libretaHighlight,
         CM.keymap.of([
             ...CM.defaultKeymap,
             ...CM.historyKeymap,
             CM.indentWithTab,
-            { key: "Mod-s", run: () => { LIBRETA_VIEW.save(); return true; } },
+            { key: "Mod-s", run: () => { const store = lbStore(); if (store) store.save(); return !!store; } },
         ]),
         // atomic.css is scoped under this class
         CM.EditorView.editorAttributes.of({ class: "atomic-cm-editor" }),
         CM.EditorView.updateListener.of((update) => {
-            const tab = LIBRETA_VIEW.activeTab();
+            // MUST go through the reactive store: the module-level const holds the
+            // raw tab objects, and mutating those bypasses Alpine's proxy (no
+            // dirty dot, no save button, no live preview refresh).
+            const store = lbStore();
+            const tab = store ? store.activeTab() : null;
             if (!tab) return;
             // the view is the source of truth for the open buffer; keep the
             // per-tab state (outside the reactive store) in step
             LB_STATES.set(tab.key, update.state);
             if (!update.docChanged) return;
             tab.dirty = true;
-            if (tab.mode === "notes" && LIBRETA_VIEW.split) LIBRETA_VIEW.schedulePreview(tab);
+            if (tab.mode === "notes" && store.split) store.schedulePreview(tab);
         }),
         lbCm6Theme(),
         LB_COMP.wrap.of([]),
@@ -757,7 +771,7 @@ const LIBRETA_VIEW = {
         this.syncEditor();
     },
 
-    close(key, force) {
+    async close(key, force) {
         const index = this.tabs.findIndex((tab) => tab.key === key);
         if (index < 0) return;
 
@@ -776,7 +790,13 @@ const LIBRETA_VIEW = {
         if (this.active === key) {
             const next = this.tabs[Math.min(index, this.tabs.length - 1)];
             this.active = next ? next.key : "";
-            if (next && !next.loaded) this.load(next);
+            // the view still holds the closed document. Point it at whatever is
+            // active now: a stale buffer here would be stashed under the next
+            // tab's key and later saved into the wrong file.
+            if (next) {
+                if (!next.loaded) await this.load(next);
+                else await this.syncEditor();
+            }
         }
         if (!this.tabs.length) this.hide();
         this.persist();
