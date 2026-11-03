@@ -792,10 +792,23 @@ const LIBRETA_VIEW = {
         if (this.isOpen) {
             try { document.body.dataset.lb = this.effectiveView(); } catch (e) { /* no body */ }
         }
+        this.syncDockWidth();
         // the geometry changed; CM6 must re-measure
         requestAnimationFrame(() => {
             try { if (LB_VIEW) LB_VIEW.requestMeasure(); } catch (e) { /* not mounted */ }
         });
+    },
+
+    // The panel is 42% of #chat-window, but percentage *padding* on #chat-window
+    // resolves against its parent — different bases, so the chat used to reserve
+    // ~128px more than the panel took. Pin the width in px once and share it.
+    syncDockWidth() {
+        const win = document.getElementById("chat-window");
+        if (!win) return;
+        try {
+            const px = Math.round(win.getBoundingClientRect().width * 0.42);
+            document.documentElement.style.setProperty("--lb-dock-w", px + "px");
+        } catch (e) { /* no document */ }
     },
 
     viewLabel() {
@@ -1128,6 +1141,7 @@ const LIBRETA_VIEW = {
     /* ---- overlay ---- */
     show() {
         this.isOpen = true;
+        this.syncDockWidth();
         try { document.body.dataset.lb = this.effectiveView(); } catch (e) { /* no body yet */ }
         this.persist();
         try { Alpine.store("libretaData").load(); } catch (e) { /* not registered yet */ }
@@ -1967,4 +1981,10 @@ document.addEventListener("keydown", (event) => {
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (target && target.isContentEditable)) return;
 
     view.hide();
+});
+
+// keep the docked panel and the space reserved for it in step when the window
+// resizes (the width is pinned in px so padding and panel share one base)
+window.addEventListener("resize", () => {
+    try { Alpine.store("libretaView").syncDockWidth(); } catch (e) { /* store not ready */ }
 });
