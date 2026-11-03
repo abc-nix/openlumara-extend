@@ -468,6 +468,19 @@ function lbFindPanel(view) {
         timer = setTimeout(fn, ms === undefined ? 160 : ms);
     }
 
+    // findNext/findPrevious call input.select() on the active search field, which
+    // selects the whole query after every jump and makes the next keystroke
+    // overwrite it. Keep the caret where the user left it.
+    function keepCaret(run) {
+        if (document.activeElement !== searchInput) { run(); return; }
+        const start = searchInput.selectionStart;
+        const end = searchInput.selectionEnd;
+        run();
+        if (document.activeElement === searchInput) {
+            try { searchInput.setSelectionRange(start, end); } catch (e) { /* not a text field */ }
+        }
+    }
+
     function commit(jump) {
         const query = new CM.SearchQuery(spec());
         if (lastQuery && query.eq(lastQuery)) return;
@@ -476,7 +489,7 @@ function lbFindPanel(view) {
         later(refresh);
         if (jump && query.valid) {
             clearTimeout(jumpTimer);
-            jumpTimer = setTimeout(() => CM.findNext(view), 260);
+            jumpTimer = setTimeout(() => keepCaret(() => CM.findNext(view)), 260);
         }
     }
 
@@ -488,7 +501,7 @@ function lbFindPanel(view) {
     searchInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             event.preventDefault();
-            if (event.shiftKey) CM.findPrevious(view); else CM.findNext(view);
+            keepCaret(() => (event.shiftKey ? CM.findPrevious(view) : CM.findNext(view)));
             later(refresh, 80);
         } else if (event.key === "Escape") {
             event.preventDefault();
@@ -516,8 +529,8 @@ function lbFindPanel(view) {
         try { view.requestMeasure(); } catch (e) { /* not mounted */ }
     });
 
-    prev.addEventListener("click", () => { CM.findPrevious(view); later(refresh, 80); });
-    next.addEventListener("click", () => { CM.findNext(view); later(refresh, 80); });
+    prev.addEventListener("click", () => { keepCaret(() => CM.findPrevious(view)); later(refresh, 80); });
+    next.addEventListener("click", () => { keepCaret(() => CM.findNext(view)); later(refresh, 80); });
     closeBtn.addEventListener("click", () => CM.closeSearchPanel(view));
     caseBtn.addEventListener("click", () => { setOn(caseBtn, !isOn(caseBtn)); commit(true); });
     wordBtn.addEventListener("click", () => { setOn(wordBtn, !isOn(wordBtn)); commit(true); });
