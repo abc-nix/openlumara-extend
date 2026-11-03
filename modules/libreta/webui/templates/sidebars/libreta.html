@@ -307,6 +307,14 @@
                             <div class="lb-opt-hint">characters shown on Recent and Pinned cards.</div>
                         </div>
 
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-pad">Docked / floating side padding</label>
+                            <input id="lb-opt-pad" type="number" class="lb-input" min="0" max="80" step="2"
+                                :value="$store.libretaView.viewPadding"
+                                @input="$store.libretaView.setViewPadding($event.target.value)">
+                            <div class="lb-opt-hint">pixels between the text and the panel edges in docked and floating views (a browser preference, not a config key).</div>
+                        </div>
+
                         <div class="lb-opt-title">Files</div>
 
                         <div class="lb-opt">

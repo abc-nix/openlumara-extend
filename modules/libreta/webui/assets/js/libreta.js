@@ -672,6 +672,7 @@ const LIBRETA_VIEW = {
     notesLivePreview: true,  // notes mode: one live-preview editor (config key notes_block_edit)
     split: false,          // notes mode: source + live preview side by side
     lineNumbers: true,     // interface preference (localStorage), not a config setting
+    viewPadding: 16,       // text inset in docked/floating (localStorage preference)
     editorReady: false,
     cmFailed: false,       // CodeMirror could not load -> fall back to the rendered view
     conflict: null,        // {message, path} while a save was refused by the mtime guard
@@ -732,6 +733,8 @@ const LIBRETA_VIEW = {
         this.split = lbReadJson("libreta.split", false) === true;
         const view = lbReadJson(LB_LS.view, "full");
         this.view = LB_VIEWS.indexOf(view) >= 0 ? view : "full";
+        this.viewPadding = Math.max(0, Math.min(80, Number(lbReadJson("libreta.viewPadding", 16)) || 16));
+        this.applyViewPadding();
 
         const saved = lbReadJson(LB_LS.tabs, []);
         if (Array.isArray(saved)) {
@@ -797,6 +800,18 @@ const LIBRETA_VIEW = {
 
     viewLabel() {
         return { full: "full screen", docked: "docked right", floating: "floating" }[this.view] || this.view;
+    },
+
+    /* ---- view padding (browser preference) ---- */
+    applyViewPadding() {
+        try { document.documentElement.style.setProperty("--lb-view-pad", this.viewPadding + "px"); } catch (e) { /* no document */ }
+    },
+
+    setViewPadding(px) {
+        const value = Math.max(0, Math.min(80, Math.round(Number(px) || 0)));
+        this.viewPadding = value;
+        lbWriteJson("libreta.viewPadding", value);
+        this.applyViewPadding();
     },
 
     makeTab(workspace, path, mode, wrap) {

@@ -257,6 +257,12 @@ body[data-lb="docked"] #chat-window {
     padding-right: calc(var(--lb-dock-w, 42%) + 8px);
 }
 
+/* narrow views: give the text room from the panel edges */
+body[data-lb="docked"] .lb-editor,
+body[data-lb="docked"] .lb-doc { padding-left: var(--lb-view-pad, 16px); padding-right: var(--lb-view-pad, 16px); }
+body[data-lb="floating"] .lb-editor,
+body[data-lb="floating"] .lb-doc { padding-left: calc(var(--lb-view-pad, 16px) + 6px); padding-right: calc(var(--lb-view-pad, 16px) + 6px); }
+
 body[data-lb="floating"] .lb-cover {
     inset: 6vh 6vw;
     height: 82vh;
