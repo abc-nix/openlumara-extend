@@ -731,6 +731,7 @@ const LIBRETA_VIEW = {
             loaded: false,
             loading: false,
             content: "",
+            eol: "\n",          // line endings of the file on disk (CM6 works in LF)
             html: "",
             mtime: 0,
             size: 0,
@@ -871,15 +872,19 @@ const LIBRETA_VIEW = {
         this.busy = true;
         this.error = "";
         try {
+            const text = this.sourceOf(tab);
+            // the buffer only has LF (CM6 normalises); write CRLF back when the
+            // file was opened that way, so saving never rewrites a Windows file
+            const payload = tab.eol === "\r\n" ? text.replace(/\n/g, "\r\n") : text;
             const data = await simpleApiPost("/api/ext/libreta/save", {
                 workspace: tab.workspace,
                 path: tab.path,
-                content: this.sourceOf(tab),
+                content: payload,
                 mtime: force ? 0 : tab.mtime,
                 force: !!force,
             });
 
-            tab.content = this.sourceOf(tab);
+            tab.content = text;
             tab.mtime = data.mtime || tab.mtime;
             tab.size = data.size || tab.size;
             tab.dirty = false;
@@ -978,7 +983,12 @@ const LIBRETA_VIEW = {
                 "/api/ext/libreta/read?workspace=" + encodeURIComponent(tab.workspace) +
                 "&path=" + encodeURIComponent(tab.path)
             );
-            tab.content = data.content || "";
+            const raw = data.content || "";
+            // the server sends the file verbatim (newline="" in files.py), but
+            // CM6 works in LF: keep the file's endings for the save path and
+            // normalise the cached copy so it matches the buffer
+            tab.eol = /\r\n/.test(raw) ? "\r\n" : "\n";
+            tab.content = raw.replace(/\r\n/g, "\n");
             tab.mtime = data.mtime || 0;
             tab.size = data.size || 0;
             tab.parent = data.parent || "";

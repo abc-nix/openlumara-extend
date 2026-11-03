@@ -166,7 +166,10 @@ def read_text(root, rel, max_bytes=1_000_000) -> dict:
         )
 
     try:
-        with open(target, "r", encoding="utf-8") as f:
+        # newline="" disables universal-newline translation: a CRLF file must
+        # reach the editor with its \r intact, otherwise the first save would
+        # rewrite every line ending (and show up as a whole-file diff).
+        with open(target, "r", encoding="utf-8", newline="") as f:
             content = f.read()
     except UnicodeDecodeError as e:
         raise FileError("this looks like a binary file and cannot be opened here") from e
@@ -230,7 +233,8 @@ def write_text(root, rel, content, expected_mtime=None, force=False) -> dict:
             )
 
     try:
-        with open(target, "w", encoding="utf-8") as f:
+        # newline="" writes the line endings the caller sent, verbatim
+        with open(target, "w", encoding="utf-8", newline="") as f:
             f.write(clean_content(content))
     except OSError as e:
         raise FileError(str(e)) from e
@@ -255,7 +259,7 @@ def create_file(root, rel, content="") -> dict:
         if parent and not os.path.isdir(parent):
             os.makedirs(parent, exist_ok=True)
         # 'x' refuses to clobber, even if something appeared since the check
-        with open(target, "x", encoding="utf-8") as f:
+        with open(target, "x", encoding="utf-8", newline="") as f:
             f.write(clean_content(content))
     except FileExistsError as e:
         raise FileError("something already exists at that name") from e
