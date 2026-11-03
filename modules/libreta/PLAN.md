@@ -35,6 +35,10 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
   CM6 editor extras (fold, brackets, selection matches, smart Enter, Ctrl+/),
   go-to-line, caret position; optional tree-sitter lint. Inventory and skip list
   live in `Notes/libreta-coder-parity.md`.
+- **P2.1 — next: chat views.** full (current) / docked (right panel, chat
+  narrows) / floating (centred card, tab dropdown instead of tabs), remembered
+  in localStorage, one cycle button in the doc bar. Full design and verification
+  list: `Notes/libreta-views-plan.md` (not started).
 - **P3 — not started.** Wikilinks + backlinks, tags/properties, callouts,
   attachments, in-vault search.
 
