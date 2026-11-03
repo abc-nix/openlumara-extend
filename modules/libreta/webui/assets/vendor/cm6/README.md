@@ -7,7 +7,10 @@ way `webui/assets/vendor/codemirror` shipped CodeMirror 5.
 ## What is inside
 
 - CodeMirror 6: `@codemirror/state`, `@codemirror/view`, `@codemirror/language`,
-  `@codemirror/commands`, `@codemirror/lang-markdown`
+  `@codemirror/commands`, `@codemirror/search`, `@codemirror/lang-markdown`
+  (search is the find/replace engine: query state, match highlighting, regex
+  including multiline patterns; libreta supplies its own panel through
+  `search({createPanel})`)
 - code languages: `@codemirror/lang-javascript`, `-python`, `-json`, `-yaml`,
   `-css`, `-html`, `-xml`
 - `@lezer/markdown` (with the GFM table extension)
@@ -17,7 +20,7 @@ way `webui/assets/vendor/codemirror` shipped CodeMirror 5.
 The bundle exposes `window.LibretaCM`. React is marked external and is **not**
 included (the live-preview engine's React wrapper is unused).
 
-Size: 612 KB raw / 217 KB gzipped. CodeMirror 5 (the previous engine, 1.2 MB on
+Size: 630 KB raw / 223 KB gzipped. CodeMirror 5 (the previous engine, 1.2 MB on
 disk, 546 KB loaded) is no longer vendored here.
 
 ## How it was built
@@ -25,7 +28,7 @@ disk, 546 KB loaded) is no longer vendored here.
 ```bash
 mkdir -p /tmp/cm6build && cd /tmp/cm6build
 npm i esbuild@0.25 @codemirror/state @codemirror/view @codemirror/language \
-  @codemirror/commands @codemirror/lang-markdown @codemirror/lang-javascript \
+  @codemirror/commands @codemirror/search @codemirror/lang-markdown @codemirror/lang-javascript \
   @codemirror/lang-python @codemirror/lang-json @codemirror/lang-yaml \
   @codemirror/lang-css @codemirror/lang-html @codemirror/lang-xml \
   @lezer/common @lezer/highlight @lezer/markdown @plannotator/atomic-editor \
@@ -37,6 +40,7 @@ cp node_modules/@plannotator/atomic-editor/dist/styles/inline-preview.css atomic
 ```
 
 Versions used: `@codemirror/view` 6.43.15, `@codemirror/lang-markdown` 6.5.2,
+`@codemirror/search` 6.7.2,
 `@plannotator/atomic-editor` 0.9.0.
 
 ## Licensing

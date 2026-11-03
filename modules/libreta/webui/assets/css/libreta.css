@@ -709,6 +709,104 @@ body[data-lb] .lb-cover { display: flex; }
 /* the split view scrolls inside its own pane */
 .lb-docwrap.split .lb-editor { height: 100%; overflow: auto; }
 
+/* ---- find & replace bar (CM6 panel, our DOM) ---- */
+.lb-cover .cm-panels {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 6px 10px;
+    color: var(--text-primary);
+}
+
+.lb-find { display: flex; flex-direction: column; gap: 5px; }
+
+.lb-find-row { display: flex; align-items: center; gap: 4px; }
+
+/* display:flex beats the UA rule for [hidden], so the replace row would always
+   show; this keeps the toggle meaningful */
+.lb-find-row[hidden] { display: none; }
+
+.lb-find-input {
+    flex: 1 1 auto;
+    min-width: 80px;
+    height: 24px;
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 12.5px;
+}
+
+.lb-find-input:focus { outline: none; border-color: var(--accent); }
+
+.lb-find-count {
+    flex: 0 0 auto;
+    min-width: 40px;
+    text-align: right;
+    font-size: 10.5px;
+    color: var(--text-muted);
+}
+
+.lb-find-empty .lb-find-count { color: #ff5f7a; }
+
+.lb-find-btn,
+.lb-find-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.lb-find-btn svg { width: 14px; height: 14px; }
+
+.lb-find-btn:hover,
+.lb-find-toggle:hover { color: var(--text-primary); background: var(--bg-primary); }
+
+.lb-find-btn.on {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.lb-find-toggle { width: 20px; }
+
+.lb-find-action {
+    flex: 0 0 auto;
+    height: 22px;
+    padding: 0 9px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.lb-find-action:hover { border-color: var(--accent); }
+
+/* match highlighting (classes come from the search engine) */
+.lb-cover .cm-searchMatch {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-radius: 2px;
+}
+
+.lb-cover .cm-searchMatch-selected {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 /* ==========================================================================
    save conflict banner + small buttons
    ========================================================================== */

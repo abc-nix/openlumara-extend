@@ -809,8 +809,11 @@ const CHAT_NAV_FINDBAR = {
     },
 
     shouldTakeOver(target) {
+        // libreta owns Ctrl+F while its cover is open: it has its own
+        // find/replace bar for the document being edited
+        if (document.body && document.body.dataset.lb) return false;
         if (!(target instanceof Element)) return true;
-        return !target.closest("#sidebar, #modals");
+        return !target.closest("#sidebar, #modals, .lb-cover");
     }
 };
 

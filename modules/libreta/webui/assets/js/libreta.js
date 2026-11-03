@@ -284,6 +284,7 @@ function lbCm6Extensions() {
         CM.keymap.of([
             ...CM.defaultKeymap,
             ...CM.historyKeymap,
+            ...CM.searchKeymap,   // Mod-f / Mod-g / F3 / Escape while the panel is open
             CM.indentWithTab,
             { key: "Mod-s", run: () => { const store = lbStore(); if (store) store.save(); return !!store; } },
         ]),
@@ -304,6 +305,8 @@ function lbCm6Extensions() {
             if (tab.mode === "notes" && store.split) store.schedulePreview(tab);
         }),
         lbCm6Theme(),
+        // find & replace: engine from @codemirror/search, panel built below
+        CM.search({ top: true, createPanel: lbFindPanel }),
         LB_COMP.wrap.of([]),
         LB_COMP.numbers.of([]),
         LB_COMP.lang.of([]),
@@ -321,6 +324,237 @@ function lbStateFor(tab) {
     });
     LB_STATES.set(tab.key, state);
     return state;
+}
+
+/* ---- find & replace ----
+
+   The engine is @codemirror/search (query state, match highlighting, regex —
+   including multiline patterns — and replace as real transactions so undo
+   works). Only the panel is ours: `search({createPanel})` replaces the stock
+   panel with this compact bar, which folds a replace row open instead of
+   showing two rows all the time. */
+function lbFindPanel(view) {
+    const CM = LB_CM6;
+    const root = document.createElement("div");
+    root.className = "lb-find";
+
+    const mk = (tag, cls, text) => {
+        const node = document.createElement(tag);
+        if (cls) node.className = cls;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    };
+    const svgBtn = (cls, title, path) => {
+        const node = mk("button", cls);
+        node.type = "button";
+        node.title = title;
+        node.setAttribute("aria-label", title);
+        node.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + path + "</svg>";
+        return node;
+    };
+
+    const toggle = mk("button", "lb-find-toggle", "\u25b8");
+    toggle.type = "button";
+    toggle.title = "Show replace";
+    toggle.setAttribute("aria-label", "Show replace");
+
+    const searchInput = mk("input", "lb-find-input");
+    searchInput.type = "text";
+    searchInput.placeholder = "Find";
+    searchInput.spellcheck = false;
+    searchInput.setAttribute("aria-label", "Find");
+    searchInput.setAttribute("main-field", "true");   // the engine focuses this
+
+    const count = mk("span", "lb-find-count");
+
+    const prev = svgBtn("lb-find-btn", "Previous match (Shift+Enter)", '<path d="m18 15-6-6-6 6"/>');
+    const next = svgBtn("lb-find-btn", "Next match (Enter)", '<path d="m6 9 6 6 6-6"/>');
+    const caseBtn = mk("button", "lb-find-btn lb-find-toggle-opt", "Aa");
+    caseBtn.type = "button";
+    caseBtn.title = "Match case";
+    const wordBtn = mk("button", "lb-find-btn lb-find-toggle-opt", "ab");
+    wordBtn.type = "button";
+    wordBtn.title = "Whole word";
+    const reBtn = mk("button", "lb-find-btn lb-find-toggle-opt", ".*");
+    reBtn.type = "button";
+    reBtn.title = "Regular expression (use \\n to match a line break)";
+    const closeBtn = svgBtn("lb-find-btn", "Close (Esc)", '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>');
+
+    const rowMain = mk("div", "lb-find-row");
+    rowMain.append(toggle, searchInput, count, prev, next, caseBtn, wordBtn, reBtn, closeBtn);
+
+    const replaceInput = mk("input", "lb-find-input");
+    replaceInput.type = "text";
+    replaceInput.placeholder = "Replace";
+    replaceInput.spellcheck = false;
+    replaceInput.setAttribute("aria-label", "Replace");
+    const replaceBtn = mk("button", "lb-find-action", "Replace");
+    replaceBtn.type = "button";
+    const replaceAllBtn = mk("button", "lb-find-action", "All");
+    replaceAllBtn.type = "button";
+    replaceAllBtn.title = "Replace all matches";
+
+    const rowReplace = mk("div", "lb-find-row lb-find-row-replace");
+    rowReplace.hidden = true;
+    rowReplace.append(replaceInput, replaceBtn, replaceAllBtn);
+
+    root.append(rowMain, rowReplace);
+
+    let lastQuery = null;
+    let timer = null;
+    let jumpTimer = null;
+    let openReplace = false;
+
+    const isOn = (btn) => btn.classList.contains("on");
+    const setOn = (btn, on) => btn.classList.toggle("on", !!on);
+
+    const spec = () => ({
+        search: searchInput.value,
+        replace: replaceInput.value,
+        caseSensitive: isOn(caseBtn),
+        regexp: isOn(reBtn),
+        wholeWord: isOn(wordBtn),
+    });
+
+    function matches(limit) {
+        const doc = view.state.doc;
+        const s = spec();
+        const out = [];
+        const wordy = (ch) => !!ch && (ch === "_" || /[0-9A-Za-z]/.test(ch));
+        try {
+            if (s.regexp) {
+                const cur = new CM.RegExpCursor(doc, s.search, { ignoreCase: !s.caseSensitive }, 0, doc.length);
+                while (!cur.done && out.length < limit) {
+                    cur.next();
+                    if (cur.done) break;
+                    const { from, to } = cur.value;
+                    if (s.wholeWord) {
+                        const before = from > 0 ? doc.sliceString(from - 1, from) : "";
+                        const after = to < doc.length ? doc.sliceString(to, to + 1) : "";
+                        if (wordy(before) || wordy(after)) continue;
+                    }
+                    out.push({ from, to });
+                }
+            } else {
+                const norm = s.caseSensitive ? null : (text) => text.toLowerCase();
+                const cur = new CM.SearchCursor(doc, s.search, 0, doc.length, norm || undefined);
+                while (!cur.done && out.length < limit) {
+                    cur.next();
+                    if (cur.done) break;
+                    out.push({ from: cur.value.from, to: cur.value.to });
+                }
+            }
+        } catch (e) { /* invalid pattern: no matches */ }
+        return out;
+    }
+
+    function refresh() {
+        if (!searchInput.value) {
+            count.textContent = "";
+            root.classList.remove("lb-find-empty");
+            return;
+        }
+        const found = matches(999);
+        const sel = view.state.selection.main;
+        const at = found.findIndex((m) => m.from === sel.from && m.to === sel.to);
+        if (!found.length) count.textContent = "0";
+        else if (at >= 0) count.textContent = at + 1 + "/" + found.length;
+        else count.textContent = found.length + (found.length >= 999 ? "+" : "");
+        root.classList.toggle("lb-find-empty", !found.length);
+    }
+
+    function later(fn, ms) {
+        clearTimeout(timer);
+        timer = setTimeout(fn, ms === undefined ? 160 : ms);
+    }
+
+    function commit(jump) {
+        const query = new CM.SearchQuery(spec());
+        if (lastQuery && query.eq(lastQuery)) return;
+        lastQuery = query;
+        view.dispatch({ effects: CM.setSearchQuery.of(query) });
+        later(refresh);
+        if (jump && query.valid) {
+            clearTimeout(jumpTimer);
+            jumpTimer = setTimeout(() => CM.findNext(view), 260);
+        }
+    }
+
+    // typing jumps to the first match after a short pause (Obsidian behaviour),
+    // so the Replace button always has a match selected when it is clicked
+    searchInput.addEventListener("input", () => commit(true));
+    replaceInput.addEventListener("input", () => commit(false));
+
+    searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            if (event.shiftKey) CM.findPrevious(view); else CM.findNext(view);
+            later(refresh, 80);
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            CM.closeSearchPanel(view);
+        }
+    });
+
+    replaceInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            CM.replaceNext(view);
+            later(refresh, 80);
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            CM.closeSearchPanel(view);
+        }
+    });
+
+    toggle.addEventListener("click", () => {
+        openReplace = !openReplace;
+        rowReplace.hidden = !openReplace;
+        toggle.textContent = openReplace ? "\u25be" : "\u25b8";
+        toggle.title = openReplace ? "Hide replace" : "Show replace";
+        if (openReplace) replaceInput.focus();
+        try { view.requestMeasure(); } catch (e) { /* not mounted */ }
+    });
+
+    prev.addEventListener("click", () => { CM.findPrevious(view); later(refresh, 80); });
+    next.addEventListener("click", () => { CM.findNext(view); later(refresh, 80); });
+    closeBtn.addEventListener("click", () => CM.closeSearchPanel(view));
+    caseBtn.addEventListener("click", () => { setOn(caseBtn, !isOn(caseBtn)); commit(true); });
+    wordBtn.addEventListener("click", () => { setOn(wordBtn, !isOn(wordBtn)); commit(true); });
+    reBtn.addEventListener("click", () => { setOn(reBtn, !isOn(reBtn)); commit(true); });
+    replaceBtn.addEventListener("click", () => { CM.replaceNext(view); later(refresh, 80); });
+    replaceAllBtn.addEventListener("click", () => { CM.replaceAll(view); later(refresh, 120); });
+
+    return {
+        dom: root,
+        top: true,
+        mount() {
+            const query = CM.getSearchQuery(view.state);
+            searchInput.value = query.search || "";
+            replaceInput.value = query.replace || "";
+            setOn(caseBtn, query.caseSensitive);
+            setOn(reBtn, query.regexp);
+            setOn(wordBtn, query.wholeWord);
+            lastQuery = query;
+            refresh();
+            searchInput.focus();
+            searchInput.select();
+        },
+        update(update) {
+            if (update.docChanged || update.selectionSet) later(refresh);
+            const query = CM.getSearchQuery(update.state);
+            if (lastQuery && !query.eq(lastQuery)) {
+                searchInput.value = query.search || "";
+                replaceInput.value = query.replace || "";
+                setOn(caseBtn, query.caseSensitive);
+                setOn(reBtn, query.regexp);
+                setOn(wordBtn, query.wholeWord);
+                lastQuery = query;
+                later(refresh);
+            }
+        },
+        destroy() { clearTimeout(timer); clearTimeout(jumpTimer); },
+    };
 }
 
 /* --------------------------------------------------------- store: recents/pins */
@@ -1453,17 +1687,31 @@ document.addEventListener("alpine:init", () => {
     }
 });
 
-// Ctrl/Cmd+S saves the active document (works in notes mode too)
+// Ctrl/Cmd+S saves, Ctrl/Cmd+F opens find & replace. The editor's own keymap
+// already handles both while it has focus; this covers the cover being open
+// with focus somewhere else (chat_nav no longer steals Ctrl+F inside .lb-cover).
 document.addEventListener("keydown", (event) => {
     const key = String(event.key || "").toLowerCase();
-    if (key !== "s" || !(event.ctrlKey || event.metaKey)) return;
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
 
     let view = null;
     try { view = Alpine.store("libretaView"); } catch (e) { return; }
     if (!view || !view.isOpen) return;
 
-    event.preventDefault();
-    view.save();
+    if (key === "s") {
+        event.preventDefault();
+        view.save();
+        return;
+    }
+
+    if (key === "f") {
+        const target = event.target;
+        const tag = target ? String(target.tagName || "").toUpperCase() : "";
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (target && target.isContentEditable)) return;
+        if (!LB_VIEW || !LB_CM6) return;
+        event.preventDefault();
+        LB_CM6.openSearchPanel(LB_VIEW);
+    }
 });
 
 // Esc closes the reading cover, except while typing in a field
