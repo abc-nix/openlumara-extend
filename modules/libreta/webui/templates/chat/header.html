@@ -7,8 +7,10 @@
 {% macro right() %}
 {% if module_config.get("enable_webui_extension", true) %}
 <button type="button" class="btn lb-header-btn"
-    @click="$store.libretaView.show()"
-    title="Notes &amp; code — open libreta (Esc closes it)">
+    @click="$store.libretaView.isOpen &amp;&amp; $store.libretaView.view !== 'full'
+        ? $store.libretaView.hide() : $store.libretaView.show()"
+    :title="$store.libretaView.isOpen &amp;&amp; $store.libretaView.view !== 'full'
+        ? 'Close libreta' : 'Notes &amp; code — open libreta (Esc closes it)'">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6"/><path d="M6 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2"/><path d="M9 3v18"/><path d="M12 8h4"/><path d="M12 12h4"/></svg>
     <span class="lb-header-label">Notes</span>
 </button>
