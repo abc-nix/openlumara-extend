@@ -30,6 +30,11 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
   editor (Obsidian style): markdown stays the text, formatting renders in place,
   markers appear only on the caret's line. Split view survives as an optional
   escape hatch; block-by-block editing is removed. Code view moved to CM6 too.
+- **P2 — in progress (parity with coder/codeeditor).** Quick-open Ctrl/⌘+P
+  done (route + palette); codeeditor disabled. Next: autosave interval, then the
+  CM6 editor extras (fold, brackets, selection matches, smart Enter, Ctrl+/),
+  go-to-line, caret position; optional tree-sitter lint. Inventory and skip list
+  live in `Notes/libreta-coder-parity.md`.
 - **P3 — not started.** Wikilinks + backlinks, tags/properties, callouts,
   attachments, in-vault search.
 
