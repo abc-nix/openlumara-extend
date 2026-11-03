@@ -688,6 +688,11 @@ body[data-lb] .lb-cover { display: flex; }
 .lb-cover .lb-editor--code .cm-gutters {
     background: var(--bg-primary);
     border-right: 1px solid var(--border-color);
+    /* the gutter otherwise inherits the page's 16px sans-serif and the line
+       numbers dwarf the 12.5px monospace code */
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
 }
 
 .lb-cover .lb-editor--code .cm-lineNumbers .cm-gutterElement { opacity: .75; }
