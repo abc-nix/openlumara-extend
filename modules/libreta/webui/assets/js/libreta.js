@@ -18,7 +18,12 @@ const LB_LS = {
     tabs: "libreta.tabs",
     active: "libreta.active",
     open: "libreta.open",
+    view: "libreta.view",
 };
+
+// cover presentation modes, in cycle order
+const LB_VIEWS = ["docked", "full", "floating"];
+const LB_NARROW = 900;   // below this, dock/floating fall back to full
 
 function lbErr(error) {
     if (error && typeof error === "object") return error.message || error.error || JSON.stringify(error);
@@ -658,6 +663,7 @@ const LIBRETA_DATA = {
 /* ------------------------------------------------------- store: open documents */
 const LIBRETA_VIEW = {
     isOpen: false,
+    view: "full",        // full | docked | floating (remembered)
     tabs: [],
     active: "",
     busy: false,
@@ -724,6 +730,8 @@ const LIBRETA_VIEW = {
     restore() {
         this.lineNumbers = lbReadJson("libreta.lineNumbers", true) !== false;
         this.split = lbReadJson("libreta.split", false) === true;
+        const view = lbReadJson(LB_LS.view, "full");
+        this.view = LB_VIEWS.indexOf(view) >= 0 ? view : "full";
 
         const saved = lbReadJson(LB_LS.tabs, []);
         if (Array.isArray(saved)) {
@@ -750,6 +758,45 @@ const LIBRETA_VIEW = {
         })));
         lbWriteJson(LB_LS.active, this.active);
         lbWriteJson(LB_LS.open, this.isOpen);
+        lbWriteJson(LB_LS.view, this.view);
+    },
+
+    /* ---- cover views: full / docked / floating ---- */
+    effectiveView() {
+        // a docked panel on a narrow window is broken by definition
+        if (this.view !== "full" && window.innerWidth < LB_NARROW) return "full";
+        return this.view;
+    },
+
+    viewNext() {
+        const index = LB_VIEWS.indexOf(this.view);
+        return LB_VIEWS[(index + 1) % LB_VIEWS.length];
+    },
+
+    setView(view) {
+        if (LB_VIEWS.indexOf(view) < 0 || view === this.view) return;
+        if (window.innerWidth < LB_NARROW) return;   // only full fits
+        this.view = view;
+        lbWriteJson(LB_LS.view, view);
+        this.applyView();
+    },
+
+    cycleView() {
+        this.setView(this.viewNext());
+    },
+
+    applyView() {
+        if (this.isOpen) {
+            try { document.body.dataset.lb = this.effectiveView(); } catch (e) { /* no body */ }
+        }
+        // the geometry changed; CM6 must re-measure
+        requestAnimationFrame(() => {
+            try { if (LB_VIEW) LB_VIEW.requestMeasure(); } catch (e) { /* not mounted */ }
+        });
+    },
+
+    viewLabel() {
+        return { full: "full screen", docked: "docked right", floating: "floating" }[this.view] || this.view;
     },
 
     makeTab(workspace, path, mode, wrap) {
@@ -1066,7 +1113,7 @@ const LIBRETA_VIEW = {
     /* ---- overlay ---- */
     show() {
         this.isOpen = true;
-        try { document.body.dataset.lb = "1"; } catch (e) { /* no body yet */ }
+        try { document.body.dataset.lb = this.effectiveView(); } catch (e) { /* no body yet */ }
         this.persist();
         try { Alpine.store("libretaData").load(); } catch (e) { /* not registered yet */ }
     },

@@ -7,7 +7,7 @@
 <div class="lb-cover" role="region" aria-label="Libreta">
 
     {# ---------------- document tabs ---------------- #}
-    <div class="lb-tabbar">
+    <div class="lb-tabbar" x-show="$store.libretaView.view === 'full'">
         {# only the tab strip scrolls; the bar buttons stay pinned on the right #}
         <div class="lb-tabs">
             <template x-for="tab in $store.libretaView.tabs" :key="tab.key">
@@ -37,7 +37,19 @@
 
     {# ---------------- document bar: path, mode switch, pin ---------------- #}
     <div class="lb-docbar" x-show="$store.libretaView.activeTab()">
-        <span class="lb-docpath" x-text="$store.libretaView.activePath()"></span>
+        <span class="lb-docpath" x-show="$store.libretaView.view === 'full'"
+            x-text="$store.libretaView.activePath()"></span>
+
+        {# docked / floating show one file: a picker stands in for the tab strip #}
+        <select class="lb-file-picker" x-show="$store.libretaView.view !== 'full'"
+            :value="$store.libretaView.active"
+            @change="$store.libretaView.activate($event.target.value)"
+            title="Switch file">
+            <template x-for="tab in $store.libretaView.tabs" :key="tab.key">
+                <option :value="tab.key" x-text="tab.name"></option>
+            </template>
+        </select>
+
         <span class="lb-modes" role="tablist" aria-label="View mode">
             <button type="button" class="lb-mode" role="tab"
                 :class="{ on: $store.libretaView.modeOf() === 'notes' }"
@@ -56,6 +68,11 @@
                 : 'Split view — edit raw source beside a rendered preview'"
             @click="$store.libretaView.toggleSplit()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+        </button>
+        <button type="button" class="lb-iconbtn lb-viewbtn"
+            :title="'Cover: ' + $store.libretaView.viewLabel() + ' — click for ' + $store.libretaView.viewNext()"
+            @click="$store.libretaView.cycleView()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="13" y="7" width="5" height="10" rx="1"/></svg>
         </button>
         <button type="button" class="lb-iconbtn lb-savebtn"
             x-show="$store.libretaView.dirtyOf()"
