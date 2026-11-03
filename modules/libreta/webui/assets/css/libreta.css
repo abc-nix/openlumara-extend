@@ -1154,3 +1154,29 @@ body[data-lb] .lb-cover { display: flex; }
 .lb-row:hover .lb-row-danger,
 .lb-row:focus-within .lb-row-danger { display: flex; }
 .lb-row-danger:hover { color: #ff5f7a; background: var(--bg-primary); }
+
+/* ==========================================================================
+   chat header: libreta entry point (filled through the `right` slot)
+   ========================================================================== */
+.lb-header-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lb-header-btn svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+}
+
+.lb-header-btn .lb-header-label {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+@media (max-width: 768px) {
+    /* the icon stays usable, the label would crowd the header */
+    .lb-header-btn .lb-header-label { display: none; }
+}
