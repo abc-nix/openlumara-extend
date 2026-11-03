@@ -807,6 +807,16 @@ body[data-lb] .lb-cover { display: flex; }
     box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* A match that covers inline code renders as <span.cm-searchMatch><span.cm-atomic-inline-code>.
+   The code chip paints its own opaque --atomic-editor-code-bg as a *child*, so it
+   hides the highlight; drop the chip fill only while it is matched (the monospace
+   font still reads as code). Matches inside fenced code are unaffected: there the
+   highlight is a child of the line and paints above the line background. */
+.lb-cover .cm-searchMatch .cm-atomic-inline-code,
+.lb-cover .cm-searchMatch.cm-atomic-inline-code {
+    background-color: transparent;
+}
+
 /* ==========================================================================
    save conflict banner + small buttons
    ========================================================================== */
