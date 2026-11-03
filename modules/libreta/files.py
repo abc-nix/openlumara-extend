@@ -143,6 +143,54 @@ def list_dir(root, rel="", show_hidden=False, skip_dirs=()) -> list:
     return entries
 
 
+def list_files(root, show_hidden=False, skip_dirs=()) -> list:
+    """every file path in the workspace, for the quick-open palette.
+
+    Same rules as list_dir: the trash and dot entries are skipped unless
+    show_hidden, symlinks are ignored, and skip_dirs matches an exact folder
+    name at any depth. Deliberately uncapped, like coder's: a cap inside a
+    depth-first walk starves every folder that sorts after the one that ate the
+    budget, and the palette caps what it renders anyway.
+    """
+    base = resolve(root)
+    skip = {str(name) for name in (skip_dirs or [])}
+    found = []
+
+    def walk(current, prefix):
+        try:
+            with os.scandir(current) as scan:
+                children = []
+                for entry in scan:
+                    name = entry.name
+                    if name == TRASH_DIR:
+                        continue
+                    if not show_hidden and name.startswith("."):
+                        continue
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        is_dir = entry.is_dir(follow_symlinks=False)
+                        is_file = entry.is_file(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    if is_dir and name in skip:
+                        continue
+                    if is_dir or is_file:
+                        children.append((name, is_dir, entry.path))
+        except OSError:
+            return
+
+        for name, is_dir, path in children:
+            if is_dir:
+                walk(path, join_rel(prefix, name))
+            else:
+                found.append(join_rel(prefix, name))
+
+    walk(base, "")
+    found.sort(key=str.lower)
+    return found
+
+
 # ---------------------------------------------------------------------------
 # reading
 # ---------------------------------------------------------------------------

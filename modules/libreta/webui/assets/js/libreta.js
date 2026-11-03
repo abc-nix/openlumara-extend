@@ -63,6 +63,41 @@ function lbIsProse(path) {
     return /\.(md|markdown|mdx)$/i.test(String(path || ""));
 }
 
+/* strict fuzzy scorer for quick-open (ported from coder/codeeditor, same
+   scoring so muscle memory and rankings feel familiar). */
+function lbFuzzyScore(text, q) {
+    let ti = 0;
+    let score = 0;
+    let run = 0;
+    let firstFound = -1;
+
+    for (let qi = 0; qi < q.length; qi++) {
+        const found = text.indexOf(q[qi], ti);
+        if (found === -1) return 0;
+
+        const gap = found - ti;
+        if (gap === 0) {
+            run++;
+            score += 5 + run * 2;
+        } else {
+            run = 0;
+            let crossed = 0;
+            for (let i = ti; i < found; i++) {
+                if (text[i] === "/") crossed++;
+            }
+            score += 1 - Math.min(gap, 10) - crossed * 3;
+        }
+
+        if (found === 0 || text[found - 1] === "/") score += 6;
+        if (firstFound === -1) firstFound = found;
+        ti = found + 1;
+    }
+
+    if (firstFound > text.lastIndexOf("/")) score += 5;
+
+    return score - Math.min(text.length, 60) / 10;
+}
+
 function lbEscape(text) {
     return String(text || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
@@ -637,6 +672,7 @@ const LIBRETA_VIEW = {
     pendingClose: null,    // {key, name} while an edited tab waits for a discard decision
     savedAt: 0,
     _silent: false,        // true while swapping docs / resetting buffers
+    quick: { open: false, query: "", idx: 0, files: [], loadedFor: "", loadedAt: 0, ws: "", loading: false, error: "" },
 
     wrapOn() {
         const tab = this.activeTab();
@@ -926,6 +962,105 @@ const LIBRETA_VIEW = {
         const tab = this.activeTab();
         if (!tab) return "";
         return tab.workspace + " / " + (tab.parent ? tab.parent + " / " : "") + tab.name;
+    },
+
+    /* ---- quick-open (Ctrl/⌘+P) ---- */
+    quickWorkspace() {
+        const tab = this.activeTab();
+        if (tab && tab.workspace) return tab.workspace;
+        const saved = lbReadRaw(LB_LS.workspace, "");
+        if (!saved) return "";
+        try {
+            const parsed = JSON.parse(saved);
+            return typeof parsed === "string" ? parsed : "";
+        } catch (e) {
+            return saved;
+        }
+    },
+
+    async openQuick() {
+        if (!this.isOpen) this.show();
+        this.quick.open = true;
+        this.quick.query = "";
+        this.quick.idx = 0;
+        this.quick.error = "";
+
+        const ws = this.quickWorkspace();
+        this.quick.ws = ws;
+
+        if (!ws) {
+            this.quick.files = [];
+            this.quick.error = "no workspace selected";
+        } else if (this.quick.loadedFor !== ws || Date.now() - this.quick.loadedAt > 30000) {
+            await this.loadQuickFiles(ws);
+        }
+
+        requestAnimationFrame(() => {
+            const input = document.querySelector(".lb-quick-input");
+            if (input) { input.focus(); input.select(); }
+        });
+    },
+
+    async loadQuickFiles(ws) {
+        this.quick.loading = true;
+        try {
+            const data = await simpleApiFetch("/api/ext/libreta/files?workspace=" + encodeURIComponent(ws));
+            this.quick.files = Array.isArray(data.files) ? data.files : [];
+            this.quick.loadedFor = ws;
+            this.quick.loadedAt = Date.now();
+            this.quick.error = "";
+        } catch (e) {
+            this.quick.files = [];
+            this.quick.error = lbErr(e);
+        } finally {
+            this.quick.loading = false;
+        }
+    },
+
+    // a create/rename/delete makes the cached index stale; the panel calls this
+    quickInvalidate() {
+        this.quick.loadedFor = "";
+        this.quick.loadedAt = 0;
+    },
+
+    quickMatches() {
+        const q = (this.quick.query || "").trim().toLowerCase();
+        const all = this.quick.files || [];
+        if (!q) return all.slice(0, 40);
+
+        const scored = [];
+        for (const file of all) {
+            const score = lbFuzzyScore(file.toLowerCase(), q);
+            if (score > 0) scored.push([score, file]);
+        }
+        scored.sort((a, b) => (b[0] - a[0]) || a[1].localeCompare(b[1]));
+        return scored.slice(0, 40).map((item) => item[1]);
+    },
+
+    quickNav(delta) {
+        const max = this.quickMatches().length - 1;
+        if (max < 0) return;
+        this.quick.idx = Math.max(0, Math.min(this.quick.idx + delta, max));
+        requestAnimationFrame(() => {
+            const row = document.querySelector(".lb-quick-item.active");
+            if (row) row.scrollIntoView({ block: "nearest" });
+        });
+    },
+
+    quickEnter() {
+        const file = this.quickMatches()[this.quick.idx];
+        if (file) this.quickOpen(file);
+    },
+
+    quickOpen(path) {
+        const ws = this.quick.ws || this.quickWorkspace();
+        this.quick.open = false;
+        if (!ws) return;
+        this.open(ws, path);
+    },
+
+    quickClose() {
+        this.quick.open = false;
     },
 
     /* ---- overlay ---- */
@@ -1727,6 +1862,19 @@ document.addEventListener("keydown", (event) => {
         return;
     }
 
+    if (key === "p") {
+        // only inside the cover: Ctrl+P is the browser's print shortcut
+        // everywhere else (coder hijacks it app-wide; libreta does not).
+        // The editor itself is contentEditable, so only real text fields are
+        // excluded here.
+        const target = event.target;
+        const tag = target ? String(target.tagName || "").toUpperCase() : "";
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        event.preventDefault();
+        view.openQuick();
+        return;
+    }
+
     if (key === "f") {
         const target = event.target;
         const tag = target ? String(target.tagName || "").toUpperCase() : "";
@@ -1744,6 +1892,13 @@ document.addEventListener("keydown", (event) => {
     let view = null;
     try { view = Alpine.store("libretaView"); } catch (e) { return; }
     if (!view || !view.isOpen) return;
+
+    // the quick-open palette closes first, then the cover
+    if (view.quick && view.quick.open) {
+        view.quickClose();
+        event.preventDefault();
+        return;
+    }
 
     const target = event.target;
     const tag = target ? String(target.tagName || "").toUpperCase() : "";

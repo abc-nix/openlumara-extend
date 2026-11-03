@@ -123,6 +123,47 @@ class TestListing(VaultCase):
         self.assertNotIn("alias", names)
 
 
+class TestListFiles(VaultCase):
+    """the recursive index that backs Ctrl+P quick-open."""
+
+    def test_lists_every_file_recursively(self):
+        paths = files.list_files(str(self.root))
+        self.assertIn("Work/note.md", paths)
+        self.assertIn("Work/script.py", paths)
+        self.assertIn("binary.bin", paths)
+        self.assertEqual(paths, sorted(paths, key=str.lower))
+        self.assertFalse(any(p.startswith("/") for p in paths))
+
+    def test_skips_hidden_and_skip_dirs(self):
+        (self.root / "node_modules").mkdir()
+        (self.root / "node_modules" / "dep.js").write_text("x\n", encoding="utf-8")
+        paths = files.list_files(str(self.root), skip_dirs=("node_modules",))
+        self.assertNotIn("node_modules/dep.js", paths)
+        self.assertNotIn(".hidden", paths)
+        self.assertNotIn(".git/config", paths)
+        self.assertIn("Work/note.md", paths)
+
+    def test_show_hidden_includes_dot_entries(self):
+        paths = files.list_files(str(self.root), show_hidden=True)
+        self.assertIn(".hidden", paths)
+        self.assertIn(".git/config", paths)
+
+    def test_skips_trash_and_symlinks(self):
+        trash = self.root / files.TRASH_DIR / "stamp"
+        trash.mkdir(parents=True)
+        (trash / "old.md").write_text("x\n", encoding="utf-8")
+        link = self.root / "link.md"
+        try:
+            os.symlink(self.root / "Work" / "note.md", link)
+        except (OSError, NotImplementedError):
+            link = None
+
+        paths = files.list_files(str(self.root), show_hidden=True)
+        self.assertNotIn(f"{files.TRASH_DIR}/stamp/old.md", paths)
+        if link is not None:
+            self.assertNotIn("link.md", paths)
+
+
 class TestReading(VaultCase):
     def test_read_text(self):
         data = files.read_text(str(self.root), "Work/note.md")

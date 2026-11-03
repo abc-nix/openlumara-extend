@@ -130,4 +130,39 @@
                 x-html="$store.libretaView.codeHtmlOf()"></div>
         </div>
     </div>
+
+    {# ---------------- quick-open (Ctrl/⌘+P) ---------------- #}
+    <div class="lb-quick" x-show="$store.libretaView.quick.open" x-cloak
+        @click.self="$store.libretaView.quickClose()">
+        <div class="lb-quick-box" role="dialog" aria-label="Quick open">
+            <input type="text" class="lb-quick-input" placeholder="Find a file…"
+                autocomplete="off" spellcheck="false"
+                x-model="$store.libretaView.quick.query"
+                @input="$store.libretaView.quick.idx = 0"
+                @keydown.down.prevent="$store.libretaView.quickNav(1)"
+                @keydown.up.prevent="$store.libretaView.quickNav(-1)"
+                @keydown.enter.prevent="$store.libretaView.quickEnter()">
+            <div class="lb-quick-list">
+                <template x-for="(file, i) in $store.libretaView.quickMatches()" :key="file">
+                    <div class="lb-quick-item" :class="{ active: i === $store.libretaView.quick.idx }"
+                        @click="$store.libretaView.quickOpen(file)"
+                        @mouseenter="$store.libretaView.quick.idx = i">
+                        <span class="lb-quick-name" x-text="file.split('/').pop()"></span>
+                        <span class="lb-quick-dir" x-text="file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : ''"></span>
+                    </div>
+                </template>
+                <div class="lb-quick-empty" x-show="!$store.libretaView.quickMatches().length">
+                    <span x-show="$store.libretaView.quick.loading">loading…</span>
+                    <span x-show="!$store.libretaView.quick.loading"
+                        x-text="$store.libretaView.quick.error || 'no match'"></span>
+                </div>
+            </div>
+            <div class="lb-quick-foot">
+                <span class="lb-quick-ws" x-text="$store.libretaView.quick.ws"></span>
+                <span class="lb-kbd">↑↓</span><span>move</span>
+                <span class="lb-kbd">Enter</span><span>open</span>
+                <span class="lb-kbd">Esc</span><span>close</span>
+            </div>
+        </div>
+    </div>
 </div>

@@ -248,6 +248,25 @@ class Libreta(core.module.Module):
             "entries": entries,
         }
 
+    @webui.route("files")
+    async def _route_files(self, body=None, query=None):
+        """every file path in a workspace, for the Ctrl+P quick-open palette.
+
+        Uncapped on purpose (see files.list_files); the palette scores and caps.
+        """
+        selector = (query or {}).get("workspace", "")
+        try:
+            root = self._root(selector)
+            paths = files.list_files(
+                root,
+                show_hidden=bool(self.config.get("show_hidden")),
+                skip_dirs=self._skip_dirs(),
+            )
+        except files.FileError as e:
+            return self.result(str(e), success=False)
+
+        return {"workspace": os.path.basename(root) or root, "files": paths}
+
     @webui.route("read")
     async def _route_read(self, body=None, query=None):
         selector = (query or {}).get("workspace", "")
