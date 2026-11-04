@@ -5,8 +5,9 @@ No @core.module.tool methods, on purpose: file access for the AI stays in the
 only ships webui routes, a sidebar tab (Files / Recent / Pinned / Options) and
 a full-window reading cover.
 
-P0a is READ-ONLY for user files. The only disk write is the module's own state
-file (data/libreta_state.json) holding the recent and pinned lists.
+P0a is READ-ONLY for user files. The only disk writes are the module's own data
+files under data/libreta/: state.json (recent / pinned) and autosave.json (the
+files the user took out of autosave).
 
 Routes are addressed as /api/ext/libreta/<path>. They are read-only today, so
 none are marked admin_only; the write routes in P0b will follow the shipped
@@ -66,6 +67,10 @@ class Libreta(core.module.Module):
             "default": True,
             "description": "Wrap long lines in Code view instead of scrolling sideways. The document bar has a per-file override.",
         },
+        "autosave_default": {
+            "default": True,
+            "description": "What a file with no per-file switch does: on = it is autosaved, off = autosave starts off for every file and you turn it on with the caret next to Save (or for good, here). The per-file choices live in data/libreta/autosave.json.",
+        },
         "autosave_interval": {
             "default": 0,
             "description": "Auto-save this many seconds after you stop typing (0 = off). Every dirty document is saved on its own timer, through the same mtime guard as Ctrl+S: if the file changed on disk since it was opened, nothing is written and the conflict banner asks you what to do.",
@@ -99,17 +104,91 @@ class Libreta(core.module.Module):
     }
 
     # ------------------------------------------------------------------
-    # state file (recent / pinned)
+    # data files: data/libreta/<name>.json
     # ------------------------------------------------------------------
+    def _data_dir(self):
+        return os.path.join(core.get_data_path(), "libreta")
+
+    def _migrate_state_file(self):
+        """recent/pinned used to live at data/libreta_state.json; the module keeps
+        its own folder now, so move the old file instead of orphaning it."""
+        old = os.path.join(core.get_data_path(), "libreta_state.json")
+        new = os.path.join(self._data_dir(), "state.json")
+        try:
+            if os.path.isfile(old) and not os.path.exists(new):
+                os.makedirs(self._data_dir(), exist_ok=True)
+                os.replace(old, new)
+        except OSError as e:
+            core.log("warning", f"libreta: could not move libreta_state.json ({e})")
+
     async def on_ready(self):
-        self.state = core.storage.StorageDict("libreta_state", "json")
+        self._migrate_state_file()
+        self.state = core.storage.StorageDict("state", "json", path=self._data_dir())
+        self.autosave = core.storage.StorageDict("autosave", "json", path=self._data_dir())
 
     def _state(self):
         """the state file, created on demand (routes may be hit before on_ready
         when a module is reloaded from the settings screen)."""
         if getattr(self, "state", None) is None:
-            self.state = core.storage.StorageDict("libreta_state", "json")
+            self._migrate_state_file()
+            self.state = core.storage.StorageDict("state", "json", path=self._data_dir())
         return self.state
+
+    # ------------------------------------------------------------------
+    # per-file autosave switch (data/libreta/autosave.json)
+    #
+    # The config key stays the interval; this file only remembers the files the
+    # user took out of autosave. An exception list, so the default (nothing
+    # listed) needs no maintenance and the file stays small.
+    # ------------------------------------------------------------------
+    AUTOSAVE_MAX = 500
+
+    def _autosave_store(self):
+        store = getattr(self, "autosave", None)
+        if store is None:
+            self.autosave = core.storage.StorageDict("autosave", "json", path=self._data_dir())
+            store = self.autosave
+        return store
+
+    @staticmethod
+    def _autosave_key(workspace, path):
+        return f"{workspace}|{path}"
+
+    def _autosave_default(self):
+        """what a file with no per-file entry does: True = autosaved."""
+        return bool(self.config.get("autosave_default", True))
+
+    def _autosave_lists(self):
+        """(off, on) — the files that disagree with the default."""
+        store = self._autosave_store()
+
+        def clean(value):
+            return [k for k in value if isinstance(k, str)] if isinstance(value, list) else []
+
+        return clean(store.get("off")), clean(store.get("on"))
+
+    def _autosave_state(self):
+        off, on = self._autosave_lists()
+        return {"off": off, "on": on, "default": self._autosave_default()}
+
+    def _autosave_set(self, key, on):
+        """record one file's switch. A file that agrees with the default needs no
+        entry at all, so toggling back leaves the file clean."""
+        store = self._autosave_store()
+        off, on_list = self._autosave_lists()
+        off = [k for k in off if k != key]
+        on_list = [k for k in on_list if k != key]
+
+        if bool(on) != self._autosave_default():
+            if on:
+                on_list = on_list[-(self.AUTOSAVE_MAX - 1):] + [key]
+            else:
+                off = off[-(self.AUTOSAVE_MAX - 1):] + [key]
+
+        store["off"] = off
+        store["on"] = on_list
+        store.save()
+        return self._autosave_state()
 
     @staticmethod
     def _clean(items):
@@ -527,7 +606,10 @@ class Libreta(core.module.Module):
     # ------------------------------------------------------------------
     # options panel: the subset of settings a user can change from the tab
     # ------------------------------------------------------------------
-    _BOOL_SETTINGS = ("code_autowrap", "notes_block_edit", "show_hidden", "inherit_from_editor", "use_trash")
+    _BOOL_SETTINGS = (
+        "code_autowrap", "notes_block_edit", "autosave_default", "show_hidden",
+        "inherit_from_editor", "use_trash",
+    )
 
     _NUMBER_SETTINGS = {
         "max_read_bytes": (1024, 50_000_000),
@@ -546,6 +628,7 @@ class Libreta(core.module.Module):
             "values": {
                 "code_autowrap": bool(self.config.get("code_autowrap", True)),
                 "notes_block_edit": bool(self.config.get("notes_block_edit", True)),
+                "autosave_default": bool(self.config.get("autosave_default", True)),
                 "autosave_interval": int(self.config.get("autosave_interval") or 0),
                 # read-only is not editable from this panel, but the editor has to
                 # know: it must not schedule writes the server would refuse
@@ -628,7 +711,7 @@ class Libreta(core.module.Module):
     @webui.route("state")
     async def _route_state(self, body=None, query=None):
         recent, pinned = self._lists()
-        return {"recent": recent, "pinned": pinned}
+        return {"recent": recent, "pinned": pinned, "autosave": self._autosave_state()}
 
     @webui.route("state/open", method="POST")
     async def _route_state_open(self, body=None, query=None):
@@ -680,3 +763,17 @@ class Libreta(core.module.Module):
             recent = [r for r in recent if keep(r)]
 
         return self._save(recent=recent, pinned=pinned)
+
+    @webui.route("state/autosave", method="POST")
+    async def _route_state_autosave(self, body=None, query=None):
+        """Per-file autosave switch, stored per workspace + path so it survives
+        closing the tab. `on` is the wanted state; an entry that matches
+        autosave_default is dropped instead of stored."""
+        body = body or {}
+        try:
+            entry = self._entry(str(body.get("workspace") or ""), body.get("path") or "")
+        except files.FileError as e:
+            return self.result(str(e), success=False)
+
+        key = self._autosave_key(entry["workspace"], entry["path"])
+        return {"autosave": self._autosave_set(key, bool(body.get("on", True)))}

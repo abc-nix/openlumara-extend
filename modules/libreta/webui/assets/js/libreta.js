@@ -615,14 +615,24 @@ function lbFindPanel(view) {
 const LIBRETA_DATA = {
     recent: [],
     pinned: [],
+    // data/libreta/autosave.json: only the files that disagree with the module's
+    // autosave_default. Keys are 'workspace|path'.
+    autosaveOff: [],
+    autosaveOnKeys: [],
     loading: false,
     loaded: false,
     error: "",
 
+    // routes answer with only the lists they touched: update what is there and
+    // leave the rest alone (a state/autosave reply must not wipe recents)
     apply(data) {
         if (!data) return;
-        this.recent = Array.isArray(data.recent) ? data.recent : [];
-        this.pinned = Array.isArray(data.pinned) ? data.pinned : [];
+        if (Array.isArray(data.recent)) this.recent = data.recent;
+        if (Array.isArray(data.pinned)) this.pinned = data.pinned;
+        if (data.autosave && typeof data.autosave === "object") {
+            if (Array.isArray(data.autosave.off)) this.autosaveOff = data.autosave.off;
+            if (Array.isArray(data.autosave.on)) this.autosaveOnKeys = data.autosave.on;
+        }
     },
 
     async load(force) {
@@ -659,6 +669,24 @@ const LIBRETA_DATA = {
         try { this.apply(await simpleApiPost("/api/ext/libreta/state/forget", { list, workspace, path })); }
         catch (e) { this.error = lbErr(e); }
     },
+
+    /* ---- per-file autosave switch ---- */
+    autosaveKey(workspace, path) {
+        return workspace + "|" + path;
+    },
+
+    isAutosaveOff(workspace, path) {
+        return this.autosaveOff.indexOf(this.autosaveKey(workspace, path)) >= 0;
+    },
+
+    isAutosaveOn(workspace, path) {
+        return this.autosaveOnKeys.indexOf(this.autosaveKey(workspace, path)) >= 0;
+    },
+
+    async setAutosave(workspace, path, on) {
+        try { this.apply(await simpleApiPost("/api/ext/libreta/state/autosave", { workspace, path, on })); }
+        catch (e) { this.error = lbErr(e); }
+    },
 };
 
 /* ------------------------------------------------------- store: open documents */
@@ -671,8 +699,10 @@ const LIBRETA_VIEW = {
     error: "",
     autowrap: true,
     autosaveInterval: 0,     // seconds of idle before a dirty document is written (config key; 0 = off)
+    autosaveDefault: true,   // what a file with no per-file switch does (config key autosave_default)
     readOnly: false,         // config key read-only: the server refuses every write
     _autosave: {},           // tab key -> pending timer (one per document; coder only has one file)
+    autosaveMenu: false,     // the caret menu next to the save button is open
     notesLivePreview: true,  // notes mode: one live-preview editor (config key notes_block_edit)
     split: false,          // notes mode: source + live preview side by side
     lineNumbers: true,     // interface preference (localStorage), not a config setting
@@ -863,6 +893,7 @@ const LIBRETA_VIEW = {
             this.autowrap = !!(data.values && data.values.code_autowrap);
             this.notesLivePreview = !(data.values && data.values.notes_block_edit === false);
             this.autosaveInterval = Math.max(0, Math.min(600, Number(data.values && data.values.autosave_interval) || 0));
+            this.autosaveDefault = !(data.values && data.values.autosave_default === false);
             this.readOnly = !!(data.values && data.values.read_only);
         } catch (e) {
             /* keep the built-in default */
@@ -1057,12 +1088,62 @@ const LIBRETA_VIEW = {
        active when it fires. Everything else follows coder: reset the timer on
        every keystroke, go through the same mtime-guarded save, and do nothing
        while a write is already in flight. */
-    autosaveOn() {
+    autosaveEnabled() {
+        // module level: an interval to wait for, and no read-only mode
         return this.autosaveInterval > 0 && !this.readOnly;
     },
 
+    // does this document take part? the per-file switch lives in
+    // data/libreta/autosave.json and is loaded with the recent/pinned state;
+    // a file that was never toggled follows autosave_default.
+    fileAutosaveOn(tab) {
+        if (!tab) return false;
+        const data = Alpine.store("libretaData");
+        if (!data) return this.autosaveDefault;
+        if (data.isAutosaveOff(tab.workspace, tab.path)) return false;
+        if (data.isAutosaveOn(tab.workspace, tab.path)) return true;
+        return this.autosaveDefault;
+    },
+
+    autosaveFor(tab) {
+        return !!tab && this.autosaveEnabled() && this.fileAutosaveOn(tab);
+    },
+
+    // what the doc-bar chip shows: the interval, or 'auto off' for this file
+    autosaveLabel() {
+        const tab = this.activeTab();
+        if (!tab || !this.autosaveEnabled()) return "";
+        return this.fileAutosaveOn(tab) ? "auto " + this.autosaveInterval + "s" : "auto off";
+    },
+
+    toggleAutosaveMenu() {
+        this.autosaveMenu = !this.autosaveMenu;
+    },
+
+    async toggleFileAutosave() {
+        const tab = this.activeTab();
+        const data = Alpine.store("libretaData");
+        if (!tab || !data) return;
+        const on = !this.fileAutosaveOn(tab);
+        const key = data.autosaveKey(tab.workspace, tab.path);
+
+        // optimistic: the tick moves at once, the server confirms in a moment.
+        // Same rule the server applies: an entry that agrees with the default
+        // is not stored at all.
+        data.autosaveOff = data.autosaveOff.filter((k) => k !== key);
+        data.autosaveOnKeys = data.autosaveOnKeys.filter((k) => k !== key);
+        if (on !== this.autosaveDefault) {
+            if (on) data.autosaveOnKeys = data.autosaveOnKeys.concat(key);
+            else data.autosaveOff = data.autosaveOff.concat(key);
+        }
+
+        if (on) this.scheduleAutosave(tab);
+        else this.cancelAutosave(tab.key);
+        await data.setAutosave(tab.workspace, tab.path, on);
+    },
+
     scheduleAutosave(tab) {
-        if (!tab || !tab.key || !this.autosaveOn()) return;
+        if (!tab || !tab.key || !this.autosaveFor(tab)) return;
         clearTimeout(this._autosave[tab.key]);
         this._autosave[tab.key] = setTimeout(() => {
             delete this._autosave[tab.key];
@@ -1086,7 +1167,7 @@ const LIBRETA_VIEW = {
         // a closed, clean, mid-write or conflicted document has nothing to do:
         // the conflict in particular must wait for the user's Reload / Overwrite
         if (!tab || !tab.loaded || !tab.dirty || tab.saving || tab.conflict) return;
-        if (!this.autosaveOn()) return;
+        if (!this.autosaveFor(tab)) return;
         await this.saveTab(tab, false, true);
     },
 
@@ -1971,8 +2052,18 @@ const LIBRETA_PANEL = {
             // autosave is a live setting too: apply it without a reload, and drop
             // pending timers when it was switched off
             view.autosaveInterval = Math.max(0, Math.min(600, parseInt(this.opts.values.autosave_interval, 10) || 0));
+            view.autosaveDefault = this.opts.values.autosave_default !== false;
             view.readOnly = !!this.opts.values.read_only;
-            if (!view.autosaveOn()) view.cancelAutosave();
+            if (!view.autosaveEnabled()) {
+                view.cancelAutosave();
+            } else {
+                // a new default may have taken documents out of autosave: drop the
+                // timers that no longer belong to an autosaved file
+                Object.keys(view._autosave).forEach((key) => {
+                    const tab = view.tabs.find((item) => item.key === key);
+                    if (!tab || !view.autosaveFor(tab)) view.cancelAutosave(key);
+                });
+            }
 
             this.opts.status = "saved";
             setTimeout(() => { if (this.opts.status === "saved") this.opts.status = ""; }, 2000);
@@ -1996,6 +2087,9 @@ document.addEventListener("alpine:init", () => {
     // content arrives after the first paint must still be reactive
     const view = Alpine.store("libretaView");
     view.loadSettings();
+    // the per-file autosave switches come with the state file: load them early
+    // so the first keystrokes already know which documents opted out
+    Alpine.store("libretaData").load();
     view.restore();
 
     if (view.isOpen) {

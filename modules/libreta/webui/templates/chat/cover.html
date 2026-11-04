@@ -50,11 +50,15 @@
             </template>
         </select>
 
-        {# autosave: the setting, not a per-document state — the chip is a reminder
-           that Ctrl+S is not the only way text reaches the disk #}
-        <span class="lb-autotag" x-show="$store.libretaView.autosaveInterval > 0"
-            :title="'Autosave: unsaved edits are written ' + $store.libretaView.autosaveInterval + 's after you stop typing (set it to 0 to turn autosave off)'"
-            x-text="'auto ' + $store.libretaView.autosaveInterval + 's'"></span>
+        {# autosave chip: the interval for this document, or 'auto off' when the
+           per-file switch (the caret next to Save) took it out #}
+        <span class="lb-autotag"
+            :class="{ off: !$store.libretaView.fileAutosaveOn($store.libretaView.activeTab()) }"
+            x-show="$store.libretaView.autosaveInterval > 0"
+            :title="$store.libretaView.fileAutosaveOn($store.libretaView.activeTab())
+                ? 'Autosave: unsaved edits are written ' + $store.libretaView.autosaveInterval + 's after you stop typing'
+                : 'Autosave is off for this file — use the caret next to Save to turn it back on'"
+            x-text="$store.libretaView.autosaveLabel()"></span>
 
         <span class="lb-modes" role="tablist" aria-label="View mode">
             <button type="button" class="lb-mode" role="tab"
@@ -80,16 +84,42 @@
             @click="$store.libretaView.cycleView()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="13" y="7" width="5" height="10" rx="1"/></svg>
         </button>
-        {# always visible: quiet while the buffer matches the disk, highlighted while
-           there are unsaved changes #}
-        <button type="button" class="lb-iconbtn lb-savebtn"
-            :class="{ pending: $store.libretaView.dirtyOf() }"
-            :title="$store.libretaView.dirtyOf()
-                ? 'Save (Ctrl+S) — there are unsaved changes'
-                : 'Save (Ctrl+S) — nothing to save, the file matches the disk'"
-            @click="$store.libretaView.save()">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        </button>
+        {# save + its autosave caret. The button is always in the bar: quiet while
+           the buffer matches the disk, highlighted while there are unsaved
+           changes. The caret opens the per-file autosave switch. #}
+        {# outside-click lives on the group, not the menu: the caret is outside the
+           menu, so a handler on the menu would close it in the same click #}
+        <span class="lb-savegroup"
+            @click.outside="$store.libretaView.autosaveMenu = false"
+            @keydown.escape.window="$store.libretaView.autosaveMenu = false">
+            <button type="button" class="lb-iconbtn lb-savebtn"
+                :class="{ pending: $store.libretaView.dirtyOf() }"
+                :title="$store.libretaView.dirtyOf()
+                    ? 'Save (Ctrl+S) — there are unsaved changes'
+                    : 'Save (Ctrl+S) — nothing to save, the file matches the disk'"
+                @click="$store.libretaView.save()">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            </button>
+            <button type="button" class="lb-iconbtn lb-savecaret"
+                :class="{ on: $store.libretaView.autosaveMenu }"
+                title="Autosave for this file"
+                aria-haspopup="true" :aria-expanded="$store.libretaView.autosaveMenu"
+                @click="$store.libretaView.toggleAutosaveMenu()">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="lb-automenu" x-show="$store.libretaView.autosaveMenu" x-cloak>
+                <button type="button" class="lb-menu-item"
+                    :disabled="$store.libretaView.autosaveInterval === 0"
+                    @click="$store.libretaView.toggleFileAutosave()">
+                    <span class="lb-tick"
+                        x-text="$store.libretaView.fileAutosaveOn($store.libretaView.activeTab()) ? '✓' : ''"></span>Autosave
+                </button>
+                <div class="lb-automenu-hint"
+                    x-text="$store.libretaView.autosaveInterval > 0
+                        ? 'every ' + $store.libretaView.autosaveInterval + 's'
+                        : 'no interval set — see Options'"></div>
+            </div>
+        </span>
         <button type="button" class="lb-iconbtn lb-wrapbtn"
             :class="{ on: $store.libretaView.wrapOn() }"
             x-show="$store.libretaView.modeOf() === 'code'"

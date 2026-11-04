@@ -316,6 +316,14 @@
                         </div>
 
                         <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input id="lb-opt-autosave-default" type="checkbox" class="lb-check" x-model="opts.values.autosave_default">
+                                <span>Autosave by default</span>
+                            </label>
+                            <div class="lb-opt-hint">applies to files with no per-file switch — i.e. the ones you never toggled away from this default. Off: autosave starts off for every file and you turn it on for the ones you want. Only differences are stored, in data/libreta/autosave.json.</div>
+                        </div>
+
+                        <div class="lb-opt">
                             <label class="lb-opt-label" for="lb-opt-autosave">Autosave idle time</label>
                             <input id="lb-opt-autosave" type="number" class="lb-input" min="0" max="600" step="5"
                                 x-model.number="opts.values.autosave_interval">

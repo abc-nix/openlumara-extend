@@ -419,6 +419,8 @@ body[data-lb="floating"] .lb-cover {
 .lb-star.on svg { fill: currentColor; }
 
 /* autosave chip (config autosave_interval > 0) */
+.lb-autotag.off { opacity: .55; }
+
 .lb-autotag {
     flex-shrink: 0;
     padding: 1px 7px;
@@ -1002,6 +1004,49 @@ body[data-lb="floating"] .lb-cover {
 }
 .lb-savebtn.pending:hover { background: var(--accent); filter: brightness(1.12); }
 
+/* save + caret: the caret opens the per-file autosave switch */
+.lb-savegroup {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.lb-savecaret {
+    width: 12px;
+    margin-left: -2px;
+    border-radius: 4px;
+}
+.lb-savecaret svg { width: 10px; height: 10px; }
+.lb-savecaret.on { color: var(--accent); }
+
+.lb-automenu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    min-width: 172px;
+    padding: 4px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+
+.lb-automenu .lb-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.lb-automenu .lb-menu-item:disabled { opacity: .45; cursor: default; }
+.lb-tick { width: 13px; display: inline-block; color: var(--accent); flex-shrink: 0; }
+.lb-automenu-hint {
+    padding: 2px 10px 5px 23px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
 /* ==========================================================================
    notes mode: split view (source pane left, rendered preview right)
    ========================================================================== */
@@ -1225,25 +1270,16 @@ body[data-lb="floating"] .lb-cover {
 /* ==========================================================================
    chat header: libreta entry point (filled through the `right` slot)
    ========================================================================== */
+/* icon only: a label here read as a generic "notes" feature and crowded the
+   header; the tooltip carries the meaning */
 .lb-header-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
 }
 
 .lb-header-btn svg {
     width: 16px;
     height: 16px;
     flex: 0 0 auto;
-}
-
-.lb-header-btn .lb-header-label {
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1;
-}
-
-@media (max-width: 768px) {
-    /* the icon stays usable, the label would crowd the header */
-    .lb-header-btn .lb-header-label { display: none; }
 }
