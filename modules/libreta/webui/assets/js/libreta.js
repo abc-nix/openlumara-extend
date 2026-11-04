@@ -322,6 +322,26 @@ function lbMakeTurndown() {
     const gfm = window.turndownPluginGfm && window.turndownPluginGfm.gfm;
     if (gfm) service.use(gfm);      // tables, strikethrough, task list items
 
+    // The GFM table rule deliberately keeps *header-less* tables as raw HTML
+    // (its "keep" guard against data loss). Those are almost never data tables
+    // — Moodle's file-attachment treeview is the textbook case — so flatten the
+    // rows to their cell text instead of dropping markup into the note.
+    // Rules added later win, so this one takes precedence over `keep`.
+    service.addRule("layoutTable", {
+        filter: (node) => node.nodeName === "TABLE" && !node.querySelector("th"),
+        replacement: (content, node) => {
+            const rows = Array.from(node.rows || [])
+                .map((row) => Array.from(row.cells)
+                    // convert the cell's children, not the <td> itself: the gfm
+                    // cell rule would wrap it in pipe-table syntax
+                    .map((cellNode) => service.turndown(cellNode.innerHTML).replace(/\s+/g, " ").trim())
+                    .filter(Boolean)
+                    .join("  "))
+                .filter(Boolean);
+            return "\n\n" + rows.join("\n\n") + "\n\n";
+        },
+    });
+
     // attachments are out of scope: an image pastes as its path, never as an
     // embed. A data: URI is not a path, so only its alt text survives.
     service.addRule("imagePath", {
