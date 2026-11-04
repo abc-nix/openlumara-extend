@@ -283,6 +283,138 @@ function lbLoadCm6() {
     return LB_CM6_LOAD;
 }
 
+/* ---- turndown: clipboard HTML -> markdown (Notes mode paste) ----
+
+   Notes mode is markdown, so a paste coming from a browser, a word processor
+   or Google Docs is converted instead of dropped in as flattened text. Code
+   mode, plain-text clipboards and Ctrl/⌘+Shift+V paste verbatim. The two files
+   are plain UMD builds, vendored — see webui/assets/vendor/turndown/README.md. */
+const LB_TD_BASE = "/ext-assets/libreta/vendor/turndown/";
+const LB_TD_JS = ["turndown.umd.js", "turndown-plugin-gfm.js"];
+
+let LB_TD_LOAD = null;
+let LB_TD = null;             // configured TurndownService
+let LB_PLAIN_PASTE = false;   // set by Ctrl/⌘+Shift+V, for one paste
+
+function lbLoadTurndown() {
+    if (!LB_TD_LOAD) {
+        LB_TD_LOAD = (async () => {
+            for (const file of LB_TD_JS) await lbLoadScript(LB_TD_BASE + file);
+            if (!window.TurndownService) throw new Error("the converter did not register TurndownService");
+            LB_TD = lbMakeTurndown();
+        })();
+    }
+    return LB_TD_LOAD;
+}
+
+function lbMakeTurndown() {
+    const Service = window.TurndownService;
+    if (!Service) return null;
+    const service = new Service({
+        headingStyle: "atx",        // "## heading", not underlined
+        hr: "---",
+        bulletListMarker: "-",
+        codeBlockStyle: "fenced",
+        emDelimiter: "*",
+        strongDelimiter: "**",
+        linkStyle: "inlined",
+    });
+    const gfm = window.turndownPluginGfm && window.turndownPluginGfm.gfm;
+    if (gfm) service.use(gfm);      // tables, strikethrough, task list items
+
+    // attachments are out of scope: an image pastes as its path, never as an
+    // embed. A data: URI is not a path, so only its alt text survives.
+    service.addRule("imagePath", {
+        filter: (node) => node.nodeName === "IMG",
+        replacement: (content, node) => {
+            const src = (node.getAttribute("src") || "").trim();
+            const alt = (node.getAttribute("alt") || "").trim();
+            if (!src || /^data:/i.test(src)) return alt;
+            return src;
+        },
+    });
+    return service;
+}
+
+function lbTurndownService() {
+    if (LB_TD) return LB_TD;
+    if (!window.TurndownService) {
+        lbLoadTurndown().catch(() => {});   // ready for the next paste
+        return null;
+    }
+    LB_TD = lbMakeTurndown();
+    return LB_TD;
+}
+
+// a file copied in a file manager has no text, only uri(s): paste the path
+function lbUriPaths(uris) {
+    return String(uris || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#"))
+        .map((line) => {
+            try { return decodeURIComponent(line.replace(/^file:\/\//i, "")); }
+            catch (e) { return line.replace(/^file:\/\//i, ""); }
+        });
+}
+
+function lbPasteHandler(event, view) {
+    const store = lbStore();
+    const tab = store ? store.activeTab() : null;
+    // Notes mode only: Code mode keeps the clipboard verbatim (source editing).
+    if (!tab || tab.mode !== "notes" || !tab.prose) return false;
+
+    const plainAsked = LB_PLAIN_PASTE;
+    LB_PLAIN_PASTE = false;
+    if (plainAsked) return false;            // Ctrl/⌘+Shift+V
+
+    const data = event.clipboardData;
+    if (!data) return false;
+
+    const html = (data.getData("text/html") || "").trim();
+
+    // an image/file copied from a file manager: only its path is available
+    if (!html) {
+        const plain = data.getData("text/plain") || "";
+        const uris = data.getData("text/uri-list") || "";
+        if (!plain.trim() && uris) {
+            const paths = lbUriPaths(uris);
+            if (!paths.length) return false;
+            event.preventDefault();
+            view.dispatch(view.state.replaceSelection(paths.join("\n")), { scrollIntoView: true });
+            return true;
+        }
+        return false;
+    }
+
+    // our own copy: the browser's HTML flavour of a contentEditable selection
+    // carries the editor's spans (cm-, atomic-). Round-tripping those would
+    // corrupt the text, so fall through to the plain flavour.
+    if (/class="(?:cm-|atomic-)/.test(html)) return false;
+
+    const service = lbTurndownService();
+    if (!service) return false;              // still loading: raw paste this time
+
+    let md = "";
+    try {
+        const body = new DOMParser().parseFromString(html, "text/html").body;
+        md = service.turndown(body)
+            // turndown pads list markers to three columns ("-   item"); notes
+            // should read like something written by hand
+            .replace(/^([ \t]*)([-*+])[ \t]{2,}(?=\S)/gm, "$1$2 ")
+            .replace(/^([ \t]*)(\d+\.)[ \t]{2,}(?=\S)/gm, "$1$2 ")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+    } catch (e) {
+        return false;
+    }
+    if (!md) return false;
+
+    event.preventDefault();
+    view.dispatch(view.state.replaceSelection(md), { scrollIntoView: true });
+    return true;
+}
+
 function lbExtensionOf(path) {
     return String(path || "").split(".").pop().toLowerCase();
 }
@@ -346,6 +478,9 @@ function lbCm6Extensions() {
             store.scheduleAutosave(tab);
         }),
         lbCm6Theme(),
+        // Notes mode pastes as markdown; Code mode and plain clipboards are
+        // untouched (the handler returns false and CM6 pastes normally)
+        CM.EditorView.domEventHandlers({ paste: lbPasteHandler }),
         // find & replace: engine from @codemirror/search, panel built below
         CM.search({ top: true, createPanel: lbFindPanel }),
         LB_COMP.wrap.of([]),
@@ -923,6 +1058,9 @@ const LIBRETA_VIEW = {
             parent: host,
             state: LB_CM6.EditorState.create({ doc: "", extensions: lbCm6Extensions() }),
         });
+        // warm the HTML->markdown converter so the first paste in a session
+        // converts instead of falling back to the raw clipboard
+        lbLoadTurndown().catch(() => {});
         this.editorReady = true;
         return true;
     },
@@ -2104,6 +2242,15 @@ document.addEventListener("alpine:init", () => {
 document.addEventListener("keydown", (event) => {
     const key = String(event.key || "").toLowerCase();
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+
+    // Ctrl/⌘+Shift+V asks for an unformatted paste even in Notes mode. The
+    // paste event cannot see the modifiers, so remember the chord here; the
+    // flag is one-shot (cleared by the paste handler) and expires on its own.
+    if (key === "v" && event.shiftKey) {
+        LB_PLAIN_PASTE = true;
+        setTimeout(() => { LB_PLAIN_PASTE = false; }, 1200);
+        return;
+    }
 
     let view = null;
     try { view = Alpine.store("libretaView"); } catch (e) { return; }

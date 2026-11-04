@@ -36,6 +36,13 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
   banner per document). Next: the CM6 editor extras (fold, brackets, selection
   matches, smart Enter, Ctrl+/), go-to-line, caret position; optional
   tree-sitter lint. Inventory and skip list live in `Notes/libreta-coder-parity.md`.
+- **P2.0 — done (2026-11-04). Autosave.** `autosave_interval` (0 = off),
+  `autosave_default` + per-file switch (caret next to Save) stored in
+  `data/libreta/autosave.json`; the save button is always visible and highlights
+  while there are unsaved changes.
+- **P2.0b — done (2026-11-04). Paste as markdown.** Notes mode converts the
+  clipboard's HTML flavour with vendored turndown (Code mode and
+  `Ctrl/⌘+Shift+V` stay raw; images paste as their path).
 - **P2.1 — done (9290ee4). Chat views.** full / docked (right panel, chat
   narrows) / floating (centred card, file picker instead of tabs), remembered in
   localStorage, one cycle button in the doc bar. Details:
