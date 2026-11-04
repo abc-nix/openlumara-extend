@@ -418,6 +418,19 @@ body[data-lb="floating"] .lb-cover {
 .lb-star.on { color: var(--accent); }
 .lb-star.on svg { fill: currentColor; }
 
+/* autosave chip (config autosave_interval > 0) */
+.lb-autotag {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    font-size: 10px;
+    letter-spacing: .02em;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: default;
+}
+
 /* ---- stage ---- */
 .lb-stage { flex: 1; min-height: 0; position: relative; overflow: auto; }
 
@@ -980,7 +993,14 @@ body[data-lb="floating"] .lb-cover {
 
 .lb-btn-ghost:hover { border-color: var(--accent); }
 
-.lb-savebtn { color: var(--accent); }
+/* the save button is always in the bar: quiet (muted, no background) while the
+   buffer matches the disk, highlighted while there are unsaved changes */
+.lb-savebtn { color: var(--text-muted); }
+.lb-savebtn.pending {
+    color: var(--bg-primary);
+    background: var(--accent);
+}
+.lb-savebtn.pending:hover { background: var(--accent); filter: brightness(1.12); }
 
 /* ==========================================================================
    notes mode: split view (source pane left, rendered preview right)

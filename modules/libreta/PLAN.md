@@ -31,10 +31,11 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
   markers appear only on the caret's line. Split view survives as an optional
   escape hatch; block-by-block editing is removed. Code view moved to CM6 too.
 - **P2 — in progress (parity with coder/codeeditor).** Quick-open Ctrl/⌘+P
-  done (route + palette); codeeditor disabled. Next: autosave interval, then the
-  CM6 editor extras (fold, brackets, selection matches, smart Enter, Ctrl+/),
-  go-to-line, caret position; optional tree-sitter lint. Inventory and skip list
-  live in `Notes/libreta-coder-parity.md`.
+  done (route + palette); codeeditor disabled. **Autosave done** (`autosave_interval`,
+  seconds, 0 = off; one timer per open document, same mtime guard as Ctrl+S,
+  banner per document). Next: the CM6 editor extras (fold, brackets, selection
+  matches, smart Enter, Ctrl+/), go-to-line, caret position; optional
+  tree-sitter lint. Inventory and skip list live in `Notes/libreta-coder-parity.md`.
 - **P2.1 — done (9290ee4). Chat views.** full / docked (right panel, chat
   narrows) / floating (centred card, file picker instead of tabs), remembered in
   localStorage, one cycle button in the doc bar. Details:
@@ -96,6 +97,6 @@ Routes: `workspaces` · `tree` · `read` · `save` · `preview` · `create` ·
 3. `read` refuses files larger than `max_read_bytes` (1 MB) instead of windowing.
 4. Wiki links are supported by the engine but not wired to the vault.
 5. Relative image paths resolve against the page URL, not the workspace.
-6. No find-in-note panel.
+6. Find & replace exists per document; cross-file search does not (backend route + results pane still to build).
 7. core `notes` module still enabled although unused; `codeeditor` still ships
    its own CM5 vendor (retire both once libreta covers them).

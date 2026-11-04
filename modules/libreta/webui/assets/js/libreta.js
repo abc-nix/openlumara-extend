@@ -343,6 +343,7 @@ function lbCm6Extensions() {
             if (!update.docChanged) return;
             tab.dirty = true;
             if (tab.mode === "notes" && store.split) store.schedulePreview(tab);
+            store.scheduleAutosave(tab);
         }),
         lbCm6Theme(),
         // find & replace: engine from @codemirror/search, panel built below
@@ -669,13 +670,15 @@ const LIBRETA_VIEW = {
     busy: false,
     error: "",
     autowrap: true,
+    autosaveInterval: 0,     // seconds of idle before a dirty document is written (config key; 0 = off)
+    readOnly: false,         // config key read-only: the server refuses every write
+    _autosave: {},           // tab key -> pending timer (one per document; coder only has one file)
     notesLivePreview: true,  // notes mode: one live-preview editor (config key notes_block_edit)
     split: false,          // notes mode: source + live preview side by side
     lineNumbers: true,     // interface preference (localStorage), not a config setting
     viewPadding: 16,       // text inset in docked/floating (localStorage preference)
     editorReady: false,
     cmFailed: false,       // CodeMirror could not load -> fall back to the rendered view
-    conflict: null,        // {message, path} while a save was refused by the mtime guard
     pendingClose: null,    // {key, name} while an edited tab waits for a discard decision
     savedAt: 0,
     _silent: false,        // true while swapping docs / resetting buffers
@@ -847,6 +850,8 @@ const LIBRETA_VIEW = {
             mtime: 0,
             size: 0,
             dirty: false,
+            saving: false,      // a write for this document is in flight
+            conflict: null,     // {message, path}: the mtime guard refused a save
             error: "",
         };
     },
@@ -857,6 +862,8 @@ const LIBRETA_VIEW = {
             const data = await simpleApiFetch("/api/ext/libreta/settings");
             this.autowrap = !!(data.values && data.values.code_autowrap);
             this.notesLivePreview = !(data.values && data.values.notes_block_edit === false);
+            this.autosaveInterval = Math.max(0, Math.min(600, Number(data.values && data.values.autosave_interval) || 0));
+            this.readOnly = !!(data.values && data.values.read_only);
         } catch (e) {
             /* keep the built-in default */
         }
@@ -979,9 +986,22 @@ const LIBRETA_VIEW = {
     async save(force) {
         const tab = this.activeTab();
         if (!tab) return;
+        // nothing pending: a save would only bump the file's mtime. Force (the
+        // conflict banner's Overwrite) still writes.
+        if (!force && !tab.dirty) return;
+        await this.saveTab(tab, force, false);
+    },
 
-        this.busy = true;
-        this.error = "";
+    // One write path for manual and automatic saves. `quiet` keeps autosave out
+    // of the global "working…" indicator: a background document being written
+    // must not flash a spinner over whatever the user is looking at.
+    async saveTab(tab, force, quiet) {
+        if (!tab || tab.saving) return;
+        tab.saving = true;
+        if (!quiet) {
+            this.busy = true;
+            this.error = "";
+        }
         try {
             const text = this.sourceOf(tab);
             // the buffer only has LF (CM6 normalises); write CRLF back when the
@@ -1001,25 +1021,73 @@ const LIBRETA_VIEW = {
             tab.dirty = false;
             tab.codeHtml = lbCodeHtml(tab.content, tab.path);
             tab.html = lbRender(tab.content);
-            this.conflict = null;
+            tab.conflict = null;
             this.savedAt = Date.now();
             this.persist();
         } catch (e) {
             if (e && typeof e === "object" && e.conflict) {
-                this.conflict = { message: e.message || "the file changed on disk", path: tab.path };
+                // keep the conflict on the document it belongs to: with several
+                // tabs open, a banner is only meaningful over its own file
+                tab.conflict = { message: e.message || "the file changed on disk", path: tab.path };
             } else {
                 this.error = lbErr(e);
             }
         } finally {
-            this.busy = false;
+            tab.saving = false;
+            if (!quiet) this.busy = false;
         }
     },
 
     async reloadFromDisk() {
         const tab = this.activeTab();
         if (!tab) return;
-        this.conflict = null;
+        tab.conflict = null;
         await this.load(tab);
+    },
+
+    conflictOf() {
+        const tab = this.activeTab();
+        return tab ? tab.conflict : null;
+    },
+
+    /* ---- autosave ----
+
+       Coder debounces one file; libreta has documents behind tabs, so the timer
+       is per document and saves that document, not whatever happens to be
+       active when it fires. Everything else follows coder: reset the timer on
+       every keystroke, go through the same mtime-guarded save, and do nothing
+       while a write is already in flight. */
+    autosaveOn() {
+        return this.autosaveInterval > 0 && !this.readOnly;
+    },
+
+    scheduleAutosave(tab) {
+        if (!tab || !tab.key || !this.autosaveOn()) return;
+        clearTimeout(this._autosave[tab.key]);
+        this._autosave[tab.key] = setTimeout(() => {
+            delete this._autosave[tab.key];
+            this.autosaveTab(tab.key);
+        }, this.autosaveInterval * 1000);
+    },
+
+    // key omitted = drop every pending timer (used when the setting turns off)
+    cancelAutosave(key) {
+        if (key === undefined) {
+            Object.keys(this._autosave).forEach((k) => clearTimeout(this._autosave[k]));
+            this._autosave = {};
+            return;
+        }
+        clearTimeout(this._autosave[key]);
+        delete this._autosave[key];
+    },
+
+    async autosaveTab(key) {
+        const tab = this.tabs.find((item) => item.key === key);
+        // a closed, clean, mid-write or conflicted document has nothing to do:
+        // the conflict in particular must wait for the user's Reload / Overwrite
+        if (!tab || !tab.loaded || !tab.dirty || tab.saving || tab.conflict) return;
+        if (!this.autosaveOn()) return;
+        await this.saveTab(tab, false, true);
     },
 
     /* ---- template accessors ---- */
@@ -1189,6 +1257,10 @@ const LIBRETA_VIEW = {
         this.error = "";
         tab.loading = true;
         tab.error = "";
+        // the buffer is about to be replaced: a pending autosave would write the
+        // old text back over the file we just read
+        this.cancelAutosave(tab.key);
+        tab.conflict = null;
         try {
             const data = await simpleApiFetch(
                 "/api/ext/libreta/read?workspace=" + encodeURIComponent(tab.workspace) +
@@ -1252,6 +1324,7 @@ const LIBRETA_VIEW = {
         }
 
         this.pendingClose = null;
+        this.cancelAutosave(key);
         LB_STATES.delete(key);
         LB_SCROLL.delete(key);
         this.tabs.splice(index, 1);
@@ -1293,6 +1366,10 @@ const LIBRETA_VIEW = {
         if (movedScroll !== undefined) { LB_SCROLL.delete(oldKey); LB_SCROLL.set(key, movedScroll); }
         if (this.active === oldKey) this.active = key;
         tab.key = key;
+        // the pending timer still points at the old key: drop it and let the
+        // renamed document schedule its own if it is still dirty
+        this.cancelAutosave(oldKey);
+        this.scheduleAutosave(tab);
         this.persist();
     },
 
@@ -1889,7 +1966,13 @@ const LIBRETA_PANEL = {
             this.applyOptions(await simpleApiPost("/api/ext/libreta/settings/save", { values: this.opts.values }));
 
             // the open document picks up a new autowrap default immediately
-            Alpine.store("libretaView").autowrap = !!this.opts.values.code_autowrap;
+            const view = Alpine.store("libretaView");
+            view.autowrap = !!this.opts.values.code_autowrap;
+            // autosave is a live setting too: apply it without a reload, and drop
+            // pending timers when it was switched off
+            view.autosaveInterval = Math.max(0, Math.min(600, parseInt(this.opts.values.autosave_interval, 10) || 0));
+            view.readOnly = !!this.opts.values.read_only;
+            if (!view.autosaveOn()) view.cancelAutosave();
 
             this.opts.status = "saved";
             setTimeout(() => { if (this.opts.status === "saved") this.opts.status = ""; }, 2000);

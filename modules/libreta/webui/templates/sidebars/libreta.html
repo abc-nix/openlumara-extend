@@ -315,6 +315,13 @@
                             <div class="lb-opt-hint">pixels between the text and the panel edges in docked and floating views (a browser preference, not a config key).</div>
                         </div>
 
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-autosave">Autosave idle time</label>
+                            <input id="lb-opt-autosave" type="number" class="lb-input" min="0" max="600" step="5"
+                                x-model.number="opts.values.autosave_interval">
+                            <div class="lb-opt-hint">seconds — unsaved edits are written this long after you stop typing. 0 saves only with Ctrl+S. Every document is saved on its own timer, and a file that changed on disk is never overwritten silently.</div>
+                        </div>
+
                         <div class="lb-opt-title">Files</div>
 
                         <div class="lb-opt">

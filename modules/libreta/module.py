@@ -56,7 +56,7 @@ class Libreta(core.module.Module):
         },
         "read-only": {
             "default": False,
-            "description": "Placeholder for P0b: when on, the editor refuses to save. Nothing can write user files yet, so it changes nothing today.",
+            "description": "When on, Libreta refuses every write: Ctrl+S, autosave, new files, renames and deletes (moving to the trash included). Browsing and reading keep working.",
         },
         "max_read_bytes": {
             "default": 1_000_000,
@@ -65,6 +65,10 @@ class Libreta(core.module.Module):
         "code_autowrap": {
             "default": True,
             "description": "Wrap long lines in Code view instead of scrolling sideways. The document bar has a per-file override.",
+        },
+        "autosave_interval": {
+            "default": 0,
+            "description": "Auto-save this many seconds after you stop typing (0 = off). Every dirty document is saved on its own timer, through the same mtime guard as Ctrl+S: if the file changed on disk since it was opened, nothing is written and the conflict banner asks you what to do.",
         },
         "notes_block_edit": {
             "default": True,
@@ -530,6 +534,8 @@ class Libreta(core.module.Module):
         "preview_chars": (40, 1000),
         "recent_max": (1, 200),
         "pinned_max": (1, 200),
+        # 0 is a valid value here (autosave off), unlike the limits above
+        "autosave_interval": (0, 600),
     }
 
     _SIDE_TABS = ("files", "recent", "pinned")
@@ -540,6 +546,10 @@ class Libreta(core.module.Module):
             "values": {
                 "code_autowrap": bool(self.config.get("code_autowrap", True)),
                 "notes_block_edit": bool(self.config.get("notes_block_edit", True)),
+                "autosave_interval": int(self.config.get("autosave_interval") or 0),
+                # read-only is not editable from this panel, but the editor has to
+                # know: it must not schedule writes the server would refuse
+                "read_only": bool(self.config.get("read-only")),
                 "show_hidden": bool(self.config.get("show_hidden")),
                 "use_trash": bool(self.config.get("use_trash", True)),
                 "inherit_from_editor": bool(self.config.get("inherit_from_editor")),

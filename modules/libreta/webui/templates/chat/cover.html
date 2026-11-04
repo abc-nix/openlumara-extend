@@ -50,6 +50,12 @@
             </template>
         </select>
 
+        {# autosave: the setting, not a per-document state — the chip is a reminder
+           that Ctrl+S is not the only way text reaches the disk #}
+        <span class="lb-autotag" x-show="$store.libretaView.autosaveInterval > 0"
+            :title="'Autosave: unsaved edits are written ' + $store.libretaView.autosaveInterval + 's after you stop typing (set it to 0 to turn autosave off)'"
+            x-text="'auto ' + $store.libretaView.autosaveInterval + 's'"></span>
+
         <span class="lb-modes" role="tablist" aria-label="View mode">
             <button type="button" class="lb-mode" role="tab"
                 :class="{ on: $store.libretaView.modeOf() === 'notes' }"
@@ -74,9 +80,14 @@
             @click="$store.libretaView.cycleView()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="13" y="7" width="5" height="10" rx="1"/></svg>
         </button>
+        {# always visible: quiet while the buffer matches the disk, highlighted while
+           there are unsaved changes #}
         <button type="button" class="lb-iconbtn lb-savebtn"
-            x-show="$store.libretaView.dirtyOf()"
-            title="Save (Ctrl+S)" @click="$store.libretaView.save()">
+            :class="{ pending: $store.libretaView.dirtyOf() }"
+            :title="$store.libretaView.dirtyOf()
+                ? 'Save (Ctrl+S) — there are unsaved changes'
+                : 'Save (Ctrl+S) — nothing to save, the file matches the disk'"
+            @click="$store.libretaView.save()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         </button>
         <button type="button" class="lb-iconbtn lb-wrapbtn"
@@ -101,9 +112,9 @@
         <div class="lb-busy" x-show="$store.libretaView.busy">working…</div>
 
         {# mtime guard refused the save: the file changed under us #}
-        <div class="lb-banner" x-show="$store.libretaView.conflict">
+        <div class="lb-banner" x-show="$store.libretaView.conflictOf()">
             <span class="lb-banner-text"
-                x-text="$store.libretaView.conflict &amp;&amp; $store.libretaView.conflict.message"></span>
+                x-text="$store.libretaView.conflictOf() &amp;&amp; $store.libretaView.conflictOf().message"></span>
             <button type="button" class="lb-btn lb-btn-sm"
                 @click="$store.libretaView.reloadFromDisk()">Reload from disk</button>
             <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost"
