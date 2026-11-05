@@ -215,6 +215,14 @@ class Delegate(core.module.Module):
         except (TypeError, ValueError):
             return 40
 
+    def _font_scale(self):
+        """the panel font size as a percentage of the chat's text, always in range"""
+        try:
+            scale = int(round(float(self.config.get("font_scale", 94) or 94)))
+        except (TypeError, ValueError):
+            scale = 94
+        return max(70, min(130, scale))
+
     async def _system_prompt(self):
         """the current chat's frozen system prompt, plus the delegation preamble"""
         try:
@@ -288,7 +296,26 @@ class Delegate(core.module.Module):
             "tasks": tasks,
             "running": [job["task_id"] for job in self.bus.running_list()],
             "today": chat_listing.local_today(tz_offset).isoformat(),
+            "font_scale": self._font_scale(),
         }
+
+    @webui.route("font-scale", method="POST")
+    async def _route_font_scale(self, body=None, query=None):
+        """store the panel's font size (the panel applies it optimistically)
+
+        The value is a percentage of the chat's text size, clamped to the
+        setting's declared range; persisting it (instead of core editing) means
+        the slider and the settings modal always agree.
+        """
+        try:
+            scale = int(round(float((body or {}).get("scale"))))
+        except (TypeError, ValueError):
+            return self.result("scale must be a number", success=False)
+
+        # write through the module's ConfigManager (it creates the path if the
+        # setting is missing and saves the root config itself)
+        self.config.config["font_scale"] = max(70, min(130, scale))
+        return {"font_scale": self._font_scale()}
 
     @webui.route("rename", method="POST")
     async def _route_rename(self, body=None, query=None):

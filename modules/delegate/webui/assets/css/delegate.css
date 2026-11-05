@@ -318,6 +318,60 @@ body[data-delegate="docked"] #chat-window {
     overflow: auto;
 }
 
+/* ---- footer: the panel's own setting (font size, % of the chat's text) ---- */
+/* core's .slider-* helpers only exist inside .modal, so the panel carries its
+   own range styling, matched to Appearance's 4px track / round accent thumb */
+.dl-foot {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border-color, #1e1e24);
+}
+.dl-foot-label {
+    flex: none;
+    font-size: 11px;
+    color: var(--text-secondary, #a1a1aa);
+}
+.dl-foot-range {
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    margin: 0;
+    background: var(--border-color, #1e1e24);
+    border-radius: var(--radius-full, 999px);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.dl-foot-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--accent, #d4d4d8);
+    cursor: pointer;
+    box-shadow: 0 0 8px var(--accent-glow, transparent);
+}
+.dl-foot-range::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent, #d4d4d8);
+    cursor: pointer;
+    box-shadow: 0 0 8px var(--accent-glow, transparent);
+}
+.dl-foot-value {
+    flex: none;
+    min-width: 34px;
+    text-align: right;
+    font-size: 11px;
+    color: var(--text-muted, #52525b);
+    font-variant-numeric: tabular-nums;
+}
+
 /* ---- narrow windows: never a broken dock, use the full width instead ---- */
 @media (max-width: 900px) {
     body[data-delegate="docked"] #chat-window { padding-right: 0; }

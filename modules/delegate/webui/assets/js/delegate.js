@@ -74,9 +74,12 @@ const DELEGATE_VIEW = {
     liveStep: null,        // the round still streaming, shaped like a step
     running: [],
     statusText: "",
+    fontScale: 94,          // percent of the chat's text (module setting font_scale)
     seq: 0,
     _timer: null,
     _interval: 0,
+    _scaleLoaded: false,
+    _scaleTimer: null,
 
     /* ---- open / close ---- */
     restore() {
@@ -85,9 +88,50 @@ const DELEGATE_VIEW = {
         } catch (error) {
             this.isOpen = false;
         }
+        this.syncScaleFromDom();
         this.applyOpen(this.isOpen);
         this.ensureTimer();
         if (this.isOpen) this.loadTasks();
+    },
+
+    /* ---- font size: a panel-side control over the module's font_scale setting ---- */
+    syncScaleFromDom() {
+        // the panel is server-rendered with the stored setting, so the inline
+        // --dl-scale is the value to start from (before the first tasks poll)
+        const cover = document.querySelector(".dl-cover");
+        if (!cover) return;
+        try {
+            const scale = parseFloat(getComputedStyle(cover).getPropertyValue("--dl-scale"));
+            if (Number.isFinite(scale) && scale > 0) this.fontScale = Math.round(scale * 100);
+        } catch (error) { /* keep the declared default */ }
+    },
+
+    applyScale(value) {
+        const scale = Number(value);
+        this.fontScale = Number.isFinite(scale)
+            ? Math.max(70, Math.min(130, Math.round(scale)))
+            : 94;
+
+        const cover = document.querySelector(".dl-cover");
+        if (cover) cover.style.setProperty("--dl-scale", String(this.fontScale / 100));
+    },
+
+    setFontScale(value) {
+        // drag feedback is immediate; the store write is debounced so a drag
+        // posts once, not on every slider step
+        this.applyScale(value);
+        clearTimeout(this._scaleTimer);
+        this._scaleTimer = setTimeout(() => this.saveFontScale(), 250);
+    },
+
+    async saveFontScale() {
+        this._scaleTimer = null;
+        try {
+            const data = await dlPost("font-scale", { scale: this.fontScale });
+            if (data && typeof data.font_scale === "number") this.applyScale(data.font_scale);
+        } catch (error) {
+            this.statusText = String(error.message || error);
+        }
     },
 
     toggle() {
@@ -282,6 +326,10 @@ const DELEGATE_VIEW = {
             if (!data) return;
             this.tasks = data.tasks || [];
             this.today = data.today || "";
+            if (!this._scaleLoaded) {
+                this._scaleLoaded = true;
+                if (typeof data.font_scale === "number") this.applyScale(data.font_scale);
+            }
             const active = this.tasks.find((task) => task.id === this.activeId);
             if (active) {
                 this.activeTask = active;

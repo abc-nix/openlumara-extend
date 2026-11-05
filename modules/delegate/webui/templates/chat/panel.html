@@ -214,4 +214,15 @@
             Nothing to show for this task yet.
         </div>
     </div>
+
+    {# ---- the panel's own setting: font size, as % of the chat's text ---- #}
+    <div class="dl-foot">
+        <label class="dl-foot-label" for="dl-font-range">Font size</label>
+        <input id="dl-font-range" class="dl-foot-range" type="range"
+               min="70" max="130" step="1"
+               :value="$store.delegateView.fontScale"
+               @input="$store.delegateView.setFontScale($event.target.value)"
+               aria-label="Delegate panel font size">
+        <span class="dl-foot-value" x-text="$store.delegateView.fontScale + '%'"></span>
+    </div>
 </div>
