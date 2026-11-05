@@ -123,7 +123,14 @@ body[data-delegate="docked"] #chat-window {
     background: var(--bg-tertiary, #111115);
 }
 
-/* ---- task list ---- */
+/* ---- task list ----
+   The list's type follows the panel font-size slider in the same way the
+   transcript does: each px baseline is multiplied by --dl-scale and divided by
+   that variable's 0.94 default, so 94% renders exactly the sizes written below
+   and the text scales linearly around them. Panel chrome (.dl-head, .dl-meta,
+   .dl-foot) intentionally keeps fixed sizes: the header and the slider must not
+   wobble while the content resizes. The search placeholder has no size of its
+   own, it inherits the input's, so it follows along. */
 .dl-list {
     flex: 1;
     min-height: 0;
@@ -161,7 +168,7 @@ body[data-delegate="docked"] #chat-window {
     width: 100%;
     padding: 6px 8px 6px 26px;
     font-family: inherit;
-    font-size: 12px;
+    font-size: calc(14px * var(--dl-scale, 0.94) / 0.94);   /* 14px at 94% */
     color: var(--text-primary, #fafafa);
     background: var(--bg-input, #0f0f12);
     border: 1px solid var(--border-color, #1e1e24);
@@ -169,7 +176,9 @@ body[data-delegate="docked"] #chat-window {
     outline: none;
 }
 .dl-search input:focus { border-color: var(--border-message, #252530); }
-.dl-search input::placeholder { color: var(--text-muted, #52525b); }
+/* explicit: the placeholder carries no size of its own, it takes the input's
+   scaled font-size rather than a UA default */
+.dl-search input::placeholder { color: var(--text-muted, #52525b); font-size: inherit; }
 
 /* ---- day groups (labels like the chat sidebar, cards as they were) ---- */
 .dl-day-group + .dl-day-group { margin-top: 8px; }
@@ -183,7 +192,7 @@ body[data-delegate="docked"] #chat-window {
     border: none;
     color: var(--text-muted, #52525b);
     cursor: pointer;
-    font-size: 10.5px;
+    font-size: calc(12.5px * var(--dl-scale, 0.94) / 0.94);   /* 12.5px at 94%: label + count */
     letter-spacing: .05em;
     text-transform: uppercase;
 }
@@ -253,7 +262,7 @@ body[data-delegate="docked"] #chat-window {
     border-color: var(--border-message, #252530);
 }
 .dl-task-title {
-    font-size: 12.5px;
+    font-size: calc(14.5px * var(--dl-scale, 0.94) / 0.94);   /* 14.5px at 94% */
     line-height: 1.35;
     word-break: break-word;
 }
@@ -264,6 +273,11 @@ body[data-delegate="docked"] #chat-window {
     color: var(--text-muted, #52525b);
     text-transform: uppercase;
     letter-spacing: .04em;
+}
+/* the same class is used by the task view's meta strip (.dl-meta), which is
+   chrome and keeps the fixed 10.5px above; only the list rows scale here */
+.dl-list .dl-task-meta {
+    font-size: calc(12.5px * var(--dl-scale, 0.94) / 0.94);   /* 12.5px at 94% */
 }
 .dl-task-meta span:last-child {
     font-family: var(--code-font, monospace);
@@ -291,8 +305,9 @@ body[data-delegate="docked"] #chat-window {
     font-family: var(--code-font, monospace);
     word-break: break-all;
 }
-.dl-note { font-size: 11.5px; color: var(--text-secondary, #a1a1aa); }
-.dl-empty { font-size: 12px; color: var(--text-muted, #52525b); padding: 6px 2px; }
+/* both appear in either view and are message text, so they follow the slider */
+.dl-note { font-size: calc(11.5px * var(--dl-scale, 0.94) / 0.94); color: var(--text-secondary, #a1a1aa); }
+.dl-empty { font-size: calc(12px * var(--dl-scale, 0.94) / 0.94); color: var(--text-muted, #52525b); padding: 6px 2px; }
 /* (the user message is rendered with the chat's own bubble markup now) */
 
 .dl-reason {
