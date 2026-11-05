@@ -2,14 +2,18 @@
 
 The loop mirrors the `subagents` module (stream -> on `tool_calls`, hand the
 round to `channel.tc_manager.process(context=ctx)` so tools run exactly like
-they do for the main agent), with two differences that matter here:
+they do for the main agent), with three differences that matter here:
 
   * the assistant message built for each tool round keeps the content and
     reasoning that preceded the call (subagents pass empty lists), so the
     stored transcript - and the next continuation - keeps the model's preamble
     and chain of thought for that round;
   * every message that lands in the context is folded into the rich transcript
-    and saved, so a crash costs at most the current round.
+    and saved, so a crash costs at most the current round;
+  * the `tool_calls` tokens `process()` yields for the rounds it recurses into
+    are announced to the panel and counted against `max_rounds`, because core's
+    recursion runs the whole rest of the chain inside one `process()` call and
+    has no cap of its own.
 
 `ctx` stays wire-clean: `_absorb()` moves `reasoning_content` into the rich
 copy's `_metadata` as messages appear, so `process()` never re-sends it.
@@ -39,6 +43,7 @@ class DelegateRunner:
     def __init__(self, module):
         self.module = module
         self._model = ""        # model this run is on, recorded per assistant message
+        self._announced_calls = set()   # call ids already sent to the panel (this run)
 
     # ------------------------------------------------------------ model scope
     def _use_model(self, model):
@@ -110,13 +115,28 @@ class DelegateRunner:
         return bool(str(last.get("content") or "").strip())
 
     def _emit_calls(self, task_id, round_no, tool_calls):
+        """announce one round's calls to the panel, once per call id.
+
+        The outer branch announces the first round and the inner loop announces
+        every round core's `process()` recursion runs after it. Those ids are
+        disjoint in core's flow (process() yields only the calls of its own
+        follow-up requests), but a re-emitted id would duplicate a card in the
+        panel, so the ids announced in this run are remembered.
+        """
         for call in tool_calls or []:
             function = call.get("function") or {}
+            call_id = call.get("id", "")
+
+            if call_id:
+                if call_id in self._announced_calls:
+                    continue
+                self._announced_calls.add(call_id)
+
             self.module.bus.emit(
                 task_id,
                 "tool_call",
                 round=round_no,
-                call_id=call.get("id", ""),
+                call_id=call_id,
                 name=function.get("name", ""),
                 args=_short(function.get("arguments", ""), PANEL_ARGS_LIMIT),
             )
@@ -135,7 +155,13 @@ class DelegateRunner:
         bus = module.bus
 
         task = store.find(task_id) or {}
+        # `rounds` is the task's lifetime statistic (shown in the panel and tool
+        # summary, cumulative across continuations). `max_rounds` is a budget for
+        # THIS run, so it is compared against a run-local count - otherwise a
+        # long-lived task would brick itself once its lifetime total passes the
+        # cap, and every later continuation would abort on its first tool call.
         rounds = int(task.get("rounds") or 0)
+        run_rounds = 0
 
         rich = [dict(message) for message in history]
         rich.append({
@@ -149,6 +175,7 @@ class DelegateRunner:
 
         effective_model = model or module.manager.API.get_model() or ""
         self._model = effective_model
+        self._announced_calls = set()   # fresh per run: the calls already announced
 
         bus.start(task_id, title=task.get("title", ""), model=effective_model, rounds=rounds)
 
@@ -193,8 +220,9 @@ class DelegateRunner:
                         elif token_type == "tool_calls":
                             called_tool = True
                             rounds += 1
+                            run_rounds += 1
                             bus.set_rounds(task_id, rounds)
-                            if rounds > max_rounds:
+                            if run_rounds > max_rounds:
                                 raise RuntimeError(
                                     f"the delegate hit its round cap ({max_rounds} tool rounds)"
                                 )
@@ -205,33 +233,71 @@ class DelegateRunner:
                             self._emit_calls(task_id, rounds, request.get("tool_calls"))
                             content, reasoning = [], []
 
-                            async for sub_token in toolcalls.process(request, context=ctx):
-                                sub_type = sub_token.get("type")
-                                if sub_type == "final":
-                                    message = sub_token.get("content")
-                                    if message:
-                                        ctx.append(message)
-                                        self._absorb(ctx, rich, rounds)
-                                        piece = message.get("content") or ""
-                                        if piece:
-                                            answer_parts.append((piece, "" if answer_cut else "\n\n"))
-                                            answer_cut = False
-                                        finished = True
-                                elif sub_type == "tool":
-                                    bus.emit(
-                                        task_id,
-                                        "tool_result",
-                                        call_id=sub_token.get("tool_call_id", ""),
-                                        text=_short(sub_token.get("content")),
-                                    )
-                                elif sub_type == "content":
-                                    bus.emit(task_id, "content", text=sub_token.get("content") or "")
-                                elif sub_type == "reasoning":
-                                    bus.emit(task_id, "reasoning", text=sub_token.get("content") or "")
-                                elif sub_type == "error":
-                                    raise RuntimeError(
-                                        str(sub_token.get("content") or "the API returned an error")
-                                    )
+                            # core's process() runs the whole rest of the tool chain
+                            # itself: it yields the `tool_calls` token of every round
+                            # after this one. Announcing them here is what makes the
+                            # panel live past round 1 - and what makes max_rounds bind,
+                            # because core's recursion has no cap of its own.
+                            sub_stream = toolcalls.process(request, context=ctx)
+                            try:
+                                async for sub_token in sub_stream:
+                                    sub_type = sub_token.get("type")
+                                    if sub_type == "final":
+                                        message = sub_token.get("content")
+                                        if message:
+                                            ctx.append(message)
+                                            self._absorb(ctx, rich, rounds)
+                                            piece = message.get("content") or ""
+                                            if piece:
+                                                answer_parts.append((piece, "" if answer_cut else "\n\n"))
+                                                answer_cut = False
+                                            finished = True
+                                    elif sub_type == "tool_calls":
+                                        rounds += 1
+                                        run_rounds += 1
+                                        bus.set_rounds(task_id, rounds)
+                                        if run_rounds > max_rounds:
+                                            # the rounds that did run are already in ctx:
+                                            # fold them into the transcript before giving
+                                            # up, so the abort does not silently drop them
+                                            self._absorb(ctx, rich, rounds)
+                                            raise RuntimeError(
+                                                f"the delegate hit its round cap ({max_rounds} tool rounds)"
+                                            )
+
+                                        # the token is raw: its arguments may be broken
+                                        # JSON, which the panel could not parse. repair it
+                                        # exactly as core does before showing it.
+                                        repaired = await toolcalls._repair_toolcall_token(sub_token)
+                                        self._emit_calls(
+                                            task_id, rounds, repaired.get("tool_calls")
+                                        )
+                                    elif sub_type == "tool":
+                                        bus.emit(
+                                            task_id,
+                                            "tool_result",
+                                            call_id=sub_token.get("tool_call_id", ""),
+                                            text=_short(sub_token.get("content")),
+                                        )
+                                    elif sub_type == "content":
+                                        bus.emit(task_id, "content", text=sub_token.get("content") or "")
+                                    elif sub_type == "reasoning":
+                                        bus.emit(task_id, "reasoning", text=sub_token.get("content") or "")
+                                    elif sub_type == "error":
+                                        raise RuntimeError(
+                                            str(sub_token.get("content") or "the API returned an error")
+                                        )
+                            finally:
+                                # same shape as the outer stream's finally: an abort out
+                                # of this loop (round cap, API error) must not leave
+                                # core's generator - and the model stream behind it -
+                                # suspended until the garbage collector gets round to it
+                                close = getattr(sub_stream, "aclose", None)
+                                if close is not None:
+                                    try:
+                                        await close()
+                                    except Exception:
+                                        pass
 
                             self._absorb(ctx, rich, rounds)
                             store.save(task_id, rich)
@@ -285,9 +351,12 @@ class DelegateRunner:
 
         except asyncio.CancelledError:
             # the caller was cancelled: the tool call hit its timeout, the turn
-            # was aborted, or Stop was pressed. Keep what landed and never leave
-            # the task looking "running" forever - a cancelled task must read as
-            # interrupted in the index and the panel.
+            # was aborted, or Stop was pressed. Keep what landed - including the
+            # rounds core ran inside this process() call - and never leave the
+            # task looking "running" forever: a cancelled task must read as
+            # interrupted in the index and the panel. An aborted round may end on
+            # a dangling tool call; repair() truncates it on the next continuation.
+            self._absorb(ctx, rich, rounds)
             store.save(task_id, rich)
             store.update(
                 task_id,
@@ -299,6 +368,7 @@ class DelegateRunner:
             raise
 
         except Exception as error:
+            self._absorb(ctx, rich, rounds)
             store.save(task_id, rich)
             if isinstance(error, DelegateCancelled):
                 store.update(task_id, status="interrupted", rounds=rounds, last_error=str(error))

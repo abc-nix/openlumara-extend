@@ -9,6 +9,9 @@ Run from the repo root:
     python3 -m unittest discover -s modules/delegate/tests -v
 """
 
+import asyncio
+import copy
+import json
 import sys
 import types
 import unittest
@@ -27,6 +30,7 @@ if "core" not in sys.modules:
 sys.path.insert(0, str(MODULE_DIR.parent))
 
 from delegate import runner as runner_module  # noqa: E402  (needs the stub above first)
+from delegate import store as store_module    # noqa: E402  (repair(): transcript validity)
 
 
 CALL = {
@@ -35,6 +39,31 @@ CALL = {
         {"id": "call-1", "function": {"name": "delegate_list", "arguments": "{}"}}
     ],
 }
+
+# what a model emits one round later, inside core's recursion: a call with
+# arguments that are not valid JSON (json_repair fixes them in core, and the
+# runner has to repair them before showing them)
+RECURSIVE_CALL = {
+    "type": "tool_calls",
+    "tool_calls": [
+        {"id": "call-2", "function": {"name": "editor_read", "arguments": "{'path': 'notes.md'}"}}
+    ],
+}
+
+RECURSIVE_CALL_2 = {
+    "type": "tool_calls",
+    "tool_calls": [
+        {"id": "call-3", "function": {"name": "editor_edit", "arguments": '{"path": "notes.md"}'}}
+    ],
+}
+
+
+def tool_token(call_id):
+    return {"type": "tool", "tool_call_id": call_id, "content": f"output of {call_id}"}
+
+
+def final_token(text="the answer"):
+    return {"type": "final", "content": {"role": "assistant", "content": text}}
 
 
 class FakeAPI:
@@ -64,28 +93,99 @@ class FakeAPI:
 
 
 class FakeToolCalls:
-    """process() answers a round with a tool result and, optionally, a final message."""
+    """process() replays a scripted list of sub-tokens, like core's recursion.
 
-    def __init__(self, final_message=None):
+    With no `sub_tokens`: the round's tool result plus, when asked for, a final
+    message - one round, nothing recursive. A `tool_calls` token in the script
+    stands for core recursing into another round: core yields that token to its
+    caller and runs the round inside the same process() call, so the runner only
+    ever sees the token (that is the shape P1 had to learn to handle).
+
+    Like core, process() appends the assistant request and every tool result to
+    the `context` it is handed, `_repair_toolcall_token` returns a token copy
+    with canonical JSON arguments, and every generator records whether the
+    caller consumed it to the end or closed it early.
+    """
+
+    def __init__(self, final_message=None, sub_tokens=None):
         self.final_message = final_message
+        self.sub_tokens = sub_tokens
         self.requests = []
+        self.repaired = []        # tokens that went through repair
+        self.generations = []     # {"exhausted": bool, "closed": bool}
 
     async def _build_recursive_request(self, token, content, reasoning):
-        request = {
-            "role": "assistant",
-            "content": "".join(content) or None,
-            "tool_calls": list(token.get("tool_calls") or []),
-        }
+        # core's shape: content/reasoning only when there was some
+        request = {"role": "assistant"}
+        if content:
+            request["content"] = "".join(content)
+        if reasoning:
+            request["reasoning_content"] = "".join(reasoning)
+        request["tool_calls"] = copy.deepcopy(token.get("tool_calls") or [])
         self.requests.append(request)
         return request
 
+    async def _repair_toolcall_token(self, token):
+        if not token.get("tool_calls"):
+            return token
+
+        self.repaired.append(token)
+        repaired = []
+        for call in token["tool_calls"]:
+            function = dict(call.get("function") or {})
+            raw = function.get("arguments")
+            if isinstance(raw, dict):
+                parsed = raw
+            else:
+                try:
+                    parsed = json.loads(raw)
+                except (TypeError, ValueError):
+                    parsed = {}       # core: json_repair, {} when beyond repair
+            # the marker is how a test can tell that the runner announced the
+            # *repaired* calls instead of the raw token it was handed
+            function["arguments"] = json.dumps({**parsed, "_repaired": True})
+            repaired.append({**call, "function": function})
+
+        out = token.copy()
+        out["tool_calls"] = repaired
+        return out
+
     def process(self, request, context=None):
-        final_message = self.final_message
+        script = self.sub_tokens
+        if script is None:
+            script = [tool_token("call-1")]
+            if self.final_message:
+                script.append({"type": "final", "content": dict(self.final_message)})
+
+        state = {"exhausted": False, "closed": False}
+        self.generations.append(state)
+
+        if context is not None:
+            # core adds the request to the context before running its tools
+            context.append(dict(request))
 
         async def stream():
-            yield {"type": "tool", "tool_call_id": "call-1", "content": "tool output"}
-            if final_message:
-                yield {"type": "final", "content": dict(final_message)}
+            try:
+                for token in script:
+                    yield token
+                    if context is None:
+                        continue
+                    # a round core recurses into only reaches the context once the
+                    # caller let that recursion start
+                    if token.get("type") == "tool_calls":
+                        context.append({
+                            "role": "assistant",
+                            "tool_calls": copy.deepcopy(token.get("tool_calls") or []),
+                        })
+                    elif token.get("type") == "tool":
+                        context.append({
+                            "role": "tool",
+                            "tool_call_id": token.get("tool_call_id"),
+                            "content": token.get("content"),
+                        })
+                state["exhausted"] = True
+            finally:
+                state["closed"] = True
 
         return stream()
 
@@ -126,9 +226,9 @@ class FakeStore:
 
 
 class FakeModule:
-    def __init__(self, script, final_message=None):
+    def __init__(self, script, final_message=None, sub_tokens=None):
         self.api = FakeAPI(script)
-        self.toolcalls = FakeToolCalls(final_message)
+        self.toolcalls = FakeToolCalls(final_message, sub_tokens)
         self.store = FakeStore()
         self.bus = FakeBus()
         self.manager = types.SimpleNamespace(
@@ -141,8 +241,8 @@ class FakeModule:
         self.logs.append((category, message))
 
 
-def make(script, final_message=None):
-    module = FakeModule(script, final_message)
+def make(script, final_message=None, sub_tokens=None):
+    module = FakeModule(script, final_message, sub_tokens)
     return module, runner_module.DelegateRunner(module)
 
 
@@ -211,6 +311,183 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
 
         # a plain answer adds no tool round: the cumulative count is unchanged
         self.assertEqual(module.store.tasks["T1"]["rounds"], 5)
+
+    # ---- core's recursion: the rounds after the first are announced too ----
+
+    async def test_a_recursive_round_is_announced_before_its_result(self):
+        # core's process() runs the rest of the chain by itself and yields the
+        # tool_calls token of every round it recurses into. Before this fix the
+        # runner dropped those tokens: the panel never learned that round 2
+        # existed and its tool result had nothing to attach to.
+        module, delegate = make([[CALL]], sub_tokens=[
+            tool_token("call-1"),
+            RECURSIVE_CALL,
+            tool_token("call-2"),
+            final_token("the answer"),
+        ])
+
+        answer = await delegate.run("T1", "hi", "test-model", [], 40)
+
+        self.assertEqual(
+            [event[0] for event in module.bus.events],
+            ["rounds", "tool_call", "tool_result", "rounds", "tool_call", "tool_result"],
+        )
+
+        calls = [event for event in module.bus.events if event[0] == "tool_call"]
+        self.assertEqual([call[2]["call_id"] for call in calls], ["call-1", "call-2"])
+        self.assertEqual([call[2]["name"] for call in calls], ["delegate_list", "editor_read"])
+        self.assertEqual([call[2]["round"] for call in calls], [1, 2])
+
+        # the recursive token carries arguments that are not valid JSON; what
+        # the panel gets is the repaired form, so its card can parse them
+        self.assertEqual(module.toolcalls.repaired, [RECURSIVE_CALL])
+        self.assertTrue(json.loads(calls[1][2]["args"])["_repaired"])
+
+        self.assertEqual(
+            [event[2]["call_id"] for event in module.bus.events if event[0] == "tool_result"],
+            ["call-1", "call-2"],
+        )
+        self.assertEqual([event[2] for event in module.bus.events if event[0] == "rounds"], [1, 2])
+        self.assertEqual(answer, "the answer")
+        self.assertEqual(module.store.tasks["T1"]["rounds"], 2)
+        self.assertEqual(module.store.tasks["T1"]["status"], "done")
+
+    async def test_two_recursive_rounds_are_announced_and_counted(self):
+        module, delegate = make([[CALL]], sub_tokens=[
+            tool_token("call-1"),
+            RECURSIVE_CALL,
+            tool_token("call-2"),
+            RECURSIVE_CALL_2,
+            tool_token("call-3"),
+            final_token("done for real"),
+        ])
+
+        answer = await delegate.run("T1", "hi", "test-model", [], 40)
+
+        calls = [event for event in module.bus.events if event[0] == "tool_call"]
+        self.assertEqual([call[2]["call_id"] for call in calls], ["call-1", "call-2", "call-3"])
+        self.assertEqual([call[2]["round"] for call in calls], [1, 2, 3])
+        self.assertEqual([event[2] for event in module.bus.events if event[0] == "rounds"], [1, 2, 3])
+        self.assertEqual(answer, "done for real")
+        self.assertEqual(module.store.tasks["T1"]["rounds"], 3)
+
+        # every round core ran inside one process() call still lands in the
+        # transcript, call and result side by side
+        stored = module.store.saved["T1"]
+        self.assertEqual(
+            [message["role"] for message in stored],
+            ["user", "assistant", "tool", "assistant", "tool", "assistant", "tool", "assistant"],
+        )
+        self.assertEqual(stored[-1]["content"], "done for real")
+        _, dropped = store_module.repair(stored)
+        self.assertFalse(dropped)
+
+    async def test_a_recursive_round_hits_the_round_cap(self):
+        # core's recursion has no cap of its own, so a runaway delegate used to
+        # loop inside a single process() call forever. max_rounds has to bind
+        # the recursive rounds as well as the outer ones.
+        module, delegate = make([[CALL]], sub_tokens=[
+            tool_token("call-1"),
+            RECURSIVE_CALL,
+            tool_token("call-2"),
+            final_token("never reached"),
+        ])
+
+        with self.assertRaises(RuntimeError) as raised:
+            await delegate.run("T1", "hi", "test-model", [], 1)
+
+        self.assertIn("round cap", str(raised.exception))
+        self.assertEqual(module.store.tasks["T1"]["status"], "error")
+        self.assertIn("round cap", module.store.tasks["T1"]["last_error"])
+        self.assertEqual(module.store.tasks["T1"]["rounds"], 2)
+
+        # the refused round never ran: no card for it, and its token was not
+        # even repaired
+        self.assertNotIn(
+            "call-2",
+            [event[2]["call_id"] for event in module.bus.events if event[0] == "tool_call"],
+        )
+        self.assertEqual(module.toolcalls.repaired, [])
+
+        # core's generator was closed on the way out, not left suspended
+        state = module.toolcalls.generations[0]
+        self.assertTrue(state["closed"])
+        self.assertFalse(state["exhausted"])
+
+        # the round that did run survives the abort, and it is a valid prompt
+        stored = module.store.saved["T1"]
+        self.assertEqual([message["role"] for message in stored], ["user", "assistant", "tool"])
+        _, dropped = store_module.repair(stored)
+        self.assertFalse(dropped)
+
+        self.assertEqual(module.bus.stopped[0][0], "T1")
+        self.assertIn("round cap", str(module.bus.stopped[0][1]))
+
+    async def test_a_call_is_never_announced_twice(self):
+        # a repeated tool_calls token would otherwise put a second card in the
+        # panel, and that card could never be answered
+        module, delegate = make([[CALL, CALL], [{"type": "content", "content": "ok"}]])
+
+        answer = await delegate.run("T1", "hi", "test-model", [], 40)
+
+        self.assertEqual(
+            [event[2]["call_id"] for event in module.bus.events if event[0] == "tool_call"],
+            ["call-1"],
+        )
+        # the round still counts, only the duplicate announcement is dropped
+        self.assertEqual([event[2] for event in module.bus.events if event[0] == "rounds"], [1, 2])
+        self.assertEqual(answer, "ok")
+
+    async def test_the_cap_counts_this_run_not_the_tasks_lifetime(self):
+        # `rounds` is cumulative across continuations (the panel's statistic),
+        # while max_rounds is a budget for ONE run. Comparing the cap against
+        # the lifetime total would brick a long-lived task after ~4 runs.
+        module, delegate = make([[CALL]], sub_tokens=[
+            tool_token("call-1"),
+            RECURSIVE_CALL,
+            tool_token("call-2"),
+            final_token("done"),
+        ])
+        module.store.tasks["T1"]["rounds"] = 30
+
+        answer = await delegate.run("T1", "hi", "test-model", [], 2)
+
+        self.assertEqual(answer, "done")
+        self.assertEqual(module.store.tasks["T1"]["status"], "done")
+        # cumulative: 30 from before + the 2 rounds this run used
+        self.assertEqual(module.store.tasks["T1"]["rounds"], 32)
+
+    async def test_cancellation_keeps_the_rounds_that_ran(self):
+        # Stop / a dropped connection during a recursive round: the rounds core
+        # already ran inside process() must be folded into the transcript, not
+        # silently discarded with the run
+        module, delegate = make([[CALL]], sub_tokens=[tool_token("call-1"), RECURSIVE_CALL])
+        original = module.toolcalls.process
+
+        def process(request, context=None):
+            stream = original(request, context)
+
+            async def failing():
+                async for token in stream:
+                    yield token
+                    if token.get("type") == "tool_calls":
+                        raise asyncio.CancelledError()
+
+            return failing()
+
+        module.toolcalls.process = process
+
+        with self.assertRaises(asyncio.CancelledError):
+            await delegate.run("T1", "hi", "test-model", [], 40)
+
+        stored = module.store.saved["T1"]
+        roles = [message["role"] for message in stored]
+
+        # the round that ran is in the transcript (it would be just the user
+        # message without the absorb in the cancellation handler)
+        self.assertIn("tool", roles)
+        self.assertIn("assistant", roles)
+        self.assertEqual(module.store.tasks["T1"]["status"], "interrupted")
 
 
 class TrailingPartialTests(unittest.TestCase):
