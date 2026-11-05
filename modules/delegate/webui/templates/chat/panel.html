@@ -1,0 +1,78 @@
+{# delegate — the docked panel: task list on top, transcript below.
+
+   Mounted inside #chat-window by delegate/chat/index.html (below_header slot);
+   positioning and the chat's reserved width live in assets/css/delegate.css.
+
+   Two data sources, one shape (blocks):
+     * live   — events polled from /api/ext/delegate/state while a task runs,
+     * stored — /api/ext/delegate/transcript once a run ends (canonical).
+   Everything shown here comes from the backend and goes through x-text only;
+   prompts, titles and tool output are never rendered as HTML. #}
+<div class="dl-cover" x-show="$store.delegateView.isOpen" x-cloak
+     @keydown.escape.window="$store.delegateView.close()">
+
+    <div class="dl-head">
+        <span class="dl-head-title">Delegated tasks</span>
+        <button type="button" class="dl-close" @click="$store.delegateView.close()"
+                title="Close the delegate panel" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="dl-tasks">
+        <template x-for="task in $store.delegateView.tasks" :key="task.id">
+            <button type="button" class="dl-task"
+                    :class="{ selected: task.id === $store.delegateView.activeId }"
+                    @click="$store.delegateView.selectTask(task.id)"
+                    :title="task.id + ' · ' + (task.model || '')">
+                <span class="dl-task-title" x-text="task.title || task.id"></span>
+                <span class="dl-task-meta">
+                    <span :class="'dl-status dl-status-' + task.status" x-text="task.status"></span>
+                    <span x-text="task.id"></span>
+                </span>
+            </button>
+        </template>
+        <div class="dl-empty" x-show="$store.delegateView.tasks.length === 0" x-cloak>
+            No delegated tasks yet.
+        </div>
+    </div>
+
+    <div class="dl-scroll">
+        <div class="dl-task-head" x-show="$store.delegateView.activeId">
+            <span x-text="$store.delegateView.activeTitle || $store.delegateView.activeId"></span>
+        </div>
+
+        <div class="dl-note" x-show="$store.delegateView.statusText" x-text="$store.delegateView.statusText"></div>
+
+        <template x-for="(block, index) in $store.delegateView.blocks" :key="index">
+            <div class="dl-block">
+                <template x-if="block.kind === 'reasoning'">
+                    <details class="dl-reason">
+                        <summary x-text="'thinking · ' + block.text.length + ' chars'"></summary>
+                        <pre x-text="block.text"></pre>
+                    </details>
+                </template>
+                <template x-if="block.kind === 'content'">
+                    <div class="dl-text" x-text="block.text"></div>
+                </template>
+                <template x-if="block.kind === 'user'">
+                    <div class="dl-user" x-text="block.text"></div>
+                </template>
+                <template x-if="block.kind === 'tool'">
+                    <div class="dl-tool">
+                        <div class="dl-tool-head">
+                            <span class="dl-tool-name" x-text="block.name || 'tool'"></span>
+                        </div>
+                        <pre class="dl-tool-args" x-text="block.args" x-show="block.args"></pre>
+                        <pre class="dl-tool-result" x-text="block.result" x-show="block.result"></pre>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <div class="dl-empty" x-show="$store.delegateView.activeId && $store.delegateView.blocks.length === 0" x-cloak>
+            Nothing to show for this task yet.
+        </div>
+        <div class="dl-empty" x-show="!$store.delegateView.activeId" x-cloak>
+            Select a task to see its conversation.
+        </div>
+    </div>
+</div>

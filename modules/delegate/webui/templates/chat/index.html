@@ -1,0 +1,10 @@
+{# delegate — mirrors core chat/index.html only to claim the `below_header`
+   slot, where the docked panel is mounted inside #chat-window (same trick
+   libreta uses for its reading cover). Includes MUST be module-prefixed: the
+   jinja loader tries core templates first, then a PrefixLoader keyed by module
+   name, so an unprefixed path can never land inside this module. #}
+{% macro below_header() %}
+{% if module_config.get("enable_webui_extension", true) %}
+{% include 'delegate/chat/panel.html' %}
+{% endif %}
+{% endmacro %}

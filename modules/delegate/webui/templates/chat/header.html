@@ -1,0 +1,27 @@
+{# delegate — chat header entry point.
+
+   Mirrors core channels/webui/templates/chat/header.html only to claim the
+   `right` slot. That slot sits at the start of the header's right cluster, i.e.
+   immediately before the streaming-state badge (thinking / calling tools /
+   idle) — the same spot the libreta Notes button uses.
+
+   The button opens the docked delegate panel; the dot lights up while a
+   delegated task is running. #}
+{% macro right() %}
+{% if module_config.get("enable_webui_extension", true) %}
+<button type="button" class="btn dl-header-btn"
+    @click="$store.delegateView.toggle()"
+    :class="{ 'is-open': $store.delegateView.isOpen, 'is-running': $store.delegateView.running.length > 0 }"
+    :title="$store.delegateView.isOpen
+        ? 'Close the delegate panel'
+        : 'Delegated tasks — open the delegate panel'"
+    aria-label="Delegated tasks">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="6.5" cy="6.5" r="2.5"></circle>
+        <circle cx="17.5" cy="17.5" r="2.5"></circle>
+        <path d="M6.5 9v3.2a2.3 2.3 0 0 0 2.3 2.3h6.4"></path>
+    </svg>
+</button>
+{% endif %}
+{% endmacro %}

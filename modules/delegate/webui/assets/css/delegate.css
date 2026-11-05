@@ -1,0 +1,226 @@
+/* delegate — docked panel + chat-header button.
+
+   Geometry follows libreta's dock: the panel is absolutely positioned against
+   #chat-window's padding box while #chat-window reserves the same width as
+   right padding, so the chat reflows instead of being covered. Both bases are
+   the same px value (--delegate-dock-w, pinned by delegate.js) on purpose. */
+
+/* ---- header button ---- */
+.dl-header-btn { position: relative; }
+.dl-header-btn.is-open { opacity: 1; }
+.dl-header-btn.is-running::after {
+    content: "";
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent, #d4d4d8);
+    box-shadow: 0 0 0 2px var(--bg-primary, #09090b);
+}
+
+/* ---- dock ---- */
+/* core's #chat-window is not positioned; an absolutely placed panel needs it */
+body[data-delegate] #chat-window { position: relative; }
+
+body[data-delegate="docked"] #chat-window {
+    padding-right: calc(var(--delegate-dock-w, 38%) + 8px);
+}
+
+.dl-cover {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: var(--delegate-dock-w, 38%);
+    background: var(--bg-secondary, #0c0c0f);
+    border-left: 1px solid var(--border-color, #1e1e24);
+    box-shadow: -10px 0 30px rgba(0, 0, 0, .12);
+    z-index: 40;
+    overflow: hidden;
+    color: var(--text-primary, #fafafa);
+    font-family: var(--font-primary, sans-serif);
+}
+
+/* ---- header ---- */
+.dl-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color, #1e1e24);
+    flex: none;
+}
+.dl-head-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .02em;
+}
+.dl-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #a1a1aa);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm, 6px);
+}
+.dl-close:hover {
+    color: var(--text-primary, #fafafa);
+    background: var(--bg-tertiary, #111115);
+}
+
+/* ---- task list ---- */
+.dl-tasks {
+    flex: none;
+    max-height: 30%;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border-bottom: 1px solid var(--border-color, #1e1e24);
+}
+.dl-task {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm, 6px);
+    background: none;
+    color: inherit;
+    cursor: pointer;
+}
+.dl-task:hover { background: var(--bg-tertiary, #111115); }
+.dl-task.selected {
+    background: var(--bg-tertiary, #111115);
+    border-color: var(--border-message, #252530);
+}
+.dl-task-title {
+    font-size: 12.5px;
+    line-height: 1.35;
+    word-break: break-word;
+}
+.dl-task-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 10.5px;
+    color: var(--text-muted, #52525b);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+.dl-task-meta span:last-child {
+    font-family: var(--code-font, monospace);
+    text-transform: none;
+    letter-spacing: 0;
+}
+.dl-status-running { color: var(--info, #93c5fd); }
+.dl-status-error { color: var(--error, #fca5a5); }
+.dl-status-interrupted { color: var(--important, #fde68a); }
+.dl-status-done { color: var(--text-muted, #52525b); }
+
+/* ---- transcript ---- */
+.dl-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 12px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.dl-task-head {
+    font-size: 11px;
+    color: var(--text-muted, #52525b);
+    font-family: var(--code-font, monospace);
+    word-break: break-all;
+}
+.dl-note { font-size: 11.5px; color: var(--text-secondary, #a1a1aa); }
+.dl-empty { font-size: 12px; color: var(--text-muted, #52525b); padding: 6px 2px; }
+.dl-block { display: flex; flex-direction: column; gap: 6px; }
+
+.dl-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.dl-user {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12.5px;
+    color: var(--text-secondary, #a1a1aa);
+    border-left: 2px solid var(--border-user, #2a2a35);
+    padding-left: 8px;
+}
+
+.dl-reason {
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-tertiary, #111115);
+}
+.dl-reason summary {
+    cursor: pointer;
+    padding: 5px 8px;
+    font-size: 11px;
+    color: var(--text-secondary, #a1a1aa);
+}
+.dl-reason pre {
+    margin: 0;
+    padding: 0 8px 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--code-font, monospace);
+    font-size: 11.5px;
+    color: var(--text-muted, #52525b);
+    max-height: 320px;
+    overflow: auto;
+}
+
+.dl-tool {
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-code, #0c0c0f);
+    overflow: hidden;
+}
+.dl-tool-head {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border-color, #1e1e24);
+}
+.dl-tool-name {
+    font-family: var(--code-font, monospace);
+    font-size: 11.5px;
+    color: var(--info, #93c5fd);
+    word-break: break-all;
+}
+.dl-tool-args,
+.dl-tool-result {
+    margin: 0;
+    padding: 6px 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--code-font, monospace);
+    font-size: 11px;
+    color: var(--text-secondary, #a1a1aa);
+    max-height: 220px;
+    overflow: auto;
+}
+.dl-tool-result {
+    border-top: 1px dashed var(--border-color, #1e1e24);
+    color: var(--text-code, #e4e4e7);
+}
+
+/* ---- narrow windows: never a broken dock, use the full width instead ---- */
+@media (max-width: 900px) {
+    body[data-delegate="docked"] #chat-window { padding-right: 0; }
+    body[data-delegate="docked"] .dl-cover {
+        inset: 0;
+        width: 100%;
+        border-left: none;
+    }
+}
