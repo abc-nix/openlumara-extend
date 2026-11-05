@@ -21,6 +21,7 @@ context, and a steering message can be flushed into the main context mid-run.
 
 import core
 import channels.webui.api as webui
+import channels.webui.chat_listing as chat_listing
 
 from .store import DelegateStore, repair
 from .events import EventBus
@@ -52,6 +53,14 @@ class Delegate(core.module.Module):
             "type": "number",
             "default": 40,
             "description": "Tool rounds a single delegated run may use before it is aborted.",
+        },
+        "font_scale": {
+            "type": "number",
+            "default": 94,
+            "min": 70,
+            "max": 130,
+            "step": 1,
+            "description": "Font size of the delegate panel, as a percentage of the chat's text (94 = the chat size minus ~1px).",
         },
     }
 
@@ -260,11 +269,84 @@ class Delegate(core.module.Module):
 
     @webui.route("tasks")
     async def _route_tasks(self, body=None, query=None):
-        """the task index for the panel's list"""
+        """the task index for the panel, with the same day grouping the chat
+        sidebar uses (Today / Yesterday / weekday / Last Week / month, year)"""
+        try:
+            tz_offset = int((query or {}).get("tz_offset") or 0)
+        except (TypeError, ValueError):
+            tz_offset = 0
+
+        tasks = []
+        for task in self.store.all():
+            entry = dict(task)
+            key = chat_listing.group_key(entry.get("updated", ""), tz_offset)
+            entry["group_key"] = key or "undated"
+            entry["group_label"] = chat_listing.day_label_from_key(key, tz_offset)
+            tasks.append(entry)
+
         return {
-            "tasks": self.store.all(),
+            "tasks": tasks,
             "running": [job["task_id"] for job in self.bus.running_list()],
+            "today": chat_listing.local_today(tz_offset).isoformat(),
         }
+
+    @webui.route("rename", method="POST")
+    async def _route_rename(self, body=None, query=None):
+        """rename a task (the transcript is untouched)"""
+        data = body or {}
+        task = self.store.find(data.get("id", ""))
+        if task is None:
+            return self.result("no delegate task with that id", success=False)
+
+        title = str(data.get("title") or "").strip()
+        if not title:
+            return self.result("title must not be blank", success=False)
+
+        updated = self.store.update(task["id"], title=title[:120])
+        return {"task": updated}
+
+    @webui.route("delete", method="POST")
+    async def _route_delete(self, body=None, query=None):
+        """delete a task: its index entry and its stored transcript"""
+        data = body or {}
+        task = self.store.find(data.get("id", ""))
+        if task is None:
+            return self.result("no delegate task with that id", success=False)
+
+        identifier = task["id"]
+        if self._active_task == identifier or task.get("status") == "running":
+            return self.result("that task is running; stop it before deleting it", success=False)
+
+        self.store.delete(identifier)
+        return {"deleted": identifier}
+
+    @webui.route("chain")
+    async def _route_chain(self, body=None, query=None):
+        """a task's transcript grouped exactly like chat turns (steps + final
+        messages), so the panel can render it with the webui's own chain markup.
+
+        Reasoning lives in `_metadata.reasoning` in our transcript (it is moved
+        there so the wire never carries it), but the turn collector builds step
+        headers from `reasoning_content` - so it is rehydrated here, on a copy.
+        """
+        task = self.store.find((query or {}).get("id", ""))
+        if task is None:
+            return self.result("no delegate task with that id", success=False)
+
+        messages, dropped = repair(self.store.load(task["id"]))
+
+        history = []
+        for message in messages:
+            if message.get("role") == "system":
+                continue
+            message = dict(message)
+            reasoning = (message.get("_metadata") or {}).get("reasoning")
+            if reasoning and not message.get("reasoning_content"):
+                message["reasoning_content"] = reasoning
+            history.append(message)
+
+        turns = await self.channel.turncollector.group_history(history)
+        return {"task": task, "turns": turns, "dropped": dropped}
 
     @webui.route("transcript")
     async def _route_transcript(self, body=None, query=None):

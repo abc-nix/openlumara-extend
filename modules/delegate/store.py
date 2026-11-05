@@ -120,6 +120,26 @@ class DelegateStore:
         self.index.save()
         return task
 
+    def delete(self, task_id):
+        """remove a task: its index entry and its transcript file"""
+        task = self.find(task_id)
+        if task is None:
+            return False
+
+        path = os.path.join(self.history_root, f"{task['id']}.json")
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+        for position, entry in enumerate(self.index):
+            if str(entry.get("id", "")) == str(task["id"]):
+                self.index.pop(position)
+                break
+
+        self.index.save()
+        return True
+
     def mark_stale(self):
         """nothing can still be running after a restart or a module reload"""
         changed = False

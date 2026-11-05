@@ -34,13 +34,44 @@ function dlString(value) {
     return value === null || value === undefined ? "" : String(value);
 }
 
+function dlTryJson(text) {
+    try {
+        return { ok: true, value: JSON.parse(text) };
+    } catch (error) {
+        return { ok: false, value: null };
+    }
+}
+
+async function dlPost(path, body) {
+    const response = await fetch(`/api/ext/delegate/${path}`, {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+    });
+
+    let payload = null;
+    try { payload = await response.json(); } catch (error) { payload = null; }
+    if (!payload) throw new Error(`delegate: empty response (${response.status})`);
+    if (payload.success === false) {
+        const detail = typeof payload.data === "string" ? payload.data : JSON.stringify(payload.data);
+        throw new Error(detail);
+    }
+    return payload.data;
+}
+
 const DELEGATE_VIEW = {
     /* ---- state ---- */
     isOpen: false,
     tasks: [],
+    today: "",             // local day key of "today", from the tasks route
+    searchQuery: "",
+    collapsedGroups: {},
+    mode: "list",          // "list" | "task" - one view at a time, never stacked
     activeId: "",
     activeTitle: "",
-    blocks: [],
+    activeTask: null,      // {id, title, status, model, rounds, ...} of the open task
+    turns: [],             // grouped like chat turns (steps + final messages)
+    liveStep: null,        // the round still streaming, shaped like a step
     running: [],
     statusText: "",
     seq: 0,
@@ -70,7 +101,8 @@ const DELEGATE_VIEW = {
         try { localStorage.setItem("delegate.open", "1"); } catch (error) { /* private mode */ }
         this.ensureTimer();
         this.loadTasks();
-        if (!this.activeId && this.running.length) {
+        // opening the panel while a task runs: jump straight into it
+        if (this.mode === "list" && this.running.length) {
             this.selectTask(this.running[0].task_id);
         }
     },
@@ -124,150 +156,274 @@ const DELEGATE_VIEW = {
             this.running = data.running || [];
 
             for (const event of (data.events || [])) this.applyEvent(event);
-
-            if (this.isOpen && !this.activeId && this.running.length) {
-                this.selectTask(this.running[0].task_id);
-            }
         } catch (error) {
             /* backend restarting, module disabled, page on an old build — stay quiet */
         }
     },
 
-    /* ---- live events -> blocks ---- */
+    /* ---- live events -> the live step (one growing chain station) ---- */
     applyEvent(event) {
-        if (!event || event.task_id !== this.activeId) return;
+        if (!event) return;
+
+        // a run just started: if the panel is open on the list, jump into it
+        if (event.kind === "run_start" && this.isOpen && this.mode === "list") {
+            this.selectTask(event.task_id);
+        }
+
+        if (event.task_id !== this.activeId) return;
 
         const kind = event.kind;
 
         if (kind === "run_start") {
-            this.blocks = [];
+            this.mode = "task";
             this.statusText = "running…";
+            this.liveStep = this.blankLiveStep();
             this.loadTasks();          // pick up the task that just appeared
+            this.loadChain(this.activeId);
             return;
         }
-        if (kind === "run_end") {
-            this.statusText = "";
-            this.loadTasks();          // status changed to done
-            this.loadTranscript(this.activeId);
-            return;
-        }
-        if (kind === "run_error") {
-            this.statusText = "error: " + dlString(event.text || "unknown");
-            this.loadTasks();
-            this.loadTranscript(this.activeId);
+        if (kind === "run_end" || kind === "run_error") {
+            this.statusText = kind === "run_error" ? "error: " + dlString(event.text || "unknown") : "";
+            this.liveStep = null;
+            this.loadTasks();          // status changed
+            this.loadChain(this.activeId);
             return;
         }
         if (kind === "run_note") {
             this.statusText = dlString(event.text);
             return;
         }
-        if (kind === "reasoning" || kind === "content") {
-            this.appendText(kind, dlString(event.text));
+        if (kind === "reasoning") {
+            this.ensureLiveStep().reasoning_content += dlString(event.text);
+            return;
+        }
+        if (kind === "content") {
+            this.ensureLiveStep().content += dlString(event.text);
             return;
         }
         if (kind === "tool_call") {
-            this.blocks.push({
-                kind: "tool",
-                name: dlString(event.name),
-                args: dlString(event.args),
-                call_id: dlString(event.call_id),
-                result: "",
-            });
+            this.addLiveTool(event);
             return;
         }
         if (kind === "tool_result") {
-            const callId = dlString(event.call_id);
-            const pending = [...this.blocks].reverse().find((block) =>
-                block.kind === "tool" && !block.result && (!callId || block.call_id === callId)
-            );
-            if (pending) pending.result = dlString(event.text);
-            else this.blocks.push({ kind: "tool", name: "", args: "", call_id: callId, result: dlString(event.text) });
+            this.finishLiveTool(event);
         }
     },
 
-    appendText(kind, text) {
-        if (!text) return;
-        const last = this.blocks[this.blocks.length - 1];
-        if (last && last.kind === kind) last.text += text;
-        else this.blocks.push({ kind, text });
+    /* ---- the round still streaming, shaped like a grouped step ---- */
+    blankLiveStep() {
+        return {
+            step: 9999,
+            status: "running",
+            reasoning_content: "",
+            content: "",
+            tool_calls: [],
+            modules: [],
+        };
+    },
+
+    ensureLiveStep() {
+        if (!this.liveStep) this.liveStep = this.blankLiveStep();
+        return this.liveStep;
+    },
+
+    addLiveTool(event) {
+        const step = this.ensureLiveStep();
+        const name = dlString(event.name);
+        const rawArgs = dlString(event.args);
+        const parsed = dlTryJson(rawArgs);
+
+        step.tool_calls.push({
+            id: dlString(event.call_id),
+            type: "function",
+            function: { name, arguments: rawArgs },
+            _metadata: {
+                summary: "",
+                args_parsed: parsed.ok ? parsed.value : {},
+                response: null,
+                done: false,
+            },
+        });
+
+        // mirror the chat's "Module: action xN" chips
+        const [head, ...rest] = name.split("_");
+        const module = head ? head.charAt(0).toUpperCase() + head.slice(1) : name;
+        const action = (rest.length ? rest.join("_") : head || name).replaceAll("_", " ");
+
+        let group = step.modules.find((entry) => entry.module === module);
+        if (!group) {
+            group = { module, actions: [] };
+            step.modules.push(group);
+        }
+        const existing = group.actions.find((entry) => entry.name === action);
+        if (existing) existing.count += 1;
+        else group.actions.push({ name: action, count: 1 });
+    },
+
+    finishLiveTool(event) {
+        const step = this.liveStep;
+        if (!step) return;
+
+        const callId = dlString(event.call_id);
+        const call = [...step.tool_calls].reverse().find((entry) =>
+            !entry._metadata.done && (!callId || entry.id === callId)
+        );
+        if (!call) return;
+
+        call._metadata.response = dlString(event.text);
+        call._metadata.done = true;
     },
 
     /* ---- tasks ---- */
     async loadTasks() {
         try {
-            const data = await dlGet("tasks");
+            // the server groups tasks with the chat sidebar's own day keys/labels
+            const data = await dlGet("tasks", { tz_offset: new Date().getTimezoneOffset() });
             if (!data) return;
             this.tasks = data.tasks || [];
+            this.today = data.today || "";
             const active = this.tasks.find((task) => task.id === this.activeId);
-            if (active) this.activeTitle = active.title || active.id;
+            if (active) {
+                this.activeTask = active;
+                this.activeTitle = active.title || active.id;
+            }
         } catch (error) {
             /* stay quiet */
         }
     },
 
+    /* ---- search + day groups, mirroring the chat sidebar ---- */
+    taskGroups() {
+        const query = this.searchQuery.trim().toLowerCase();
+        const visible = !query
+            ? this.tasks
+            : this.tasks.filter((task) =>
+                String(task.title || "").toLowerCase().includes(query) ||
+                String(task.id || "").toLowerCase().includes(query));
+
+        const groups = [];
+        const byKey = {};
+        for (const task of visible) {
+            const key = task.group_key || "undated";
+            if (!(key in byKey)) {
+                byKey[key] = { key, label: task.group_label || "Undated", count: 0, tasks: [] };
+                groups.push(byKey[key]);
+            }
+            byKey[key].tasks.push(task);
+            byKey[key].count += 1;
+        }
+        return groups;
+    },
+
+    isGroupCollapsed(group) {
+        // search results are always shown fully, like the chat sidebar
+        if (this.searchQuery.trim()) return false;
+        if (group.key in this.collapsedGroups) return Boolean(this.collapsedGroups[group.key]);
+        return group.key !== this.today;
+    },
+
+    toggleGroup(group) {
+        this.collapsedGroups[group.key] = !this.isGroupCollapsed(group);
+    },
+
+    /* ---- task management ---- */
+    async renameTask(task) {
+        const current = task.title || task.id;
+        const next = window.prompt("Task title", current);
+        if (next === null) return;
+
+        const title = next.trim();
+        if (!title || title === current) return;
+
+        try {
+            await dlPost("rename", { id: task.id, title });
+            await this.loadTasks();
+        } catch (error) {
+            this.statusText = String(error.message || error);
+        }
+    },
+
+    async deleteTask(task) {
+        const name = task.title || task.id;
+        if (!window.confirm(`Delete "${name}"? Its transcript is removed too.`)) return;
+
+        try {
+            await dlPost("delete", { id: task.id });
+            if (this.activeId === task.id) {
+                this.activeId = "";
+                this.activeTitle = "";
+                this.activeTask = null;
+                this.turns = [];
+                this.liveStep = null;
+                this.mode = "list";
+            }
+            await this.loadTasks();
+        } catch (error) {
+            this.statusText = String(error.message || error);
+        }
+    },
+
     async selectTask(id) {
         if (!id) return;
-        if (id === this.activeId && this.blocks.length) return;
+        this.mode = "task";
+
+        if (id === this.activeId && this.turns.length) return;
 
         this.activeId = id;
         this.statusText = "";
-        this.blocks = [];
+        this.turns = [];
+        this.liveStep = null;
 
         const known = this.tasks.find((task) => task.id === id);
+        this.activeTask = known || { id };
         this.activeTitle = known ? (known.title || known.id) : id;
 
         if (this.running.some((job) => job.task_id === id)) {
             this.statusText = "running…";
-            return;    // live events build the view; the transcript lands on run_end
+            this.liveStep = this.blankLiveStep();
         }
 
-        await this.loadTranscript(id);
+        // grouped rounds so far; the live step above covers the round in flight
+        await this.loadChain(id);
     },
 
-    async loadTranscript(id) {
+    backToList() {
+        this.mode = "list";
+        this.statusText = "";
+        this.loadTasks();
+    },
+
+    /* the transcript grouped by the core's turn collector: turns with steps[] in
+       exactly the shape the chat's chain templates read (see delegate/chain) */
+    async loadChain(id) {
         if (!id) return;
         try {
-            const data = await dlGet("transcript", { id });
+            const data = await dlGet("chain", { id });
             if (!data || data.task?.id !== this.activeId) return;
-            if (this.running.some((job) => job.task_id === id)) return;
 
+            this.activeTask = data.task;
             this.activeTitle = data.task.title || data.task.id;
-            this.blocks = this.buildBlocks(data.messages || []);
+            this.mode = "task";
+            this.turns = data.turns || [];
             if (data.dropped) this.statusText = "the last round was interrupted";
         } catch (error) {
             this.statusText = String(error.message || error);
         }
     },
 
-    /* ---- stored transcript -> the same block shape as live events ---- */
-    buildBlocks(messages) {
-        const blocks = [];
-
-        for (const message of messages || []) {
-            const metadata = message._metadata || {};
-            if (metadata.reasoning) blocks.push({ kind: "reasoning", text: dlString(metadata.reasoning) });
-
-            if (message.role === "assistant") {
-                if (message.content) blocks.push({ kind: "content", text: dlString(message.content) });
-                for (const call of (message.tool_calls || [])) {
-                    const fn = call.function || {};
-                    const args = typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {});
-                    blocks.push({ kind: "tool", name: dlString(fn.name), args, call_id: dlString(call.id), result: "" });
-                }
-            } else if (message.role === "tool") {
-                const callId = dlString(message.tool_call_id);
-                const pending = [...blocks].reverse().find((block) =>
-                    block.kind === "tool" && !block.result && (!callId || block.call_id === callId)
-                );
-                if (pending) pending.result = dlString(message.content);
-                else blocks.push({ kind: "tool", name: "", args: "", call_id: callId, result: dlString(message.content) });
-            } else if (message.role === "user" && message.content) {
-                blocks.push({ kind: "user", text: dlString(message.content) });
-            }
+    turnUserText(turn) {
+        const first = (turn.messages || [])[0] || {};
+        const content = first.content;
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) {
+            return content
+                .filter((part) => part && part.type === "text")
+                .map((part) => part.text || "")
+                .join("\n");
         }
-
-        return blocks;
+        return "";
     },
+
 };
 
 /* ---- bootstrap ---- */

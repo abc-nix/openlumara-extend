@@ -1,78 +1,217 @@
-{# delegate — the docked panel: task list on top, transcript below.
+{# delegate — the docked panel.
 
-   Mounted inside #chat-window by delegate/chat/index.html (below_header slot);
-   positioning and the chat's reserved width live in assets/css/delegate.css.
+   Two views inside one panel, never stacked:
+     * list  — the task index (default), searched and grouped by date like the
+               chat sidebar (Today / Yesterday / weekday / Last Week / month)
+     * task  — one task's conversation, full height, with its title/status/id/model
+               pinned at the top and a `<` back button on the left
 
-   Two data sources, one shape (blocks):
-     * live   — events polled from /api/ext/delegate/state while a task runs,
-     * stored — /api/ext/delegate/transcript once a run ends (canonical).
-   Everything shown here comes from the backend and goes through x-text only;
-   prompts, titles and tool output are never rendered as HTML. #}
+   The conversation is rendered with the webui's own chat markup: the transcript
+   comes from /api/ext/delegate/chain, grouped by core's turn collector into
+   turns with `steps` (exactly what chat/combined_block.html expects), so the
+   collapsed chain, fonts, node dots and tool chips look like the chat window.
+   While a round is still streaming it is shown as one extra live station built
+   from the polled events; on run_end the grouped view replaces it.
+
+   Everything from the backend is rendered through x-text / x-md, never as raw
+   HTML (titles, prompts and tool output are untrusted text). #}
+
+{# font size: percentage of the chat's text, from the module settings #}
+{% set _scale = 94 %}
+{% if module_config is defined and module_config.get("font_scale") %}
+{% set _scale = module_config.get("font_scale") %}
+{% endif %}
+
 <div class="dl-cover" x-show="$store.delegateView.isOpen" x-cloak
+     style="--dl-scale: {{ (_scale | float) / 100 }}"
      @keydown.escape.window="$store.delegateView.close()">
 
     <div class="dl-head">
-        <span class="dl-head-title">Delegated tasks</span>
+        <button type="button" class="dl-back" x-show="$store.delegateView.mode === 'task'"
+                @click="$store.delegateView.backToList()"
+                title="Back to the task list" aria-label="Back to the task list">&lsaquo;</button>
+
+        <span class="dl-head-title" x-show="$store.delegateView.mode === 'list'">Delegated tasks</span>
+        <span class="dl-head-title dl-head-task" x-show="$store.delegateView.mode === 'task'"
+              :title="$store.delegateView.activeTitle"
+              x-text="$store.delegateView.activeTitle || 'task'"></span>
+
         <button type="button" class="dl-close" @click="$store.delegateView.close()"
                 title="Close the delegate panel" aria-label="Close">&times;</button>
     </div>
 
-    <div class="dl-tasks">
-        <template x-for="task in $store.delegateView.tasks" :key="task.id">
-            <button type="button" class="dl-task"
-                    :class="{ selected: task.id === $store.delegateView.activeId }"
-                    @click="$store.delegateView.selectTask(task.id)"
-                    :title="task.id + ' · ' + (task.model || '')">
-                <span class="dl-task-title" x-text="task.title || task.id"></span>
-                <span class="dl-task-meta">
-                    <span :class="'dl-status dl-status-' + task.status" x-text="task.status"></span>
-                    <span x-text="task.id"></span>
-                </span>
-            </button>
-        </template>
-        <div class="dl-empty" x-show="$store.delegateView.tasks.length === 0" x-cloak>
-            No delegated tasks yet.
-        </div>
+    <div class="dl-meta" x-show="$store.delegateView.mode === 'task'">
+        <span class="dl-task-meta">
+            <span class="dl-status"
+                  :class="'dl-status-' + (($store.delegateView.activeTask && $store.delegateView.activeTask.status) || '')"
+                  x-text="($store.delegateView.activeTask && $store.delegateView.activeTask.status) || ''"></span>
+            <span class="dl-meta-id" x-text="$store.delegateView.activeId"></span>
+        </span>
+        <span class="dl-meta-model" x-show="$store.delegateView.activeTask && $store.delegateView.activeTask.model"
+              x-text="$store.delegateView.activeTask ? $store.delegateView.activeTask.model : ''"></span>
     </div>
 
-    <div class="dl-scroll">
-        <div class="dl-task-head" x-show="$store.delegateView.activeId">
-            <span x-text="$store.delegateView.activeTitle || $store.delegateView.activeId"></span>
+    {# ---- view: the task list, searched + grouped by date ---- #}
+    <div class="dl-list" x-show="$store.delegateView.mode === 'list'">
+        <div class="dl-search">
+            <span class="dl-search-icon">{% include 'svg/search.svg' %}</span>
+            <input type="text" placeholder="Search tasks.." autocomplete="off"
+                   aria-label="Search delegated tasks"
+                   x-model="$store.delegateView.searchQuery">
         </div>
 
         <div class="dl-note" x-show="$store.delegateView.statusText" x-text="$store.delegateView.statusText"></div>
 
-        <template x-for="(block, index) in $store.delegateView.blocks" :key="index">
-            <div class="dl-block">
-                <template x-if="block.kind === 'reasoning'">
-                    <details class="dl-reason">
-                        <summary x-text="'thinking · ' + block.text.length + ' chars'"></summary>
-                        <pre x-text="block.text"></pre>
-                    </details>
-                </template>
-                <template x-if="block.kind === 'content'">
-                    <div class="dl-text" x-text="block.text"></div>
-                </template>
-                <template x-if="block.kind === 'user'">
-                    <div class="dl-user" x-text="block.text"></div>
-                </template>
-                <template x-if="block.kind === 'tool'">
-                    <div class="dl-tool">
-                        <div class="dl-tool-head">
-                            <span class="dl-tool-name" x-text="block.name || 'tool'"></span>
+        <div class="dl-tasks">
+            <template x-for="group in $store.delegateView.taskGroups()" :key="group.key">
+                <div class="dl-day-group">
+                    <button type="button" class="dl-day-header"
+                            :class="{ expanded: !$store.delegateView.isGroupCollapsed(group) }"
+                            :aria-expanded="!$store.delegateView.isGroupCollapsed(group)"
+                            @click="$store.delegateView.toggleGroup(group)">
+                        <svg class="dl-day-chevron" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+                            <path fill="currentColor" d="M4 1l5 5-5 5z"/>
+                        </svg>
+                        <span class="dl-day-label" x-text="group.label"></span>
+                        <span class="dl-day-count" x-show="!$store.delegateView.searchQuery.trim()"
+                              x-text="group.count"></span>
+                    </button>
+
+                    <template x-if="!$store.delegateView.isGroupCollapsed(group)">
+                        <div class="dl-day-tasks">
+                            <template x-for="task in group.tasks" :key="task.id">
+                                <div class="dl-task-row">
+                                    <div class="dl-task" role="button" tabindex="0"
+                                         :class="{ selected: task.id === $store.delegateView.activeId }"
+                                         :title="task.id + ' · ' + (task.model || '')"
+                                         @click="$store.delegateView.selectTask(task.id)"
+                                         @keydown.enter.prevent="$store.delegateView.selectTask(task.id)">
+                                        <span class="dl-task-title" x-text="task.title || task.id"></span>
+                                        <span class="dl-task-meta">
+                                            <span :class="'dl-status dl-status-' + task.status" x-text="task.status"></span>
+                                            <span x-text="task.id"></span>
+                                        </span>
+                                    </div>
+                                    <span class="dl-task-actions">
+                                        <button type="button" class="dl-icon-btn" title="Rename task"
+                                                aria-label="Rename task"
+                                                @click.stop="$store.delegateView.renameTask(task)">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                                            </svg>
+                                        </button>
+                                        <button type="button" class="dl-icon-btn" title="Delete task"
+                                                aria-label="Delete task"
+                                                @click.stop="$store.delegateView.deleteTask(task)">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+                                            </svg>
+                                        </button>
+                                    </span>
+                                </div>
+                            </template>
                         </div>
-                        <pre class="dl-tool-args" x-text="block.args" x-show="block.args"></pre>
-                        <pre class="dl-tool-result" x-text="block.result" x-show="block.result"></pre>
+                    </template>
+                </div>
+            </template>
+
+            <div class="dl-empty" x-show="$store.delegateView.taskGroups().length === 0" x-cloak>
+                <span x-text="$store.delegateView.searchQuery.trim()
+                    ? 'No tasks match that search.'
+                    : 'No delegated tasks yet.'"></span>
+            </div>
+        </div>
+    </div>
+
+    {# ---- view: one task's conversation, in the chat's own rendering ---- #}
+    <div class="dl-scroll" x-show="$store.delegateView.mode === 'task'">
+        <div class="dl-note" x-show="$store.delegateView.statusText" x-text="$store.delegateView.statusText"></div>
+
+        <template x-for="(turn, turnIndex) in $store.delegateView.turns" :key="'turn-' + turnIndex">
+            <div class="dl-turn">
+                {# the delegate's instructions, rendered like a chat user bubble #}
+                <template x-if="turn.role === 'user'">
+                    <div class="message-wrapper user">
+                        <div class="message user">
+                            <div class="content"
+                                 x-md="{ message: { role: 'user', content: $store.delegateView.turnUserText(turn) }, live: false }"></div>
+                        </div>
+                    </div>
+                </template>
+
+                {# assistant turn: collapsed chain + the final answer, like the chat #}
+                <template x-if="turn.role === 'assistant'">
+                    <div>
+                        <template x-if="(turn.steps ?? []).length > 0">
+                            <div class="agent-chain" x-data="{ collapsed: true, mounted: false,
+                                     get thoughtsOnly() { return turn.steps.every(s => s.status === 'thoughts') } }">
+                                <div class="agent-chain-header" @click="collapsed = !collapsed; if (!collapsed) mounted = true">
+                                    <template x-if="!thoughtsOnly">{% include 'svg/gear.svg' %}</template>
+                                    <template x-if="thoughtsOnly">{% include 'svg/thought_bubble.svg' %}</template>
+                                    <span class="label" x-text="thoughtsOnly ? 'Thoughts' : 'Process'"></span>
+                                    <span class="activity" x-show="collapsed && !thoughtsOnly"
+                                          x-text="'(' + turn.steps.length + (turn.steps.length === 1 ? ' step)' : ' steps)')"></span>
+                                </div>
+                                <template x-if="mounted">
+                                    <div class="agent-chain-body" x-show="!collapsed" x-collapse.duration.250>
+                                        <template x-for="(step, stepIndex) in turn.steps" :key="stepIndex">
+                                            <div class="chain-station">
+                                                <div class="chain-rail"><div class="chain-dot"></div></div>
+                                                <div class="chain-content">
+                                                    {% set combined_stream = False %}
+                                                    {% include 'chat/combined_block.html' %}
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <template x-for="(final, finalIndex) in (turn.final_messages ?? [])" :key="'final-' + finalIndex">
+                            <div class="dl-final">
+                                <details class="dl-reason" x-show="final._metadata && final._metadata.reasoning">
+                                    <summary x-text="'thinking · ' + (((final._metadata || {}).reasoning || '').length) + ' chars'"></summary>
+                                    <pre x-text="(final._metadata || {}).reasoning || ''"></pre>
+                                </details>
+                                <div class="message-wrapper assistant">
+                                    <div class="message assistant">
+                                        <div class="content" x-md="{ message: final, live: false }"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                 </template>
             </div>
         </template>
 
-        <div class="dl-empty" x-show="$store.delegateView.activeId && $store.delegateView.blocks.length === 0" x-cloak>
+        {# the round still streaming: one live station, the grouped view takes over on run_end #}
+        <template x-if="$store.delegateView.liveStep">
+            <div class="agent-chain is-streaming dl-live"
+                 x-data="{ get step() { return $store.delegateView.liveStep } }">
+                <div class="agent-chain-header">
+                    {% include 'svg/gear.svg' %}
+                    <span class="label">Process</span>
+                    <span class="activity">(working…)</span>
+                </div>
+                <div class="agent-chain-body">
+                    <div class="chain-station">
+                        <div class="chain-rail"><div class="chain-dot"></div></div>
+                        <div class="chain-content">
+                            {% set combined_stream = False %}
+                            {% include 'chat/combined_block.html' %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <div class="dl-empty"
+             x-show="$store.delegateView.turns.length === 0 && !$store.delegateView.liveStep" x-cloak>
             Nothing to show for this task yet.
-        </div>
-        <div class="dl-empty" x-show="!$store.delegateView.activeId" x-cloak>
-            Select a task to see its conversation.
         </div>
     </div>
 </div>

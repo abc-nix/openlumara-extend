@@ -54,9 +54,59 @@ body[data-delegate="docked"] #chat-window {
     flex: none;
 }
 .dl-head-title {
+    flex: 1;
+    min-width: 0;
     font-size: 13px;
     font-weight: 600;
     letter-spacing: .02em;
+}
+.dl-head-task {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* back to the list (only in the task view) */
+.dl-back {
+    flex: none;
+    background: none;
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: var(--radius-sm, 6px);
+    color: var(--text-secondary, #a1a1aa);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 7px 3px;
+}
+.dl-back:hover {
+    color: var(--text-primary, #fafafa);
+    background: var(--bg-tertiary, #111115);
+}
+
+/* the task view's meta line: status · id · model */
+.dl-meta {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px 8px;
+    border-bottom: 1px solid var(--border-color, #1e1e24);
+    font-size: 10.5px;
+    color: var(--text-muted, #52525b);
+}
+.dl-meta .dl-task-meta { gap: 8px; }
+.dl-meta-id {
+    font-family: var(--code-font, monospace);
+}
+.dl-meta-model {
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 55%;
+    font-family: var(--code-font, monospace);
+    text-transform: none;
+    letter-spacing: 0;
 }
 .dl-close {
     background: none;
@@ -74,16 +124,117 @@ body[data-delegate="docked"] #chat-window {
 }
 
 /* ---- task list ---- */
+.dl-list {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
 .dl-tasks {
-    flex: none;
-    max-height: 30%;
+    /* list view: fills the panel (the head already draws a divider) */
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 6px;
+    display: block;
+}
+
+/* ---- search bar (chat sidebar metrics) ---- */
+.dl-search {
+    flex: none;
+    position: relative;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color, #1e1e24);
+}
+.dl-search-icon {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    color: var(--text-muted, #52525b);
+    pointer-events: none;
+}
+.dl-search-icon svg { width: 13px; height: 13px; }
+.dl-search input {
+    width: 100%;
+    padding: 6px 8px 6px 26px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--text-primary, #fafafa);
+    background: var(--bg-input, #0f0f12);
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: var(--radius-sm, 6px);
+    outline: none;
+}
+.dl-search input:focus { border-color: var(--border-message, #252530); }
+.dl-search input::placeholder { color: var(--text-muted, #52525b); }
+
+/* ---- day groups (labels like the chat sidebar, cards as they were) ---- */
+.dl-day-group + .dl-day-group { margin-top: 8px; }
+.dl-day-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 6px;
+    background: none;
+    border: none;
+    color: var(--text-muted, #52525b);
+    cursor: pointer;
+    font-size: 10.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+.dl-day-header:hover { color: var(--text-secondary, #a1a1aa); }
+.dl-day-chevron { flex: none; transition: transform .15s ease; }
+.dl-day-header.expanded .dl-day-chevron { transform: rotate(90deg); }
+.dl-day-label { flex: 1; min-width: 0; text-align: left; }
+.dl-day-count { flex: none; opacity: .8; }
+.dl-day-tasks {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    border-bottom: 1px solid var(--border-color, #1e1e24);
+    padding: 2px 0 2px 8px;
 }
+
+/* ---- a task card: same look, plus rename/delete on hover ---- */
+.dl-task-row {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+}
+.dl-task-row .dl-task { flex: 1; min-width: 0; padding-right: 52px; }
+.dl-task-actions {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: inline-flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity .12s ease;
+}
+.dl-task-row:hover .dl-task-actions,
+.dl-task-row:focus-within .dl-task-actions { opacity: 1; }
+.dl-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: var(--bg-secondary, #0c0c0f);
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: var(--radius-sm, 6px);
+    color: var(--text-secondary, #a1a1aa);
+    cursor: pointer;
+}
+.dl-icon-btn:hover {
+    color: var(--text-primary, #fafafa);
+    background: var(--bg-tertiary, #111115);
+}
+.dl-icon-btn svg { width: 12px; height: 12px; }
 .dl-task {
     display: flex;
     flex-direction: column;
@@ -142,22 +293,7 @@ body[data-delegate="docked"] #chat-window {
 }
 .dl-note { font-size: 11.5px; color: var(--text-secondary, #a1a1aa); }
 .dl-empty { font-size: 12px; color: var(--text-muted, #52525b); padding: 6px 2px; }
-.dl-block { display: flex; flex-direction: column; gap: 6px; }
-
-.dl-text {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 13px;
-    line-height: 1.5;
-}
-.dl-user {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 12.5px;
-    color: var(--text-secondary, #a1a1aa);
-    border-left: 2px solid var(--border-user, #2a2a35);
-    padding-left: 8px;
-}
+/* (the user message is rendered with the chat's own bubble markup now) */
 
 .dl-reason {
     border: 1px solid var(--border-color, #1e1e24);
@@ -167,7 +303,7 @@ body[data-delegate="docked"] #chat-window {
 .dl-reason summary {
     cursor: pointer;
     padding: 5px 8px;
-    font-size: 11px;
+    font-size: 0.8em;   /* relative to the panel base, like core's chain */
     color: var(--text-secondary, #a1a1aa);
 }
 .dl-reason pre {
@@ -176,43 +312,10 @@ body[data-delegate="docked"] #chat-window {
     white-space: pre-wrap;
     word-break: break-word;
     font-family: var(--code-font, monospace);
-    font-size: 11.5px;
+    font-size: 0.85em;
     color: var(--text-muted, #52525b);
     max-height: 320px;
     overflow: auto;
-}
-
-.dl-tool {
-    border: 1px solid var(--border-color, #1e1e24);
-    border-radius: var(--radius-sm, 6px);
-    background: var(--bg-code, #0c0c0f);
-    overflow: hidden;
-}
-.dl-tool-head {
-    padding: 5px 8px;
-    border-bottom: 1px solid var(--border-color, #1e1e24);
-}
-.dl-tool-name {
-    font-family: var(--code-font, monospace);
-    font-size: 11.5px;
-    color: var(--info, #93c5fd);
-    word-break: break-all;
-}
-.dl-tool-args,
-.dl-tool-result {
-    margin: 0;
-    padding: 6px 8px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: var(--code-font, monospace);
-    font-size: 11px;
-    color: var(--text-secondary, #a1a1aa);
-    max-height: 220px;
-    overflow: auto;
-}
-.dl-tool-result {
-    border-top: 1px dashed var(--border-color, #1e1e24);
-    color: var(--text-code, #e4e4e7);
 }
 
 /* ---- narrow windows: never a broken dock, use the full width instead ---- */
@@ -224,3 +327,45 @@ body[data-delegate="docked"] #chat-window {
         border-left: none;
     }
 }
+
+/* ==========================================================================
+ * Conversation: reuse the chat's own chain + message markup, one pixel
+ * smaller than the chat window so the 38% dock still fits. Everything inside
+ * the chain is em/rem relative, so one override on the two roots cascades.
+ * ========================================================================== */
+/* one base for the whole panel: a percentage of the chat's body size, set by
+   the module's `font_scale` setting (94% is about the chat size minus 1px), so
+   messages, bubbles and markdown all agree with each other */
+.dl-cover { font-size: calc(1em * var(--dl-scale, 0.94)); }
+
+/* the chain is relative-sized in core (0.85rem roots, em inside), so it follows
+   the same scale */
+.dl-cover .agent-chain,
+.dl-cover .combined-block {
+    font-size: calc(0.85rem * var(--dl-scale, 0.94));
+}
+
+.dl-turn { display: flex; flex-direction: column; gap: 8px; }
+.dl-final { display: flex; flex-direction: column; gap: 6px; }
+
+/* chat message layout, without the chat's own column constraints */
+.dl-cover .message-wrapper {
+    width: 100%;
+    min-width: 0;
+}
+.dl-cover .message-wrapper.user { align-items: flex-end; }
+.dl-cover .message-wrapper .message { max-width: 100%; }
+.dl-cover .message-wrapper.user .message { padding: 8px 12px; }
+.dl-cover .message .content { font-size: 1em; width: 100%; }
+
+/* the delegate's answer: chat styling, but flush with the panel */
+.dl-cover .dl-final .message-wrapper .message {
+    width: 100%;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    backdrop-filter: none;
+}
+
+/* the live station is informational only: no expand affordance */
+.dl-live .agent-chain-header { cursor: default; }
