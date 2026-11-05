@@ -28,6 +28,21 @@ body[data-delegate="docked"] #chat-window {
     padding-right: calc(var(--delegate-dock-w, 38%) + 8px);
 }
 
+/* full: the panel covers #chat-window itself (not the sidebar, not the page):
+   the chat reserves no width for it and the panel spans the padding box, so the
+   cover's rect and the window's rect are the same. The shadow goes too — with
+   left:0 it would spill over the sidebar. */
+body[data-delegate="full"] #chat-window {
+    padding-right: 0;
+}
+
+body[data-delegate="full"] .dl-cover {
+    inset: 0;
+    width: 100%;
+    border-left: none;
+    box-shadow: none;
+}
+
 .dl-cover {
     display: flex;
     flex-direction: column;
@@ -122,6 +137,30 @@ body[data-delegate="docked"] #chat-window {
     color: var(--text-primary, #fafafa);
     background: var(--bg-tertiary, #111115);
 }
+
+/* dock ⇄ full screen: libreta's cover icon button (26x26, no chrome, 15px
+   stroke icon, hover lifts the icon and raises the surface one step). Only the
+   hover surface differs: libreta's cover sits on --bg-primary, this panel on
+   --bg-secondary, so the same "one step up" here is --bg-tertiary. */
+.dl-viewbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--text-muted, #52525b);
+    cursor: pointer;
+}
+.dl-viewbtn:hover {
+    background: var(--bg-tertiary, #111115);
+    color: var(--text-primary, #fafafa);
+}
+.dl-viewbtn svg { width: 15px; height: 15px; }
 
 /* ---- task list ----
    The list's type follows the panel font-size slider in the same way the

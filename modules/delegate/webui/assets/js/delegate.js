@@ -1,4 +1,4 @@
-/* delegate — webui extension: chat-header button + docked panel.
+/* delegate — webui extension: chat-header button + the docked / full-screen panel.
 
    The webui has no module -> frontend push channel, so live data is polled from
    /api/ext/delegate/state with a cursor (fast while the panel is open, slow
@@ -10,6 +10,8 @@
 const DL_POLL_OPEN = 300;
 const DL_POLL_CLOSED = 1500;
 const DL_DOCK_RATIO = 0.38;
+const DL_MODES = ["docked", "full"];      // the two geometries the toggle swaps
+const DL_MODE_KEY = "delegate.mode";      // localStorage key, default "docked"
 
 async function dlGet(path, params) {
     const search = params && Object.keys(params).length
@@ -67,6 +69,7 @@ const DELEGATE_VIEW = {
     searchQuery: "",
     collapsedGroups: {},
     mode: "list",          // "list" | "task" - one view at a time, never stacked
+    viewMode: "docked",    // "docked" (side panel) | "full" (covers #chat-window); remembered
     activeId: "",
     activeTitle: "",
     activeTask: null,      // {id, title, status, model, rounds, ...} of the open task
@@ -85,8 +88,12 @@ const DELEGATE_VIEW = {
     restore() {
         try {
             this.isOpen = localStorage.getItem("delegate.open") === "1";
+            const saved = localStorage.getItem(DL_MODE_KEY);
+            this.viewMode = DL_MODES.indexOf(saved) >= 0 ? saved : "docked";
         } catch (error) {
+            // private mode / no storage: the declared defaults stand
             this.isOpen = false;
+            this.viewMode = "docked";
         }
         this.syncScaleFromDom();
         this.applyOpen(this.isOpen);
@@ -164,11 +171,23 @@ const DELEGATE_VIEW = {
         if (open && !document.querySelector(".dl-cover")) return;
 
         if (open) {
-            document.body.dataset.delegate = "docked";
-            this.syncDockWidth();
+            // the dataset is the whole mechanism: "docked" reserves room for the
+            // panel, "full" makes it cover #chat-window (see delegate.css)
+            document.body.dataset.delegate = this.viewMode === "full" ? "full" : "docked";
+            // only the docked geometry uses the pinned width; full mode needs no
+            // measurement, and switching back recomputes here with the window's
+            // current width (a resize may have happened while full)
+            if (this.viewMode !== "full") this.syncDockWidth();
         } else {
             delete document.body.dataset.delegate;
         }
+    },
+
+    /* ---- dock ⇄ full screen ---- */
+    toggleViewMode() {
+        this.viewMode = this.viewMode === "full" ? "docked" : "full";
+        try { localStorage.setItem(DL_MODE_KEY, this.viewMode); } catch (error) { /* private mode */ }
+        this.applyOpen(this.isOpen);
     },
 
     syncDockWidth() {
@@ -483,6 +502,8 @@ document.addEventListener("alpine:init", () => {
 window.addEventListener("resize", () => {
     try {
         const view = Alpine.store("delegateView");
-        if (view && view.isOpen) view.syncDockWidth();
+        // only the docked geometry shares a pinned width with the chat; full mode
+        // ignores it, and a later switch back to docked recomputes it then
+        if (view && view.isOpen && view.viewMode !== "full") view.syncDockWidth();
     } catch (error) { /* store not registered yet */ }
 });

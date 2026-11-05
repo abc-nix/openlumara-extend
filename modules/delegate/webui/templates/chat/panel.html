@@ -36,6 +36,30 @@
               :title="$store.delegateView.activeTitle"
               x-text="$store.delegateView.activeTitle || 'task'"></span>
 
+        {# dock ⇄ full screen — the same control libreta's cover carries, with its
+           icon: the glyph shows what the click gives. Docked: the frame's inner
+           area fills it (go full). Full: an inner panel docked right (go docked). #}
+        <button type="button" class="dl-viewbtn"
+                :title="$store.delegateView.viewMode === 'full'
+                    ? 'Docked — put the panel back beside the chat'
+                    : 'Full screen — cover the whole chat window'"
+                :aria-label="$store.delegateView.viewMode === 'full'
+                    ? 'Dock the delegate panel' : 'Show the delegate panel full screen'"
+                @click="$store.delegateView.toggleViewMode()">
+            <svg x-show="$store.delegateView.viewMode !== 'full'" aria-hidden="true"
+                 xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2"/>
+                <rect x="6" y="7" width="12" height="10" rx="1"/>
+            </svg>
+            <svg x-show="$store.delegateView.viewMode === 'full'" aria-hidden="true"
+                 xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2"/>
+                <rect x="13" y="7" width="5" height="10" rx="1"/>
+            </svg>
+        </button>
+
         <button type="button" class="dl-close" @click="$store.delegateView.close()"
                 title="Close the delegate panel" aria-label="Close">&times;</button>
     </div>
