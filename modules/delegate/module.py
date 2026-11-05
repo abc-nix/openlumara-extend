@@ -29,6 +29,7 @@ from .runner import DelegateRunner, DelegateCancelled
 
 TOOL_NEW = "delegate_new"
 TOOL_SEND = "delegate_send"
+TOOL_LIST = "delegate_list"
 
 DELEGATE_PREAMBLE = (
     "\n\n# Delegation\n"
@@ -174,6 +175,56 @@ class Delegate(core.module.Module):
         self.store.update(identifier, status="running", last_error=None)
 
         return await self._execute(task, prompt, model_name or task.get("model") or None, history)
+
+    @core.module.tool()
+    async def list(self, query: str = "", status: str = "", limit: int = 20) -> dict:
+        """List the stored delegated tasks, newest first.
+
+        This reads the task index on disk, so it also works when the ids from
+        earlier in this conversation were compressed away: use it to recover a
+        task id instead of asking the user for one.
+
+        Args:
+            query: text matched against the title, id and model (empty = every task).
+            status: only tasks with this status - "running", "done", "error" or "interrupted" (empty = any).
+            limit: how many tasks to return, newest first (default 20, max 100).
+
+        Returns:
+            {count, tasks: [{task_id, title, status, model, rounds, updated, error}], truncated}
+        """
+        query = (query or "").strip().lower()
+        status = (status or "").strip().lower()
+        try:
+            limit = max(1, min(100, int(limit)))
+        except (TypeError, ValueError):
+            limit = 20
+
+        matched = []
+        for task in self.store.all():   # already sorted newest first
+            if status and str(task.get("status") or "").lower() != status:
+                continue
+            if query:
+                haystack = " ".join(
+                    str(task.get(key) or "") for key in ("title", "id", "model")
+                ).lower()
+                if query not in haystack:
+                    continue
+
+            matched.append({
+                "task_id": task.get("id", ""),
+                "title": task.get("title") or task.get("id", ""),
+                "status": task.get("status") or "",
+                "model": task.get("model") or "",
+                "rounds": task.get("rounds") or 0,
+                "updated": task.get("updated") or "",
+                "error": task.get("last_error") or "",
+            })
+
+        return self.result({
+            "count": len(matched),
+            "tasks": matched[:limit],
+            "truncated": len(matched) > limit,
+        })
 
     # ------------------------------------------------------------- execution
     async def _execute(self, task, prompt, model, history):
@@ -397,17 +448,26 @@ class Delegate(core.module.Module):
             "- `delegate_send(task_id, prompt, model="")` continues the same task later: its full stored "
             "context (including every tool result) is replayed, so use it to ask why it did something or "
             "to hand it another step. Do not ask the user for a task id - use the one delegate_new returned.\n"
+            "- If those ids are no longer in the conversation (e.g. after context compression), "
+            "`delegate_list(query=\"\", status=\"\", limit=20)` returns the stored tasks newest first, "
+            "so an id can be recovered instead of asking the user.\n"
             "Delegated tasks inherit your tools."
         )
 
     def on_tool_summary(self, name, args, response):
         """one-line hint for the collapsed tool card: id · rounds · status"""
-        if name not in (TOOL_NEW, TOOL_SEND):
+        if name not in (TOOL_NEW, TOOL_SEND, TOOL_LIST):
             return ""
 
         payload = response.get("content") if isinstance(response, dict) else None
         if not isinstance(payload, dict):
             return ""
+
+        if name == TOOL_LIST:
+            count = payload.get("count")
+            if count is None:
+                return ""
+            return f"{count} task" if count == 1 else f"{count} tasks"
 
         task_id = payload.get("task_id")
         if not task_id:
