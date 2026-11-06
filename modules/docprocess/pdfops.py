@@ -83,6 +83,17 @@ def normalize_cropbox(data, log=lambda m: None):
         if dims(first.get("/CropBox")) == dims(first.get("/MediaBox")) or not first.get("/CropBox"):
             return data
         writer = PdfWriter()
+        # pypdf's writer defaults /Producer to "pypdf" and drops /Creator, and
+        # the series profiles identify a document by producer/creator: keep the
+        # original metadata or every matches() silently turns false after a
+        # cropbox trim.
+        try:
+            meta = {k: v for k, v in (reader.metadata or {}).items()
+                    if isinstance(v, str)}
+            if meta:
+                writer.add_metadata(meta)
+        except Exception:
+            pass
         pages = [first] + list(it)
         fixed = 0
         for p in pages:
