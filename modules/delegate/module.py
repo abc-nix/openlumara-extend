@@ -474,10 +474,14 @@ class Delegate(core.module.Module):
                     f"wake call returned for task {task_id}: {str(result)[:300]}",
                 )
             except Exception as error:
+                import traceback
+                trace = traceback.format_exc().strip().splitlines()
                 self.log(
                     "delegate",
                     f"could not wake the model for task {task_id}: {type(error).__name__}: {error}",
                 )
+                for line in trace[-14:]:
+                    self.log("delegate", f"  {line}")
             return
 
         self.log("delegate", f"pushing completion notice for task {task_id}")
