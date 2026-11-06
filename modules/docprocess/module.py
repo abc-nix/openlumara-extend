@@ -50,7 +50,7 @@ class DocProcess(core.module.Module):
 
     settings = {
         "enabled": {
-            "type": "bool", "default": True,
+            "type": "boolean", "default": True,
             "description": "Instant kill-switch for the conversion tools and PDF upload takeover. Takes effect without a restart; fully disabling the module (needs restart) is done in the module list.",
         },
         "ocr_mode": {
@@ -62,23 +62,23 @@ class DocProcess(core.module.Module):
             "description": "Comma-separated Tesseract language codes (e.g. spa,eng).",
         },
         "force_ocr": {
-            "type": "bool", "default": False,
+            "type": "boolean", "default": False,
             "description": "Ignore embedded text layer; OCR every page.",
         },
         "extras": {
-            "type": "bool", "default": True,
+            "type": "boolean", "default": True,
             "description": "Load document-series profiles from the optional ./extras/ package (quirks of a specific publisher that cannot be generalised, e.g. coloured citation blocks or cover pages). Absent or disabled = the module behaves as the generic converter.",
         },
         "fix_text": {
-            "type": "bool", "default": True,
+            "type": "boolean", "default": True,
             "description": "Repair converter text damage: space before punctuation left by emphasis runs, paragraphs cut at a style boundary, hyphenation breakage (word halves rejoined or split using the PDF's own text layer as proof) and list bullets glued to the previous item.",
         },
         "fix_styles": {
-            "type": "bool", "default": True,
+            "type": "boolean", "default": True,
             "description": "Repair lying font metadata before extraction (InDesign PDFs embed bold/italic instances under the same name with FontWeight 400, so xberg prints them plain). Classifies each embedded program by its outlines (ink + slant) and relabels only those; needs a text layer with embedded fonts, so scans are skipped.",
         },
         "layout_tables": {
-            "type": "bool", "default": True,
+            "type": "boolean", "default": True,
             "description": "PaddleOCR tier: detect table layout and output real markdown tables.",
         },
         "html_tables": {
@@ -114,7 +114,7 @@ class DocProcess(core.module.Module):
             "description": "Max seconds per document before the job fails.",
         },
         "debug": {
-            "type": "bool", "default": False,
+            "type": "boolean", "default": False,
             "description": "Extra OCR-ladder detail in tool results and logs.",
         },
     }

@@ -29,13 +29,29 @@ skipped, the rest still applies).
    to the previous item ("...la literatura. → Si atendemos..."). An arrow after
    a sentence end becomes its own list item again.
 
+5. HYPHENATION AT A LINE BREAK.  The PDF itself says the line ended on
+   "perse-" (or on U+00AD, the invisible soft hyphen this series writes) and
+   the next line opened with "guido": both halves are one word, so
+   "perse guido" becomes "perseguido". The proofs come from pdfgeom; nothing
+   is joined on a guess, and a real hyphen inside a word ("ex-presidente", no
+   space after it) is left alone.
+
+6. A COLUMN BREAK RESUMING WITH AN EM DASH.  "...y en muchos casos" /
+   "—pensemos ..." is one sentence cut by the layout: the blocks merge. A
+   capital after the dash is dialogue and stays untouched.
+
 Code fences are never touched. Everything returns text unchanged on any doubt.
 """
 import re
 
+try:                                  # pdfgeom only needs pypdf; optional so
+    from . import pdfgeom             # this module still imports standalone
+except Exception:                     # pragma: no cover
+    pdfgeom = None
+
 _WORD = re.compile(r"[^\W\d_]{2,}")
 _FENCE = re.compile(r"^\s*(```|~~~)")
-_PUNCT_AFTER_MARKER = re.compile(r"(\*{1,3}|_{1,3})[ \t]+([,.;:»)])")
+_PUNCT_AFTER_MARKER = re.compile(r"(\*{1,3}|_{1,3})[ \t]+([,.;:»)?!])")
 _GLUED_ARROW = re.compile(r"(?<=[.:;!?])[ \t]*(→|➔|➤)[ \t]+")
 _LOOSE_PUNCT = re.compile(r"(?<=\*)[ \t]+(?=[,.])")
 _TERMINAL = ".!?:;»"
@@ -61,6 +77,10 @@ def _reference(pdf_bytes):
         return None, None, None
     flat = re.sub(r"\s+", " ", raw)
     joined = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", raw)   # "incorpo-" + "ración"
+    # this series writes the break as U+00AD (soft hyphen, no ink): the
+    # extractors drop it and leave a space, so the vocabulary never contains
+    # the whole word unless it is rebuilt here too
+    joined = re.sub(r"\u00ad\s*\n\s*", "", joined)
     low = joined.lower()
     vocab = set(_WORD.findall(low))
     # Adjacent pairs must be built from the TOKEN LIST, not with findall:
@@ -125,6 +145,36 @@ def _join_fragments(text, vocab):
     return "".join(out), n
 
 
+_HYPHEN_SEP = r"(?:-\s+|\s+)"
+
+
+def _rejoin_hyphenation(text, pairs):
+    """'perse guido' -> 'perseguido' on the PDF's own proof.
+
+    `pairs` comes from pdfgeom: the text layer ends a line on "perse-" (or on
+    U+00AD, the invisible soft hyphen this series uses) and opens the next one
+    with "guido". Only those pairs are joined, so ordinary two-word sequences
+    are never touched, and a hyphen that is part of the word ("ex-presidente",
+    no space after it) is left alone because the separator must hold space.
+    """
+    if not pairs:
+        return text, 0
+    n = 0
+    for left, right in sorted(pairs, key=lambda p: (-len(p[0]), p[0])):
+        if len(left) < 2 or len(right) < 2:
+            continue
+        pat = re.compile(r"\b(" + re.escape(left) + r")" + _HYPHEN_SEP +
+                         r"(" + re.escape(right) + r")\b", re.IGNORECASE)
+
+        def repl(m):
+            nonlocal n
+            n += 1
+            return m.group(1) + m.group(2)
+
+        text = pat.sub(repl, text)
+    return text, n
+
+
 def _merge_split_paragraphs(text):
     """Undo blocks cut at a style boundary; never touches headings or lists."""
     blocks = text.split("\n\n")
@@ -135,6 +185,10 @@ def _merge_split_paragraphs(text):
             ps = prev.rstrip()
             ns = blk.lstrip()
             starts_cont = bool(re.match(r"^(\*{1,3}[a-záéíóúüñ«“\"¿¡]|[a-záéíóúüñ«“\"¿¡])", ns))
+            # a block cut at a column break that resumes with an em dash and a
+            # lowercase letter is a split sentence ("... en muchos casos" /
+            # "—pensemos ..."); a capital after the dash is dialogue and stays
+            starts_dash = bool(re.match(r"^\*{0,3}\s*—\s*[a-záéíóúüñ«“\"¿¡]", ns))
             # A trailing "," or ";" is a page-break split unless the next block
             # is itself a list item: element lists DO end with a comma or a
             # semicolon. A trailing ":" only merges into a lowercase
@@ -152,7 +206,7 @@ def _merge_split_paragraphs(text):
             elif ps.endswith((",", ";")):
                 prev_open = not next_enum
             else:
-                prev_open = ps[-1:].isalpha() and starts_cont
+                prev_open = ps[-1:].isalpha() and (starts_cont or starts_dash)
             blocky = ("#", "|", ">")
             prev_blocky = (ps.startswith(blocky) or ps.startswith(("- ", "* "))) \
                 and not ps.startswith("- → ")
@@ -223,16 +277,22 @@ def _reference_quotes(block, n, flat):
 
 
 def repair(text, pdf_bytes=None, log=lambda m: None):
-    """Apply the four repairs. Safe to call on any markdown (no-op on doubt)."""
+    """Apply the repair rules. Safe to call on any markdown (no-op on doubt)."""
     if not text:
         return text
     vocab, bigrams, flat = _reference(pdf_bytes) if pdf_bytes else (None, None, None)
+    pairs = None
+    if pdf_bytes and pdfgeom is not None:
+        try:
+            pairs = pdfgeom.hyphen_pairs(pdf_bytes, cross_page=True)
+        except Exception:
+            pairs = None
 
     # split on code fences; only prose segments are repaired
     parts = re.split(r"(^\s*(?:```|~~~).*?^\s*(?:```|~~~)\s*$)",
                      text, flags=re.S | re.M)
     counts = {"punct": 0, "arrow": 0, "merge": 0, "split": 0, "join": 0,
-              "emphjoin": 0, "quotes": 0}
+              "emphjoin": 0, "quotes": 0, "hyphen": 0}
 
     for idx, seg in enumerate(parts):
         if idx % 2 == 1:            # fenced code: keep byte-identical
@@ -247,6 +307,10 @@ def repair(text, pdf_bytes=None, log=lambda m: None):
 
         counts["arrow"] += len(_GLUED_ARROW.findall(new))
         new = _GLUED_ARROW.sub(lambda m: "\n\n- " + m.group(1) + " ", new)
+
+        # hyphenation first: it may glue two blocks that a column break cut
+        new, nh = _rejoin_hyphenation(new, pairs or ())
+        counts["hyphen"] += nh
 
         new, nm = _merge_split_paragraphs(new)
         counts["merge"] += nm
