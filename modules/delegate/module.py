@@ -90,7 +90,7 @@ class Delegate(core.module.Module):
             "options": {
                 "Off": "Do nothing. The task just shows as done in the panel.",
                 "Push": "Add a one-line notice to the chat. The model sees it at its next turn and can call delegate_read for the answer. Never starts a turn.",
-                "Wake": "Deliver the notice where a steering message goes: the turn that is running reads it at its next tool round, and if that turn has already ended the notice is answered as a fresh turn. When the chat is idle the notice simply waits for the next turn. Costs tokens when it triggers a fresh turn.",
+                "Wake": "Send the notice as a user message so the assistant acts on it at once: injected into a running turn at its next tool round, or answered in a new turn when the chat is idle. The notice appears in the chat as a user message. Costs tokens.",
             },
         },
         "keep_reasoning_in_context": {
@@ -501,10 +501,10 @@ class Delegate(core.module.Module):
             if route == policy.STEERING:
                 # The slot a user steering message uses: the running chain drains
                 # it at its next tool-round boundary, and if that turn ends first
-                # the continuation loops answer it as a fresh turn. That is what
-                # channel.send() did for Wake - minus the duplicated turn (send()
-                # re-enters the whole user-facing send path).
+                # the continuation loops answer it as a fresh turn.
                 await self.channel.queue_steering_message(note)
+            elif route == policy.START_TURN:
+                await self._start_turn(note)
             else:
                 # defer=True already gates on _chain_idle inside _push_consumer, so
                 # there is no wait of our own: that wait only added an ordering race
@@ -523,6 +523,27 @@ class Delegate(core.module.Module):
             )
             for line in trace[-12:]:
                 self.log("delegate", f"  {line}")
+
+    async def _start_turn(self, note):
+        """run a turn with `note` as the user message, the way a typed message does.
+
+        The web UI never calls channel.send() for this: it goes through its
+        websocket manager, which sets the stream state and pushes the stream into
+        the client (channels/webui/ws_manager.py:137). Using that same entry point
+        keeps the rendering identical to a message the user typed - and avoids the
+        duplicated turn channel.send() produced. Other channels get the generic
+        core path (push_stream over a fresh send_stream).
+        """
+        channel = self.channel
+        manager = getattr(channel, "websocket_manager", None)
+        if manager is not None:
+            try:
+                chat_id = channel.context.chat.get("id") or "default"
+            except Exception:
+                chat_id = "default"
+            await manager.start_stream(channel, chat_id, note)
+            return
+        await channel.push_stream(channel.send_stream(note))
 
     async def _execute(self, task, prompt, model, history):
         """run the task inside the delegation context.

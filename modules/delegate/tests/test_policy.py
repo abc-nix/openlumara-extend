@@ -19,6 +19,7 @@ sys.path.insert(0, str(MODULE_DIR.parent))
 
 from delegate.policy import (  # noqa: E402
     DEFERRED,
+    START_TURN,
     STEERING,
     TAIL,
     announce_delivery,
@@ -124,14 +125,15 @@ class AnnounceDeliveryTest(unittest.TestCase):
 
     def test_wake_name_is_normalised(self):
         self.assertEqual(announce_delivery(" WAVE ".replace("WAVE", "Wake"), True, 0), STEERING)
+        self.assertEqual(announce_delivery(" Wake ", False, 0), START_TURN)
+
+    def test_wake_starts_a_turn_when_idle(self):
+        self.assertEqual(announce_delivery("wake", False, 0), START_TURN)
+        self.assertEqual(announce_delivery("wake", False, 3), START_TURN)
 
     def test_wake_falls_back_when_a_delegate_chain_is_live(self):
         # it would steal the slot (core drains queued_message with no context guard)
         self.assertEqual(announce_delivery("wake", True, 1), DEFERRED)
-
-    def test_wake_while_idle_only_appends(self):
-        # nothing to interrupt: no turn can be injected into, so it waits in context
-        self.assertEqual(announce_delivery("wake", False, 0), TAIL)
 
     def test_unknown_mode_never_starts_a_turn(self):
         self.assertEqual(announce_delivery("", True, 0), DEFERRED)

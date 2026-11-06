@@ -73,28 +73,33 @@ def start_refusal(background, cap, running, effective_model, current_model):
 # how a completion notice reaches the channel (see announce_completion)
 TAIL = "tail"            # push(defer=False): appended and displayed now
 DEFERRED = "deferred"    # push(defer=True): appended after the turn ends
-STEERING = "steering"    # queue_steering_message: next round boundary, or a fresh turn
+STEERING = "steering"    # queue_steering_message: injected into the running turn
+START_TURN = "start_turn"  # start a turn with the notice (what a typed message does)
 
 
 def announce_delivery(mode, turn_running, delegate_runs):
-    """where a completion notice goes: TAIL / DEFERRED / STEERING.
+    """where a completion notice goes: TAIL / DEFERRED / STEERING / START_TURN.
 
     `mode` is "push" or "wake" (the caller handles "off").
     - push: never starts a turn. Tail when idle, deferred otherwise.
-    - wake: use the channel's steering slot while a normal turn is running, so the
-      model reads the notice at its next tool-round boundary (toolcalls.py:294);
-      if that turn ends first, core answers the queued message as a fresh turn
-      (channel.py:799 / :882) - the intent channel.send() had, without the
-      duplicated turn. With a delegated run also live the slot would be stolen
-      (core drains queued_message with no `context is None` guard) and with no
-      turn running there is nothing to inject into: both fall back to the tail.
+    - wake: the notice rides in a USER message and the assistant acts on it at
+      once.
+      - idle: a new turn is started with it (the webui's own start_stream path),
+        so the transcript gains a user bubble plus the reply;
+      - a normal turn is running and no delegated chain is live: it goes through
+        the steering slot, which that chain drains at its next tool-round
+        boundary (toolcalls.py:294), or answers as a continuation turn if it ends
+        first (channel.py:799 / :882);
+      - a delegated chain is live: it would steal the slot (core drains
+        queued_message with no `context is None` guard), so fall back to the
+        deferred tail.
     """
     woken = str(mode or "").strip().lower() == "wake"
-    if woken and turn_running and not delegate_runs:
-        return STEERING
-    if turn_running:
-        return DEFERRED
-    return TAIL
+    if woken:
+        if not turn_running:
+            return START_TURN
+        return STEERING if not delegate_runs else DEFERRED
+    return DEFERRED if turn_running else TAIL
 
 
 def should_detach(quiet_seconds, slots, quiet_threshold=1.0):
