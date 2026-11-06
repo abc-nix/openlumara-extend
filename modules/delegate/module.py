@@ -19,6 +19,8 @@ auto-compressed mid-run, the delegate's API usage is counted against the main
 context, and a steering message can be flushed into the main context mid-run.
 """
 
+import asyncio
+import inspect
 import time
 
 import core
@@ -76,7 +78,27 @@ class Delegate(core.module.Module):
         self.bus = EventBus()
         self.runner = DelegateRunner(self)
         self._active_task = None
+        self._background = set()      # detached runs: keep a reference or they vanish
         self.store.mark_stale()
+
+    async def on_shutdown(self):
+        # a module reload must not leave a detached run writing into a dead store
+        for task in list(self._background):
+            task.cancel()
+        self._background.clear()
+
+    def _call_chain(self):
+        """debug: the immediate Python callers of a tool call.
+
+        A native call arrives as `_run_tool` -> the method. A call routed
+        through core's dynamic-loading bridge shows `tools_call` in the chain,
+        and that path has no `bypass_timeout` - so the whole run is awaited
+        under `core.tool_timeout` and gets cut when it runs longer.
+        """
+        try:
+            return " <- ".join(frame.function for frame in inspect.stack()[1:6])
+        except Exception:
+            return "?"
 
     # ------------------------------------------------------------------ tools
     @core.module.tool(bypass_timeout=True)
@@ -99,6 +121,8 @@ class Delegate(core.module.Module):
         Returns:
             {task_id, status, model, rounds, result}
         """
+        self.log("delegate", f"new: called via {self._call_chain()}")
+
         prompt = (prompt or "").strip()
         if not prompt:
             return self.result("prompt must not be blank", success=False)
@@ -124,7 +148,7 @@ class Delegate(core.module.Module):
         system_prompt = await self._system_prompt()
         history = [{"role": "system", "content": system_prompt}] if system_prompt else []
 
-        return await self._execute(task, prompt, model_name, history)
+        return await self._execute_or_detach(task, prompt, model_name, history)
 
     @core.module.tool(bypass_timeout=True)
     async def send(self, task_id: str, prompt: str, model: str = "") -> dict:
@@ -170,7 +194,11 @@ class Delegate(core.module.Module):
             task = self.store.find(identifier)
 
         started = time.monotonic()
-        self.log("delegate", f"send {identifier}: accepted (status={task.get('status')}, rounds={task.get('rounds')})")
+        self.log(
+            "delegate",
+            f"send {identifier}: accepted (status={task.get('status')}, "
+            f"rounds={task.get('rounds')}) via {self._call_chain()}",
+        )
 
         history, dropped = repair(self.store.load(identifier))
         if dropped:
@@ -189,7 +217,9 @@ class Delegate(core.module.Module):
 
         self.store.update(identifier, status="running", last_error=None)
 
-        return await self._execute(task, prompt, model_name or task.get("model") or None, history)
+        return await self._execute_or_detach(
+            task, prompt, model_name or task.get("model") or None, history
+        )
 
     @core.module.tool()
     async def list(self, query: str = "", status: str = "", limit: int = 20) -> dict:
@@ -242,6 +272,57 @@ class Delegate(core.module.Module):
         })
 
     # ------------------------------------------------------------- execution
+    def _timeout_limit(self):
+        """the deadline core will put on this tool call (it reads the same value)"""
+        try:
+            return float(core.config.get("core", "tool_timeout", default=10.0))
+        except Exception:
+            return 10.0
+
+    async def _execute_or_detach(self, task, prompt, model, history):
+        task_id = task["id"]
+        self._active_task = task_id      # claimed before the task is scheduled
+
+        work = asyncio.create_task(self._execute(task, prompt, model, history))
+        self._background.add(work)
+        work.add_done_callback(self._background.discard)
+
+        # Block normally, and keep blocking through the caller's deadline while
+        # the run is showing tool activity - a tool-active run is not cut in
+        # practice. Detach only when there has been no tool call in the last
+        # second as the deadline arrives, one second early, so the tool call
+        # returns `running` instead of failing.
+        limit = self._timeout_limit()
+        deadline = time.monotonic() + max(2.0, limit - 1.0)
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                try:
+                    return await asyncio.wait_for(asyncio.shield(work), timeout=remaining)
+                except asyncio.TimeoutError:
+                    pass        # the slice elapsed: is the run still active?
+
+            quiet = self.runner.seconds_since_tool()
+            if quiet is None or quiet > 1.0:
+                break       # silent run about to hit the deadline: detach now
+            deadline = time.monotonic() + 1.0   # a tool call just landed
+
+        self.log(
+            "delegate",
+            f"task {task_id} silent at the tool deadline; detached from the tool call",
+        )
+        return self.result({
+            "task_id": task_id,
+            "status": "running",
+            "detached": True,
+            "note": (
+                "the run is still going; it keeps running in the background and the "
+                "panel shows it live. Use delegate_list to check it, or open the task; "
+                "delegate_send on it is refused until it finishes."
+            ),
+        })
+
     async def _execute(self, task, prompt, model, history):
         task_id = task["id"]
         self._active_task = task_id
@@ -474,6 +555,12 @@ class Delegate(core.module.Module):
             "- If those ids are no longer in the conversation (e.g. after context compression), "
             "`delegate_list(query=\"\", status=\"\", limit=20)` returns the stored tasks newest first, "
             "so an id can be recovered instead of asking the user.\n"
+            "- `delegate_new`, `delegate_send` and `delegate_list` are preloaded tools: call them "
+            "directly by name, not through `tools_call`.\n"
+            "- A run that outlives the caller's tool deadline comes back as `{task_id, status: "
+            "\"running\", detached: true}` instead of the final text. It keeps running in the "
+            "background: check it with `delegate_list`, read it in the delegate panel, or "
+            "`delegate_send` once it is done.\n"
             "Delegated tasks inherit your tools."
         )
 

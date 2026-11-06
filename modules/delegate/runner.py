@@ -52,6 +52,19 @@ class DelegateRunner:
         self._model = ""        # model this run is on, recorded per assistant message
         self._announced_calls = set()   # call ids already sent to the panel (this run)
         self._round_base = 0    # task's cumulative rounds at the start of this run
+        self._last_tool_at = None       # monotonic time of the last tool round
+
+    def seconds_since_tool(self):
+        """how long this run has gone without a tool round (None = never had one)
+
+        The module's detach logic reads this: a run that made a tool call within
+        the last second is left blocking through the caller's deadline (a
+        tool-active run is not cut in practice), while a silent run is detached
+        one second before that deadline so the tool call never fails.
+        """
+        if self._last_tool_at is None:
+            return None
+        return time.monotonic() - self._last_tool_at
 
     # ----------------------------------------------------------- run-local step
     def _step_now(self, rounds):
@@ -275,15 +288,21 @@ class DelegateRunner:
         self._model = effective_model
         self._announced_calls = set()   # fresh per run: the calls already announced
         self._round_base = rounds        # run-local steps start at 1, see _step_now
+        self._last_tool_at = None       # no tool round yet in this run
 
         bus.start(task_id, title=task.get("title", ""), model=effective_model, rounds=rounds)
 
         started_at = time.monotonic()
         size = sum(len(str(message.get("content") or "")) for message in ctx)
+        try:
+            timeout_now = core.config.get("core", "tool_timeout", default=10.0)
+        except Exception:
+            timeout_now = "?"
         module.log(
             "delegate",
             f"run {task_id}: start ({len(ctx)} messages, {size} chars, "
-            f"model={effective_model}, keep_reasoning={self._keep_reasoning()})",
+            f"model={effective_model}, keep_reasoning={self._keep_reasoning()}, "
+            f"tool_timeout={timeout_now})",
         )
 
         # the delegate's answer is everything it said after its last tool round.
@@ -340,6 +359,7 @@ class DelegateRunner:
                             raise RuntimeError(str(token.get("content") or "the API returned an error"))
                         elif token_type == "tool_calls":
                             called_tool = True
+                            self._last_tool_at = time.monotonic()
                             rounds += 1
                             run_rounds += 1
                             bus.set_rounds(task_id, rounds)
@@ -374,6 +394,7 @@ class DelegateRunner:
                                                 answer_cut = False
                                             finished = True
                                     elif sub_type == "tool_calls":
+                                        self._last_tool_at = time.monotonic()
                                         rounds += 1
                                         run_rounds += 1
                                         bus.set_rounds(task_id, rounds)
@@ -394,6 +415,7 @@ class DelegateRunner:
                                             task_id, rounds, repaired.get("tool_calls")
                                         )
                                     elif sub_type == "tool":
+                                        self._last_tool_at = time.monotonic()
                                         bus.emit(
                                             task_id,
                                             "tool_result",
