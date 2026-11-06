@@ -19,6 +19,8 @@ auto-compressed mid-run, the delegate's API usage is counted against the main
 context, and a steering message can be flushed into the main context mid-run.
 """
 
+import time
+
 import core
 import channels.webui.api as webui
 import channels.webui.chat_listing as chat_listing
@@ -62,6 +64,10 @@ class Delegate(core.module.Module):
             "max": 130,
             "step": 1,
             "description": "Font size of the delegate panel, as a percentage of the chat's text (94 = the chat size minus ~1px).",
+        },
+        "keep_reasoning_in_context": {
+            "default": True,
+            "description": "Send a delegated task's earlier reasoning back with its next message (continuations and tool rounds). Keeps the model's prompt cache warm, so a continued task starts fast; off re-sends only conclusions and saves context.",
         },
     }
 
@@ -163,9 +169,18 @@ class Delegate(core.module.Module):
             self.store.update(identifier, model=model_name)
             task = self.store.find(identifier)
 
+        started = time.monotonic()
+        self.log("delegate", f"send {identifier}: accepted (status={task.get('status')}, rounds={task.get('rounds')})")
+
         history, dropped = repair(self.store.load(identifier))
         if dropped:
             self.store.save(identifier, history)
+
+        self.log(
+            "delegate",
+            f"send {identifier}: history loaded in {time.monotonic() - started:.2f}s "
+            f"({len(history)} messages, dropped={dropped})",
+        )
         if not any(message.get("role") == "system" for message in history):
             system_prompt = await self._system_prompt()
             if system_prompt:

@@ -94,6 +94,32 @@ class DelegateRunner:
             return
         core.config.config.setdefault("model", {})["name"] = previous
 
+    # ---------------------------------------------------------------- reasoning
+    def _keep_reasoning(self):
+        """the module setting: re-send earlier reasoning with the next message"""
+        try:
+            return bool(self.module.config.get("keep_reasoning_in_context", True))
+        except Exception:
+            return True
+
+    def _rehydrate(self, ctx, rich):
+        """put stored reasoning back on the wire for a continuation.
+
+        `rich` keeps the reasoning in `_metadata.reasoning` (display only), so
+        `to_wire` never yields it. When the setting is on, the assistant
+        messages of the rebuilt context get `reasoning_content` back: same text
+        the provider saw during the run, so the prompt prefix matches its cache
+        again instead of being reprocessed from scratch.
+        """
+        if not self._keep_reasoning():
+            return
+        for wire, message in zip(ctx, rich):
+            if wire.get("role") != "assistant" or wire.get("reasoning_content"):
+                continue
+            found = (message.get("_metadata") or {}).get("reasoning")
+            if found:
+                wire["reasoning_content"] = found
+
     # ---------------------------------------------------------------- helpers
     def _absorb(self, ctx, rich, round_no, reasoning=None):
         """fold messages that appeared in `ctx` into the display transcript.
@@ -103,20 +129,32 @@ class DelegateRunner:
         with `_metadata`. `reasoning` is passed only for the final plain-content
         message, which was appended by us and never carried a reasoning field.
         """
+        keep = self._keep_reasoning()
+
         while len(rich) < len(ctx):
             wire = ctx[len(rich)]
             metadata = {"timestamp": int(time.time()), "round": round_no}
             if self._model:
                 metadata["model"] = self._model
 
-            found = wire.pop("reasoning_content", None)
+            # keep_reasoning on: the wire keeps `reasoning_content` (core's next
+            # request sees it, so the prompt prefix stays cacheable). Off: it is
+            # popped here, exactly as before.
+            if keep:
+                found = wire.get("reasoning_content")
+            else:
+                found = wire.pop("reasoning_content", None)
             if found:
                 metadata["reasoning"] = found
             elif reasoning:
                 metadata["reasoning"] = reasoning
                 reasoning = None
 
-            rich.append({**wire, "_metadata": metadata})
+            # the stored transcript never carries reasoning_content: it lives in
+            # _metadata (display only), so to_wire() yields a clean message
+            stored = {key: value for key, value in wire.items() if key != "reasoning_content"}
+            stored["_metadata"] = metadata
+            rich.append(stored)
 
     @staticmethod
     def _trailing_partial(ctx, request):
@@ -231,6 +269,7 @@ class DelegateRunner:
         store.save(task_id, rich)
 
         ctx = [to_wire(message) for message in rich]
+        self._rehydrate(ctx, rich)      # keep_reasoning: restore the prompt cache prefix
 
         effective_model = model or module.manager.API.get_model() or ""
         self._model = effective_model
@@ -238,6 +277,14 @@ class DelegateRunner:
         self._round_base = rounds        # run-local steps start at 1, see _step_now
 
         bus.start(task_id, title=task.get("title", ""), model=effective_model, rounds=rounds)
+
+        started_at = time.monotonic()
+        size = sum(len(str(message.get("content") or "")) for message in ctx)
+        module.log(
+            "delegate",
+            f"run {task_id}: start ({len(ctx)} messages, {size} chars, "
+            f"model={effective_model}, keep_reasoning={self._keep_reasoning()})",
+        )
 
         # the delegate's answer is everything it said after its last tool round.
         # a follow-up request can be cut mid-answer (cancel, connection reset);
@@ -261,8 +308,16 @@ class DelegateRunner:
                     kwargs["model"] = effective_model
 
                 stream = module.manager.API.send_stream(ctx, **kwargs)
+                first_token = True
                 try:
                     async for token in stream:
+                        if first_token:
+                            first_token = False
+                            module.log(
+                                "delegate",
+                                f"run {task_id}: first token after "
+                                f"{time.monotonic() - started_at:.2f}s (round {rounds})",
+                            )
                         if module.manager.API.cancel_request:
                             raise DelegateCancelled("cancelled by the user")
 
@@ -427,6 +482,10 @@ class DelegateRunner:
 
             store.update(task_id, status="done", rounds=rounds, last_error=None)
             bus.stop(task_id)
+            module.log(
+                "delegate",
+                f"run {task_id}: done in {time.monotonic() - started_at:.2f}s ({rounds} rounds)",
+            )
             return answer
 
         except asyncio.CancelledError:
@@ -445,9 +504,19 @@ class DelegateRunner:
                 last_error="cancelled before the delegate finished",
             )
             bus.stop(task_id, error="cancelled before the delegate finished")
+            module.log(
+                "delegate",
+                f"run {task_id}: CANCELLED after {time.monotonic() - started_at:.2f}s "
+                f"({rounds} rounds) - the tool call was cut, not the model",
+            )
             raise
 
         except Exception as error:
+            module.log(
+                "delegate",
+                f"run {task_id}: FAILED after {time.monotonic() - started_at:.2f}s "
+                f"({type(error).__name__}: {error})",
+            )
             self._absorb(ctx, rich, rounds)
             store.save(task_id, rich)
             if isinstance(error, DelegateCancelled):

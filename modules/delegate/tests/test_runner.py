@@ -234,11 +234,22 @@ class FakeStore:
         return self.tasks[task_id]
 
 
+class FakeConfig:
+    """the module settings the runner reads (a dict with .get())"""
+
+    def __init__(self):
+        self.values = {"keep_reasoning_in_context": True}
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+
 class FakeModule:
     def __init__(self, script, final_message=None, sub_tokens=None):
         self.api = FakeAPI(script)
         self.toolcalls = FakeToolCalls(final_message, sub_tokens)
         self.store = FakeStore()
+        self.config = FakeConfig()
         self.bus = FakeBus()
         self.manager = types.SimpleNamespace(
             API=self.api, tools=[], log=lambda *args: None
@@ -646,7 +657,7 @@ class TrailingPartialTests(unittest.TestCase):
 class AbsorbTests(unittest.TestCase):
     """_absorb(): the wire context stays clean, the transcript keeps the rest."""
 
-    def test_reasoning_moves_to_metadata_and_leaves_the_wire_clean(self):
+    def test_reasoning_moves_to_metadata_and_leaves_the_stored_copy_clean(self):
         module, delegate = make([[]])
         delegate._model = "some-model"
 
@@ -654,10 +665,25 @@ class AbsorbTests(unittest.TestCase):
         rich = []
         delegate._absorb(ctx, rich, 3)
 
-        self.assertNotIn("reasoning_content", ctx[0])
+        # the stored transcript stays lean; the wire copy keeps the reasoning
+        # (keep_reasoning defaults to on, so the provider's prompt cache hits)
+        self.assertNotIn("reasoning_content", rich[0])
+        self.assertEqual(ctx[0]["reasoning_content"], "why")
         self.assertEqual(rich[0]["_metadata"]["reasoning"], "why")
         self.assertEqual(rich[0]["_metadata"]["round"], 3)
         self.assertEqual(rich[0]["_metadata"]["model"], "some-model")
+
+    def test_with_keep_reasoning_off_the_wire_is_stripped(self):
+        module, delegate = make([[]])
+        module.config.values["keep_reasoning_in_context"] = False
+
+        ctx = [{"role": "assistant", "content": "x", "reasoning_content": "why"}]
+        rich = []
+        delegate._absorb(ctx, rich, 1)
+
+        self.assertNotIn("reasoning_content", ctx[0])
+        self.assertNotIn("reasoning_content", rich[0])
+        self.assertEqual(rich[0]["_metadata"]["reasoning"], "why")
 
     def test_final_reasoning_is_attached_to_the_last_message_only(self):
         module, delegate = make([[]])
@@ -751,3 +777,44 @@ class UnwrapCallTests(unittest.TestCase):
         emitted = [event for event in module.bus.events if event[0] == "tool_call"][0]
         self.assertEqual(emitted[2]["name"], "browser_status")
         self.assertEqual(json.loads(emitted[2]["args"]), {})
+
+
+class KeepReasoningTests(unittest.IsolatedAsyncioTestCase):
+    """keep_reasoning_in_context: a continuation gets its stored reasoning back.
+
+    The stored transcript keeps reasoning in `_metadata.reasoning` (display
+    only), so `to_wire()` never yields it. With the setting on, the rebuilt
+    context carries `reasoning_content` again - the same text the provider saw
+    during the previous run, so its prompt cache matches instead of reprocessing
+    the whole transcript.
+    """
+
+    def setUp(self):
+        self._core_config = sys.modules["core"].config.config
+        self._core_config.clear()
+
+    @staticmethod
+    def history():
+        return [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "prev", "_metadata": {"reasoning": "because"}},
+        ]
+
+    async def test_a_continuation_resends_the_stored_reasoning(self):
+        module, delegate = make([[{"type": "content", "content": "ok"}]])
+
+        await delegate.run("T1", "again", "test-model", self.history(), 40)
+
+        sent = module.api.contexts[0]
+        assistant = [message for message in sent if message["role"] == "assistant"][0]
+        self.assertEqual(assistant.get("reasoning_content"), "because")
+
+    async def test_switched_off_the_continuation_stays_lean(self):
+        module, delegate = make([[{"type": "content", "content": "ok"}]])
+        module.config.values["keep_reasoning_in_context"] = False
+
+        await delegate.run("T1", "again", "test-model", self.history(), 40)
+
+        sent = module.api.contexts[0]
+        assistant = [message for message in sent if message["role"] == "assistant"][0]
+        self.assertNotIn("reasoning_content", assistant)
