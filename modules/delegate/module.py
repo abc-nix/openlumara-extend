@@ -169,26 +169,15 @@ class Delegate(core.module.Module):
             return "?"
 
     # ------------------------------------------------------------------ tools
+    # One-line descriptions on purpose (house style: editor/coder/host_shell).
+    # The original verbose texts, the comparison that motivated the crop and what
+    # was dropped are recorded in TOOL_DESCRIPTIONS.md.
     @core.module.tool(bypass_timeout=True)
     async def new(self, prompt: str, title: str = "", model: str = "", background: bool = False) -> dict:
-        """Delegate a self-contained task to a separate AI session with its own context.
+        """Delegate a new task to an agent in a new session.
 
-        The delegate sees this chat's system prompt but none of its history, so the
-        prompt must stand on its own. It has the same tools you do and its whole
-        transcript (reasoning, tool calls, tool results) is saved under the returned
-        task_id: the user can watch it live in the delegate panel, and you can
-        continue the same conversation later with delegate_send(task_id, ...).
-
-        This call blocks until the delegate finishes and returns its final answer, unless `background=True`, which returns at once with status running.
-
-        Args:
-            prompt: the task, written self-contained (the delegate cannot see this chat).
-            title: short display label for the panel and task list. Derived from the prompt when empty.
-            model: model to run the delegate on. Defaults to the current model; must be one of the available models.
-            background: return immediately with status running instead of waiting for the run (default False). The run continues in the background; check it with delegate_list or read it in the panel. Refused when no background slot is free or when `model` is not the chat's current model - the error says which, and running it in the foreground (omit background) is always possible.
-
-        Returns:
-            {task_id, status, model, rounds, result} - or {task_id, status: "running", background: true} when background=True
+        Blocks until done and returns the answer; `background=True` runs it in the
+        background. `model` defaults to the current model.
         """
         self.log("delegate", f"new: called via {self._call_chain()}")
         background = self._as_bool(background)
@@ -226,21 +215,11 @@ class Delegate(core.module.Module):
 
     @core.module.tool(bypass_timeout=True)
     async def send(self, task_id: str, prompt: str, model: str = "", background: bool = False) -> dict:
-        """Continue a delegated task: a follow-up message in the same conversation.
+        """Add a message to an existing delegated session so the agent continues its
+        work.
 
-        The delegate resumes with its full stored context (every message and tool
-        result is replayed; the stored reasoning is kept for display only), so this
-        is a normal continuation, not a re-summary. Use it to ask why the delegate
-        did something, or to hand it another step.
-
-        Args:
-            task_id: id of the task, as returned by delegate_new (for example "01AB3F7G").
-            prompt: the follow-up request.
-            model: switch the task to another model. Defaults to the model the task already uses.
-            background: return immediately with status running instead of waiting for the run (default False); the run continues in the background. Refused when no background slot is free or when the task's model is not the chat's current one - the error says which; run it in the foreground (omit background) instead, or switch the chat to that model first.
-
-        Returns:
-            {task_id, status, model, rounds, result} - or {task_id, status: "running", background: true} when background=True
+        `background=True` runs it in the background; `model` switches the session's
+        model.
         """
         background = self._as_bool(background)
         prompt = (prompt or "").strip()
@@ -304,20 +283,8 @@ class Delegate(core.module.Module):
 
     @core.module.tool()
     async def list(self, query: str = "", status: str = "", limit: int = 20) -> dict:
-        """List the stored delegated tasks, newest first.
-
-        This reads the task index on disk, so it also works when the ids from
-        earlier in this conversation were compressed away: use it to recover a
-        task id instead of asking the user for one.
-
-        Args:
-            query: text matched against the title, id and model (empty = every task).
-            status: only tasks with this status - "running", "done", "error" or "interrupted" (empty = any).
-            limit: how many tasks to return, newest first (default 20, max 100).
-
-        Returns:
-            {count, tasks: [{task_id, title, status, model, rounds, updated, error}], truncated}
-        """
+        """List the most recent delegated sessions, including any running in the
+        background."""
         query = (query or "").strip().lower()
         status = (status or "").strip().lower()
         try:
@@ -354,19 +321,7 @@ class Delegate(core.module.Module):
 
     @core.module.tool()
     async def read(self, task_id: str, chars: int = 4000) -> dict:
-        """Read a delegated task's final answer (its last assistant message).
-
-        Use this to collect a run that was started with background=True or was
-        detached from its tool call - no panel and no file access needed. It also
-        reports the task's current status, so it can be polled while it runs.
-
-        Args:
-            task_id: id of the task, as returned by delegate_new / delegate_list.
-            chars: return only the last N characters of the answer (default 4000, max 40000); 0 returns it whole.
-
-        Returns:
-            {task_id, status, model, rounds, result, truncated}
-        """
+        """Fetch the answer from a specific session (requires `task_id`)."""
         task = self.store.find(task_id)
         if task is None:
             return self.result(f"no delegate task with id '{task_id}'", success=False)
