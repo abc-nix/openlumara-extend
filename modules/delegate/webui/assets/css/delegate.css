@@ -162,6 +162,26 @@ body[data-delegate="full"] .dl-cover {
 }
 .dl-viewbtn svg { width: 15px; height: 15px; }
 
+/* stop: a red hexagon (the theme's error colour, never a hard-coded red), shown
+   only for a running task, immediately left of the dock/full toggle. */
+.dl-stop {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    cursor: pointer;
+}
+.dl-stop svg { width: 16px; height: 16px; }
+.dl-stop svg path { fill: var(--error, #fca5a5); }
+.dl-stop:hover svg path { filter: brightness(1.15); }
+.dl-stop:focus-visible { outline: 2px solid var(--error, #fca5a5); outline-offset: 1px; }
+
 /* ---- task list ----
    The list's type follows the panel font-size slider in the same way the
    transcript does: each px baseline is multiplied by --dl-scale and divided by

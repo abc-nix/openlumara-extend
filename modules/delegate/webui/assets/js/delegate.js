@@ -482,6 +482,31 @@ const DELEGATE_VIEW = {
         }
     },
 
+    /* a task is live while the backend lists it as running, or while its index
+       status still says so (the list poll and the task poll are a beat apart) */
+    activeRunning() {
+        const id = this.activeId;
+        if (!id) return false;
+        if ((this.running || []).includes(id)) return true;
+        return Boolean(this.activeTask && this.activeTask.status === "running");
+    },
+
+    /* stop the open task: the module cancels the run, the runner stores what
+       landed and marks it interrupted, and the poll's run_end then reloads the
+       chain, so the panel shows the outcome without a second request here */
+    async stopTask() {
+        const id = this.activeId;
+        if (!id) return;
+
+        try {
+            await dlPost("stop", { id });
+            this.statusText = "stopping\u2026";
+            await this.loadTasks();
+        } catch (error) {
+            this.statusText = String(error.message || error);
+        }
+    },
+
     async selectTask(id) {
         if (!id) return;
         this.mode = "task";

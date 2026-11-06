@@ -38,6 +38,18 @@
               :title="$store.delegateView.activeTitle"
               x-text="$store.delegateView.activeTitle || 'task'"></span>
 
+        {# stop: a red hexagon (the theme's error colour), only while this task is
+           running. Kept left of the dock/full toggle so a stop is always in the
+           same place; the square inside is the stop sign's white centre. #}
+        <button type="button" class="dl-stop" x-show="$store.delegateView.activeRunning()" x-cloak
+                title="Stop this delegated task" aria-label="Stop this delegated task"
+                @click="$store.delegateView.stopTask()">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <path d="M6.2 2h11.6L22 12l-4.2 10H6.2L2 12z"/>
+                <rect x="8.4" y="8.4" width="7.2" height="7.2" rx="1.2" fill="#fff"/>
+            </svg>
+        </button>
+
         {# dock ⇄ full screen — the same control libreta's cover carries, with its
            icon: the glyph shows what the click gives. Docked: the frame's inner
            area fills it (go full). Full: an inner panel docked right (go docked). #}

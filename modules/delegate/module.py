@@ -410,19 +410,32 @@ class Delegate(core.module.Module):
         limit = self._timeout_limit()
         deadline = time.monotonic() + max(2.0, limit - 1.0)
 
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                try:
-                    return await asyncio.wait_for(asyncio.shield(work), timeout=remaining)
-                except asyncio.TimeoutError:
-                    pass        # the slice elapsed: is the run still active?
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    try:
+                        return await asyncio.wait_for(asyncio.shield(work), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        pass        # the slice elapsed: is the run still active?
 
-            quiet = self.runner.seconds_since_tool(task_id)
-            slots = policy.slots_left(self._max_background(), self._bg_runs)
-            if policy.should_detach(quiet, slots):
-                break       # silent run and a free slot: detach before the deadline
-            deadline = time.monotonic() + 1.0   # tool in flight / no slot: hold
+                quiet = self.runner.seconds_since_tool(task_id)
+                slots = policy.slots_left(self._max_background(), self._bg_runs)
+                if policy.should_detach(quiet, slots):
+                    break       # tool-less run and a free slot: detach before the deadline
+                deadline = time.monotonic() + 1.0   # tool in flight / no slot: hold
+        except asyncio.CancelledError:
+            if not work.cancelled():
+                raise           # the caller was cancelled (deadline cut), not a stop
+            # the panel's stop cancelled the run: report it as a definite outcome
+            # instead of handing the caller a bare cancellation
+            current = self.store.find(task_id) or task
+            return self.result({
+                "task_id": task_id,
+                "status": current.get("status", "interrupted"),
+                "stopped": True,
+                "note": "the user stopped this run from the delegate panel",
+            })
 
         self.log(
             "delegate",
@@ -745,6 +758,38 @@ class Delegate(core.module.Module):
 
         self.store.delete(identifier)
         return {"deleted": identifier}
+
+    @webui.route("stop", method="POST")
+    async def _route_stop(self, body=None, query=None):
+        """stop a running delegated task (the panel's red hexagon)
+
+        Cancelling the run task is the whole mechanism: the runner stores what
+        landed, marks the task `interrupted` and stops the live feed, and the
+        done-callbacks release its background slot (if it held one). A stale
+        `running` entry with no live task - e.g. after a restart - is flipped to
+        `interrupted` so the panel stops offering a stop for it.
+        """
+        data = body or {}
+        task = self.store.find(data.get("id", ""))
+        if task is None:
+            return self.result("no delegate task with that id", success=False)
+
+        identifier = task["id"]
+        work = self._runs.get(identifier)
+        if work is not None:
+            work.cancel()
+            self.log("delegate", f"task {identifier} stopped by the user")
+            return {"stopped": identifier}
+
+        if task.get("status") == "running":
+            self.store.update(
+                identifier,
+                status="interrupted",
+                last_error="stopped by the user",
+            )
+            return {"stopped": identifier, "stale": True}
+
+        return self.result(f"delegate task {identifier} is not running", success=False)
 
     @webui.route("chain")
     async def _route_chain(self, body=None, query=None):
