@@ -523,10 +523,13 @@ class Delegate(core.module.Module):
             return
 
         busy = bool(getattr(self.channel, "sending_message", False))
-        route = policy.announce_delivery(mode, busy, len(self._runs))
+        # this task's own run must not count as "another delegate is live", even
+        # if its deregistration has not happened yet
+        live = [tid for tid in self._runs if tid != task_id]
+        route = policy.announce_delivery(mode, busy, len(live))
         self._debug(
             f"announcing task {task_id}: {route} (sending_message={busy}, "
-            f"live_runs={len(self._runs)})"
+            f"other_runs={len(live)})"
         )
 
         try:
@@ -599,6 +602,12 @@ class Delegate(core.module.Module):
             return await self._run_task(task, prompt, model, history)
         finally:
             self._depth.reset(token)
+            # deregister here, not only in the done-callbacks: _announce() awaits
+            # this very task, and it can resume BEFORE those callbacks run - it
+            # would then count its own finished run as "another delegate live" and
+            # fall back to the deferred tail instead of waking.
+            self._runs.pop(task["id"], None)
+            self._bg_runs.pop(task["id"], None)
 
     async def _run_task(self, task, prompt, model, history):
         task_id = task["id"]
