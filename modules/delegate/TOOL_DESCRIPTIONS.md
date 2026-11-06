@@ -18,17 +18,17 @@ sections never reach the model — the loader strips them.
 | editor | 16 | 1,867 | 116 |
 | web_search | 5 | 2,615 | 494 |
 | **delegate (before)** | 4 | **3,055** | **876** |
-| **delegate (after)** | 4 | **530** | **133** |
+| **delegate (after)** | 4 | **497** | **124** |
 
 Four delegate tools outweighed all sixteen editor tools, and each delegate tool
 was ~7.5x the median editor tool. `delegate` is preloaded, so that text sat in
-**every** request — about 760 tokens permanently; it is now about 130.
+**every** request — about 760 tokens permanently; it is now about 125.
 
 ## What each tool says now
 
-- `delegate_new` — "Delegate a new task to an agent in a new session. Blocks
-  until done and returns the answer; `background=True` runs it in the background.
-  `model` defaults to the current model."
+- `delegate_new` — "Delegate a new task to an agent in a new isolated session.
+  `background=True` runs it in the background. `model` defaults to the current
+  model."
 - `delegate_send` — "Add a message to an existing delegated session so the agent
   continues its work. `background=True` runs it in the background; `model`
   switches the session's model."
@@ -51,6 +51,9 @@ was ~7.5x the median editor tool. `delegate` is preloaded, so that text sat in
   the model can react without the prose.
 - **`Returns:` blocks** — never model-visible; they duplicated the dicts the
   tools actually return.
+- **"Blocks until done and returns the answer"** — removed from `delegate_new`
+  (unintuitive); `background=True` already implies the foreground waits, and the
+  tool result is the answer either way.
 - **The "sees this chat's system prompt but not its history" note** — dropped as
   noise (the user's wording). If a delegate's prompt ever reads as if it knew
   this conversation, this is the missing sentence.

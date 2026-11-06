@@ -174,10 +174,10 @@ class Delegate(core.module.Module):
     # was dropped are recorded in TOOL_DESCRIPTIONS.md.
     @core.module.tool(bypass_timeout=True)
     async def new(self, prompt: str, title: str = "", model: str = "", background: bool = False) -> dict:
-        """Delegate a new task to an agent in a new session.
+        """Delegate a new task to an agent in a new isolated session.
 
-        Blocks until done and returns the answer; `background=True` runs it in the
-        background. `model` defaults to the current model.
+        `background=True` runs it in the background. `model` defaults to the
+        current model.
         """
         self.log("delegate", f"new: called via {self._call_chain()}")
         background = self._as_bool(background)
