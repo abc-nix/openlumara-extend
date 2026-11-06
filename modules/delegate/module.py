@@ -68,6 +68,16 @@ class Delegate(core.module.Module):
             "step": 1,
             "description": "Font size of the delegate panel, as a percentage of the chat's text (94 = the chat size minus ~1px).",
         },
+        "announce_completion": {
+            "type": "select",
+            "default": "Push",
+            "description": "What happens when a background or detached delegated task finishes. Inline runs are unaffected: their answer was already returned.",
+            "options": {
+                "Off": "Do nothing. The task just shows as done in the panel.",
+                "Push": "Add a one-line notice to the chat. The model sees it at its next turn and can call delegate_read for the answer.",
+                "Wake": "Start a model turn with that notice so the assistant can act on it immediately. Costs tokens unprompted, so use it only if you want that.",
+            },
+        },
         "keep_reasoning_in_context": {
             "default": True,
             "description": "Send a delegated task's earlier reasoning back with its next message (continuations and tool rounds). Keeps the model's prompt cache warm, so a continued task starts fast; off re-sends only conclusions and saves context.",
@@ -348,6 +358,9 @@ class Delegate(core.module.Module):
 
         if background:
             self.log("delegate", f"task {task_id} started in the background; returning at once")
+            announce = asyncio.create_task(self._announce(task_id, work))
+            self._background.add(announce)
+            announce.add_done_callback(self._background.discard)
             return self.result({
                 "task_id": task_id,
                 "status": "running",
@@ -383,6 +396,9 @@ class Delegate(core.module.Module):
             "delegate",
             f"task {task_id} silent at the tool deadline; detached from the tool call",
         )
+        announce = asyncio.create_task(self._announce(task_id, work))
+        self._background.add(announce)
+        announce.add_done_callback(self._background.discard)
         return self.result({
             "task_id": task_id,
             "status": "running",
@@ -393,6 +409,84 @@ class Delegate(core.module.Module):
                 "delegate_send on it is refused until it finishes."
             ),
         })
+
+    def _announce_mode(self):
+        """`announce_completion`: Off / Push / Wake (see the module settings)"""
+        try:
+            # default= keyword MUST be a keyword here: ModuleConfig.get() treats a
+            # trailing *string* positional argument as another key (it only pops
+            # non-strings as defaults), so a positional "Push" made the lookup
+            # return None and every completion fell back to pushing.
+            return str(self.config.get("announce_completion", default="Push")).strip().lower()
+        except Exception:
+            return "push"
+
+    async def _announce(self, task_id, work):
+        """push a one-line notice when a detached / background run finishes.
+
+        Only the status and the size travel - never the answer. The transcript
+        keeps the text and `delegate_read` fetches it when it is actually wanted,
+        so the main context pays ~20 tokens for the notification instead of the
+        whole result.
+        """
+        try:
+            await work
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self.log("delegate", f"task {task_id} ended with {error}")
+
+        task = self.store.find(task_id) or {}
+        length = 0
+        try:
+            messages, _ = repair(self.store.load(task_id))
+            for message in reversed(messages):
+                if message.get("role") == "assistant" and str(message.get("content") or "").strip():
+                    length = len(str(message.get("content")))
+                    break
+        except Exception:
+            pass
+
+        status = task.get("status") or "unknown"
+        parts = [f"[delegate] task {task_id} finished ({status})"]
+        if length:
+            parts.append(f"{length} chars")
+        parts.append("use delegate_read to see it")
+        note = " - ".join(parts)
+
+        mode = self._announce_mode()
+        if mode == "off":
+            return
+
+        if mode == "wake":
+            # a real turn: the model reads the line and can act on it at once.
+            # If the channel is busy, core queues it as a steering message.
+            busy = getattr(self.channel, "sending_message", None)
+            self.log(
+                "delegate",
+                f"waking the model for task {task_id} (sending_message={busy}, "
+                f"queued={getattr(self.channel, 'queued_message', None) is not None})",
+            )
+            try:
+                result = await self.channel.send(note)
+                self.log(
+                    "delegate",
+                    f"wake call returned for task {task_id}: {str(result)[:300]}",
+                )
+            except Exception as error:
+                self.log(
+                    "delegate",
+                    f"could not wake the model for task {task_id}: {type(error).__name__}: {error}",
+                )
+            return
+
+        self.log("delegate", f"pushing completion notice for task {task_id}")
+        try:
+            if not self.channel._chain_idle.is_set():
+                await self.channel._chain_idle.wait()
+            await self.channel.push({"role": "assistant", "content": note}, defer=True)
+        except Exception as error:
+            self.log("delegate", f"could not announce task {task_id}: {error}")
 
     async def _execute(self, task, prompt, model, history):
         task_id = task["id"]
