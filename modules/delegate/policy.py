@@ -1,0 +1,87 @@
+"""delegate — pure policy for starting and detaching runs.
+
+Kept out of `module.py` on purpose: that file imports `channels.webui`, so the
+plain-unittest suite cannot load it. Everything here is a pure function over
+numbers and names, which means the two decisions that actually matter — may a
+start go to the background, and may a run detach at the tool deadline — are
+covered by tests/test_policy.py.
+
+The rule behind `start_refusal`: core's `tc_manager.process()` re-requests every
+tool round with no `model` argument (`core/toolcalls.py:317`), so a run only
+keeps its model because the runner points `core.config` at it for the run's
+whole life. While that pointer is set, anything else that asks the API runs on
+the delegate's model. A background run therefore may only run on the model the
+chat is already on.
+"""
+
+
+def running_count(running):
+    """how many background runs are live (accepts a dict, set or a number)"""
+    try:
+        return max(0, len(running))
+    except TypeError:
+        try:
+            return max(0, int(running or 0))
+        except (TypeError, ValueError):
+            return 0
+
+
+def slots_left(cap, running):
+    """free background slots, never negative (a bad cap still means one slot)"""
+    try:
+        cap = max(1, int(cap))
+    except (TypeError, ValueError):
+        cap = 1
+    return max(0, cap - running_count(running))
+
+
+def same_model(a, b):
+    """model names compare case- and whitespace-insensitively (server spelling)"""
+    return str(a or "").strip().lower() == str(b or "").strip().lower()
+
+
+def _full_message(cap, running):
+    count = running_count(running)
+    return (
+        f"all {cap} background delegate slot{'s are' if cap != 1 else ' is'} in use "
+        f"({count} running): run this task in the foreground instead (omit "
+        f"background=True) or wait until a slot frees up"
+    )
+
+
+def start_refusal(background, cap, running, effective_model, current_model):
+    """the error message that refuses a start, or None when it may start.
+
+    `background=False` is always allowed: it blocks the calling turn, so nothing
+    is running once it returns. `background=True` needs a free slot, and the run
+    must use the chat's current model (see the module docstring).
+    """
+    if not background:
+        return None
+    if slots_left(cap, running) <= 0:
+        return _full_message(max(1, int(cap or 1)), running)
+    if not same_model(effective_model, current_model):
+        return (
+            f"a background delegate must use the chat's current model "
+            f"('{current_model}'): it keeps core's model pointer on its own model "
+            f"while it runs, so a different one would leak into the chat's requests. "
+            f"Start it in the foreground to run on '{effective_model}'."
+        )
+    return None
+
+
+def should_detach(quiet_seconds, slots, quiet_threshold=1.0):
+    """detach a run at the caller's deadline: only with a slot, only when silent.
+
+    `quiet_seconds` is None when the run has not made a tool call yet. A run
+    that is still inside a tool call keeps blocking (empirically those survive
+    the deadline); a silent run detaches so the tool call can return `running`
+    instead of being cut. Never above the cap: with no slot free the run keeps
+    blocking and re-checks every second, so it can take the slot the moment the
+    current background run ends.
+    """
+    if slots <= 0:
+        return False
+    if quiet_seconds is None:
+        return True
+    return quiet_seconds > quiet_threshold

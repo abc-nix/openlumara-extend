@@ -10,8 +10,14 @@ that subagents cannot do:
   * the same conversation can be continued later with delegate_send(task_id,
     ...), replaying the full stored context instead of re-summarising it.
 
-v1 blocks the calling turn: the delegate's final message is returned as the
-tool result (there is no background mode yet).
+A run normally blocks the calling turn: the delegate's final message is returned
+as the tool result. `background=True` returns at once instead (`{task_id,
+status: "running"}`); a run that is still silent when the caller's tool deadline
+approaches detaches by itself so it is not cut. Background runs are capped
+(`max_background_tasks`, default 1) and must use the chat's current model: core
+keeps its model pointer on the run's model for the run's whole life, so another
+model there would leak into the chat's own requests. A background request that
+breaks either rule is refused with an explanation.
 
 Running the delegate's tool loop through channel.tc_manager.process(context=...)
 accepts three core side effects for v1 (see runner.py): the main chat can be
@@ -20,6 +26,7 @@ context, and a steering message can be flushed into the main context mid-run.
 """
 
 import asyncio
+import contextvars
 import inspect
 import time
 
@@ -27,6 +34,7 @@ import core
 import channels.webui.api as webui
 import channels.webui.chat_listing as chat_listing
 
+from . import policy
 from .store import DelegateStore, repair
 from .events import EventBus
 from .runner import DelegateRunner, DelegateCancelled
@@ -60,6 +68,13 @@ class Delegate(core.module.Module):
             "default": 40,
             "description": "Tool rounds a single delegated run may use before it is aborted.",
         },
+        "max_background_tasks": {
+            "type": "number",
+            "default": 1,
+            "min": 1,
+            "max": 10,
+            "description": "How many delegated tasks may run in the background at once (1 = one). A background request beyond this is refused with a message to run it in the foreground; a run that would detach at the tool deadline waits for a free slot instead. Background runs are limited to the chat's current model.",
+        },
         "font_scale": {
             "type": "number",
             "default": 94,
@@ -88,8 +103,10 @@ class Delegate(core.module.Module):
         self.store = DelegateStore()
         self.bus = EventBus()
         self.runner = DelegateRunner(self)
-        self._active_task = None
-        self._background = set()      # detached runs: keep a reference or they vanish
+        self._runs = {}               # task_id -> the live run (foreground or background)
+        self._bg_runs = {}            # task_id -> runs holding a background slot
+        self._background = set()      # every live run/announce task: keep a reference
+        self._depth = contextvars.ContextVar("delegate_depth", default=0)
         self.store.mark_stale()
 
     async def on_shutdown(self):
@@ -104,6 +121,39 @@ class Delegate(core.module.Module):
         if isinstance(value, bool):
             return value
         return str(value or "").strip().lower() in ("1", "true", "yes", "on", "background")
+
+    def _max_background(self):
+        """how many delegated runs may sit in the background at once"""
+        try:
+            return max(1, min(10, int(self.config.get("max_background_tasks", 1) or 1)))
+        except (TypeError, ValueError):
+            return 1
+
+    def _current_model(self):
+        try:
+            return self.manager.API.get_model()
+        except Exception:
+            return ""
+
+    def _start_refusal(self, background, effective_model):
+        """the start policy (see policy.start_refusal): None or an error message"""
+        return policy.start_refusal(
+            background,
+            self._max_background(),
+            self._bg_runs,
+            effective_model,
+            self._current_model(),
+        )
+
+    def _inside_run(self):
+        """True when the call comes from inside a delegated run.
+
+        A delegate inherits the full tool set, `delegate_new`/`delegate_send`
+        included, so nesting has to be refused by the tools themselves; the
+        context variable is set around `runner.run()` and every tool call the
+        run makes is awaited inside that context.
+        """
+        return self._depth.get() > 0
 
     def _call_chain(self):
         """debug: the immediate Python callers of a tool call.
@@ -135,7 +185,7 @@ class Delegate(core.module.Module):
             prompt: the task, written self-contained (the delegate cannot see this chat).
             title: short display label for the panel and task list. Derived from the prompt when empty.
             model: model to run the delegate on. Defaults to the current model; must be one of the available models.
-            background: return immediately with status running instead of waiting for the run (default False). The run continues in the background; check it with delegate_list or read it in the panel.
+            background: return immediately with status running instead of waiting for the run (default False). The run continues in the background; check it with delegate_list or read it in the panel. Refused when no background slot is free or when `model` is not the chat's current model - the error says which, and running it in the foreground (omit background) is always possible.
 
         Returns:
             {task_id, status, model, rounds, result} - or {task_id, status: "running", background: true} when background=True
@@ -147,15 +197,19 @@ class Delegate(core.module.Module):
         if not prompt:
             return self.result("prompt must not be blank", success=False)
 
-        if self._active_task:
+        if self._inside_run():
             return self.result(
-                f"a delegate is already running ({self._active_task}); finish it before starting another",
+                "a delegated run cannot delegate: nested delegation is not allowed",
                 success=False,
             )
 
         model_name, error = await self._resolve_model(model)
         if error:
             return self.result(error, success=False)
+
+        refusal = self._start_refusal(background, model_name or self._current_model())
+        if refusal:
+            return self.result(refusal, success=False)
 
         chat = self.channel.context.chat
         task = self.store.create(
@@ -183,7 +237,7 @@ class Delegate(core.module.Module):
             task_id: id of the task, as returned by delegate_new (for example "01AB3F7G").
             prompt: the follow-up request.
             model: switch the task to another model. Defaults to the model the task already uses.
-            background: return immediately with status running instead of waiting for the run (default False); the run continues in the background.
+            background: return immediately with status running instead of waiting for the run (default False); the run continues in the background. Refused when no background slot is free or when the task's model is not the chat's current one - the error says which; run it in the foreground (omit background) instead, or switch the chat to that model first.
 
         Returns:
             {task_id, status, model, rounds, result} - or {task_id, status: "running", background: true} when background=True
@@ -198,18 +252,23 @@ class Delegate(core.module.Module):
             return self.result(f"no delegate task with id '{task_id}'", success=False)
 
         identifier = task["id"]
-        if task.get("status") == "running" or self._active_task == identifier:
+        if task.get("status") == "running" or identifier in self._runs:
             return self.result(f"delegate task {identifier} is still running", success=False)
 
-        if self._active_task:
+        if self._inside_run():
             return self.result(
-                f"a delegate is already running ({self._active_task}); finish it before continuing another",
+                "a delegated run cannot continue another task: nested delegation is not allowed",
                 success=False,
             )
 
         model_name, error = await self._resolve_model(model)
         if error:
             return self.result(error, success=False)
+
+        effective = model_name or task.get("model") or self._current_model()
+        refusal = self._start_refusal(background, effective)
+        if refusal:
+            return self.result(refusal, success=False)
 
         if model_name and model_name.lower() != str(task.get("model") or "").lower():
             self.store.update(identifier, model=model_name)
@@ -350,13 +409,25 @@ class Delegate(core.module.Module):
 
     async def _execute_or_detach(self, task, prompt, model, history, background=False):
         task_id = task["id"]
-        self._active_task = task_id      # claimed before the task is scheduled
+
+        # authoritative start policy: `new`/`send` pre-check it for a clean error,
+        # but the slot is claimed here, synchronously, so two starts racing for the
+        # same last slot cannot both win
+        refusal = self._start_refusal(background, model or self._current_model())
+        if refusal:
+            self.log("delegate", f"task {task_id} not started: {refusal}")
+            self.store.update(task_id, status="error", last_error=refusal)
+            return self.result(refusal, success=False)
 
         work = asyncio.create_task(self._execute(task, prompt, model, history))
+        self._runs[task_id] = work
         self._background.add(work)
         work.add_done_callback(self._background.discard)
+        work.add_done_callback(lambda _done, tid=task_id: self._runs.pop(tid, None))
 
         if background:
+            self._bg_runs[task_id] = work
+            work.add_done_callback(lambda _done, tid=task_id: self._bg_runs.pop(tid, None))
             self.log("delegate", f"task {task_id} started in the background; returning at once")
             announce = asyncio.create_task(self._announce(task_id, work))
             self._background.add(announce)
@@ -375,7 +446,9 @@ class Delegate(core.module.Module):
         # the run is showing tool activity - a tool-active run is not cut in
         # practice. Detach only when there has been no tool call in the last
         # second as the deadline arrives, one second early, so the tool call
-        # returns `running` instead of failing.
+        # returns `running` instead of being cut - and only while a background
+        # slot is free. The cap is hard: with no slot the call keeps holding and
+        # re-checks every second, so it can take the moment one frees up.
         limit = self._timeout_limit()
         deadline = time.monotonic() + max(2.0, limit - 1.0)
 
@@ -388,14 +461,17 @@ class Delegate(core.module.Module):
                     pass        # the slice elapsed: is the run still active?
 
             quiet = self.runner.seconds_since_tool()
-            if quiet is None or quiet > 1.0:
-                break       # silent run about to hit the deadline: detach now
-            deadline = time.monotonic() + 1.0   # a tool call just landed
+            slots = policy.slots_left(self._max_background(), self._bg_runs)
+            if policy.should_detach(quiet, slots):
+                break       # silent run and a free slot: detach before the deadline
+            deadline = time.monotonic() + 1.0   # tool in flight / no slot: hold
 
         self.log(
             "delegate",
             f"task {task_id} silent at the tool deadline; detached from the tool call",
         )
+        self._bg_runs[task_id] = work
+        work.add_done_callback(lambda _done, tid=task_id: self._bg_runs.pop(tid, None))
         announce = asyncio.create_task(self._announce(task_id, work))
         self._background.add(announce)
         announce.add_done_callback(self._background.discard)
@@ -493,9 +569,20 @@ class Delegate(core.module.Module):
             self.log("delegate", f"could not announce task {task_id}: {error}")
 
     async def _execute(self, task, prompt, model, history):
-        task_id = task["id"]
-        self._active_task = task_id
+        """run the task inside the delegation context.
 
+        The context variable marks "we are inside a delegated run": every tool
+        call the run makes is awaited in it, so `delegate_new`/`delegate_send`
+        can refuse nesting (the delegate inherits the full tool set).
+        """
+        token = self._depth.set(self._depth.get() + 1)
+        try:
+            return await self._run_task(task, prompt, model, history)
+        finally:
+            self._depth.reset(token)
+
+    async def _run_task(self, task, prompt, model, history):
+        task_id = task["id"]
         try:
             answer = await self.runner.run(
                 task_id, prompt, model, history, self._max_rounds()
@@ -513,8 +600,6 @@ class Delegate(core.module.Module):
                 },
                 success=False,
             )
-        finally:
-            self._active_task = None
 
         current = self.store.find(task_id) or task
         return self.result({
@@ -665,7 +750,7 @@ class Delegate(core.module.Module):
             return self.result("no delegate task with that id", success=False)
 
         identifier = task["id"]
-        if self._active_task == identifier or task.get("status") == "running":
+        if identifier in self._runs or task.get("status") == "running":
             return self.result("that task is running; stop it before deleting it", success=False)
 
         self.store.delete(identifier)
@@ -731,6 +816,12 @@ class Delegate(core.module.Module):
             "background: check it with `delegate_list`, read it in the delegate panel, or "
             "`delegate_send` once it is done. `delegate_read(task_id)` returns its final answer. "
             "Pass `background=True` to skip the wait entirely and get the task id at once.\n"
+            "- `background=True` needs a free background slot (`max_background_tasks`, default 1) "
+            "and the chat's current model; a refusal names the reason, and retrying without "
+            "`background` runs the task in the foreground. While a background task runs you can "
+            "keep going in this chat.\n"
+            "- A delegated run cannot delegate further: `delegate_new`/`delegate_send` called "
+            "from inside a run are refused.\n"
             "Delegated tasks inherit your tools."
         )
 
