@@ -52,19 +52,24 @@ class DelegateRunner:
         self._model = ""        # model this run is on, recorded per assistant message
         self._announced_calls = set()   # call ids already sent to the panel (this run)
         self._round_base = 0    # task's cumulative rounds at the start of this run
-        self._last_tool_at = None       # monotonic time of the last tool round
+        # task_id -> monotonic time of its last tool round IN THIS RUN, None while
+        # the run has made none. Keyed per task on purpose: one runner serves every
+        # run, and a background/detached run must never make a foreground run look
+        # tool-active (or tool-less) - that decision belongs to the foreground run.
+        self._tool_at = {}
 
-    def seconds_since_tool(self):
-        """how long this run has gone without a tool round (None = never had one)
+    def seconds_since_tool(self, task_id):
+        """how long this run of `task_id` has gone without a tool round.
 
-        The module's detach logic reads this: a run that made a tool call within
-        the last second is left blocking through the caller's deadline (a
-        tool-active run is not cut in practice), while a silent run is detached
-        one second before that deadline so the tool call never fails.
+        None means the run has made no tool call yet - the module's detach logic
+        reads exactly that: a foreground run that has used a tool keeps blocking
+        through the caller's deadline, while one that has not is detached one
+        second before it so the call returns `running` instead of failing.
         """
-        if self._last_tool_at is None:
+        started = self._tool_at.get(task_id)
+        if started is None:
             return None
-        return time.monotonic() - self._last_tool_at
+        return time.monotonic() - started
 
     # ----------------------------------------------------------- run-local step
     def _step_now(self, rounds):
@@ -288,7 +293,7 @@ class DelegateRunner:
         self._model = effective_model
         self._announced_calls = set()   # fresh per run: the calls already announced
         self._round_base = rounds        # run-local steps start at 1, see _step_now
-        self._last_tool_at = None       # no tool round yet in this run
+        self._tool_at[task_id] = None   # no tool round yet in this run
 
         bus.start(task_id, title=task.get("title", ""), model=effective_model, rounds=rounds)
 
@@ -359,7 +364,7 @@ class DelegateRunner:
                             raise RuntimeError(str(token.get("content") or "the API returned an error"))
                         elif token_type == "tool_calls":
                             called_tool = True
-                            self._last_tool_at = time.monotonic()
+                            self._tool_at[task_id] = time.monotonic()
                             rounds += 1
                             run_rounds += 1
                             bus.set_rounds(task_id, rounds)
@@ -394,7 +399,7 @@ class DelegateRunner:
                                                 answer_cut = False
                                             finished = True
                                     elif sub_type == "tool_calls":
-                                        self._last_tool_at = time.monotonic()
+                                        self._tool_at[task_id] = time.monotonic()
                                         rounds += 1
                                         run_rounds += 1
                                         bus.set_rounds(task_id, rounds)
@@ -415,7 +420,7 @@ class DelegateRunner:
                                             task_id, rounds, repaired.get("tool_calls")
                                         )
                                     elif sub_type == "tool":
-                                        self._last_tool_at = time.monotonic()
+                                        self._tool_at[task_id] = time.monotonic()
                                         bus.emit(
                                             task_id,
                                             "tool_result",
@@ -550,3 +555,4 @@ class DelegateRunner:
 
         finally:
             self._restore_model(scoped_from)
+            self._tool_at.pop(task_id, None)   # this run is over: forget its clock

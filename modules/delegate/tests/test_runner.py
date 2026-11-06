@@ -13,6 +13,7 @@ import asyncio
 import copy
 import json
 import sys
+import time
 import types
 import unittest
 from pathlib import Path
@@ -818,3 +819,39 @@ class KeepReasoningTests(unittest.IsolatedAsyncioTestCase):
         sent = module.api.contexts[0]
         assistant = [message for message in sent if message["role"] == "assistant"][0]
         self.assertNotIn("reasoning_content", assistant)
+
+
+class ToolClockTests(unittest.TestCase):
+    """the detach clock belongs to one run of one task, not to the module.
+
+    `seconds_since_tool()` is what the module's detach decision reads. It used
+    to be a single attribute on the runner, so a background run starting or
+    calling a tool could make a foreground run look tool-less (or tool-active)
+    and change whether that foreground call detached.
+    """
+
+    def test_a_task_with_no_run_reports_no_tool_call(self):
+        runner = runner_module.DelegateRunner(None)
+        self.assertIsNone(runner.seconds_since_tool("A"))
+
+    def test_one_tasks_tool_call_does_not_leak_into_another(self):
+        runner = runner_module.DelegateRunner(None)
+        runner._tool_at["foreground"] = time.monotonic()
+
+        self.assertGreaterEqual(runner.seconds_since_tool("foreground"), 0.0)
+        self.assertIsNone(runner.seconds_since_tool("background"))
+
+    def test_a_background_run_starting_does_not_clear_a_foreground_clock(self):
+        runner = runner_module.DelegateRunner(None)
+        runner._tool_at["foreground"] = time.monotonic()
+        runner._tool_at["background"] = None        # run() start of the background task
+
+        self.assertIsNotNone(runner.seconds_since_tool("foreground"))
+        self.assertIsNone(runner.seconds_since_tool("background"))
+
+    def test_a_finished_run_forgets_its_clock(self):
+        runner = runner_module.DelegateRunner(None)
+        runner._tool_at["A"] = time.monotonic()
+        runner._tool_at.pop("A", None)              # run() finally
+
+        self.assertIsNone(runner.seconds_since_tool("A"))

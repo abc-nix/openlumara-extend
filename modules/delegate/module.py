@@ -418,7 +418,7 @@ class Delegate(core.module.Module):
                 except asyncio.TimeoutError:
                     pass        # the slice elapsed: is the run still active?
 
-            quiet = self.runner.seconds_since_tool()
+            quiet = self.runner.seconds_since_tool(task_id)
             slots = policy.slots_left(self._max_background(), self._bg_runs)
             if policy.should_detach(quiet, slots):
                 break       # silent run and a free slot: detach before the deadline
