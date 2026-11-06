@@ -64,10 +64,12 @@ def _tail(text, limit):
 
 
 def _phrase(text, limit=BLOCK_PHRASE_LIMIT):
-    """the last non-empty line of a thinking block, tail-capped.
+    """the last non-empty line of a thinking block, tail-capped at a word edge.
 
-    The collapsed dot reads `Thinking: <phrase>`, so it has to be the end of the
+    The summary row reads `Thinking: <phrase>`, so it has to be the end of the
     reasoning - what the model is on about right now - not its opening line.
+    A long line is cut at a word boundary instead of mid-word: slicing the last
+    `limit` characters produced things like `\u2026ere's no hard-reload option`.
     """
     for line in reversed(str(text or "").splitlines()):
         line = line.strip()
@@ -75,7 +77,12 @@ def _phrase(text, limit=BLOCK_PHRASE_LIMIT):
             continue
         if len(line) <= limit:
             return line
-        return "\u2026" + line[-(limit - 1):]
+
+        tail = line[-(limit - 1):]
+        space = tail.find(" ")
+        if space != -1 and len(tail) - space > 12:
+            tail = tail[space + 1:]
+        return "\u2026" + tail
     return ""
 
 

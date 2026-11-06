@@ -26,6 +26,7 @@ unit the stored chain counts as a "step".
 """
 
 import asyncio
+import json
 import time
 
 import core
@@ -133,6 +134,37 @@ class DelegateRunner:
             return False
         return bool(str(last.get("content") or "").strip())
 
+    @staticmethod
+    def _unwrap_call(name, raw_args):
+        """(display name, display args) for one call.
+
+        A delegated run loads its tools dynamically, so most of its calls arrive
+        as `tools_call` with the real tool inside the arguments
+        (`{"name": "browser_navigate", "params": {...}}`). Emitting that verbatim
+        makes the panel's row read `tools_call({"name": ...})`, so the event
+        carries the proxied name and its own params instead. The stored
+        transcript keeps the raw call; only the live feed uses this form.
+        """
+        name = str(name or "")
+        if name != "tools_call":
+            return name, raw_args
+
+        try:
+            payload = json.loads(raw_args or "{}")
+        except (TypeError, ValueError):
+            return name, raw_args
+        if not isinstance(payload, dict):
+            return name, raw_args
+
+        target = payload.get("name")
+        if not isinstance(target, str) or not target:
+            return name, raw_args
+
+        params = payload.get("params")
+        if isinstance(params, str):
+            return target, params
+        return target, json.dumps(params if isinstance(params, dict) else {}, ensure_ascii=False)
+
     def _emit_calls(self, task_id, round_no, tool_calls):
         """announce one round's calls to the panel, once per call id.
 
@@ -151,6 +183,9 @@ class DelegateRunner:
                     continue
                 self._announced_calls.add(call_id)
 
+            name, args = self._unwrap_call(
+                function.get("name", ""), function.get("arguments", "")
+            )
             self.module.bus.emit(
                 task_id,
                 "tool_call",
@@ -161,8 +196,8 @@ class DelegateRunner:
                 round=round_no,
                 step=self._step_of_round(round_no),
                 call_id=call_id,
-                name=function.get("name", ""),
-                args=_short(function.get("arguments", ""), PANEL_ARGS_LIMIT),
+                name=name,
+                args=_short(args, PANEL_ARGS_LIMIT),
             )
 
     # -------------------------------------------------------------------- run

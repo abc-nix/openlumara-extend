@@ -687,3 +687,67 @@ class ShortTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnwrapCallTests(unittest.TestCase):
+    """_unwrap_call(): the live feed shows the proxied tool, not tools_call.
+
+    A delegated run loads its tools dynamically, so its calls reach the API as
+    `tools_call` with the real tool inside the arguments. The stored transcript
+    keeps that raw form; the panel's row must read the proxied one.
+    """
+
+    def test_a_proxied_call_is_unwrapped(self):
+        name, args = runner_module.DelegateRunner._unwrap_call(
+            "tools_call", '{"name": "browser_navigate", "params": {"url": "http://x"}}'
+        )
+        self.assertEqual(name, "browser_navigate")
+        self.assertEqual(json.loads(args), {"url": "http://x"})
+
+    def test_params_given_as_a_json_string_are_passed_through(self):
+        name, args = runner_module.DelegateRunner._unwrap_call(
+            "tools_call", '{"name": "browser_evaluate", "params": "{\\"expression\\": \\"1\\"}"}'
+        )
+        self.assertEqual(name, "browser_evaluate")
+        self.assertEqual(json.loads(args), {"expression": "1"})
+
+    def test_a_normal_call_is_untouched(self):
+        self.assertEqual(
+            runner_module.DelegateRunner._unwrap_call("delegate_list", '{"status": "done"}'),
+            ("delegate_list", '{"status": "done"}'),
+        )
+
+    def test_broken_arguments_keep_the_raw_call(self):
+        raw = '{"name": "browser_evaluate", "params": {' + "\n"
+        name, args = runner_module.DelegateRunner._unwrap_call("tools_call", raw)
+        self.assertEqual(name, "tools_call")
+        self.assertEqual(args, raw)
+
+    def test_a_bridge_call_without_a_target_keeps_its_name(self):
+        self.assertEqual(
+            runner_module.DelegateRunner._unwrap_call("tools_call", '{"params": {}}'),
+            ("tools_call", '{"params": {}}'),
+        )
+
+    def test_the_emitted_event_carries_the_unwrapped_call(self):
+        module, delegate = make([[CALL]], sub_tokens=[
+            tool_token("call-1"),
+            final_token("done"),
+        ])
+        # the round-1 token the runner sees is a proxied one
+        module.api.script[0] = [{
+            "type": "tool_calls",
+            "tool_calls": [{
+                "id": "call-1",
+                "function": {
+                    "name": "tools_call",
+                    "arguments": '{"name": "browser_status", "params": {}}',
+                },
+            }],
+        }]
+
+        asyncio.run(delegate.run("T1", "hi", "test-model", [], 40))
+
+        emitted = [event for event in module.bus.events if event[0] == "tool_call"][0]
+        self.assertEqual(emitted[2]["name"], "browser_status")
+        self.assertEqual(json.loads(emitted[2]["args"]), {})

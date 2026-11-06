@@ -17,7 +17,7 @@ MODULE_DIR = Path(__file__).resolve().parents[1]
 
 sys.path.insert(0, str(MODULE_DIR.parent))
 
-from delegate.events import BlockBuilder, EventBus, _tool_label  # noqa: E402
+from delegate.events import BlockBuilder, EventBus, _phrase, _tool_label  # noqa: E402
 
 
 def feed(events, **kwargs):
@@ -425,3 +425,38 @@ class ToolLabelTests(unittest.TestCase):
         entry = builder.export()["blocks"][0]["calls"][0]
         self.assertEqual(entry["name"], "tools_call")          # raw, for debugging
         self.assertEqual(entry["label"], "Browser: navigate")  # what the feed shows
+
+
+class PhraseTests(unittest.TestCase):
+    """_phrase(): the thinking summary is the tail of the reasoning, cut cleanly."""
+
+    def test_a_short_line_is_returned_whole(self):
+        self.assertEqual(_phrase("Let me check the panel."), "Let me check the panel.")
+
+    def test_the_last_non_empty_line_wins(self):
+        text = "first line\nsecond line\n\n  "
+        self.assertEqual(_phrase(text), "second line")
+
+    def test_a_long_line_is_cut_at_a_word_boundary(self):
+        text = "word " * 40            # 200 chars, spaces every 5
+        phrase = _phrase(text, limit=40)
+        self.assertTrue(phrase.startswith("\u2026"))
+        # the cut lands on a whole word of the text, never mid-word
+        self.assertEqual(phrase[1:].split(" ")[0], "word")
+        self.assertLessEqual(len(phrase), 40)
+
+    def test_an_unbroken_long_word_is_not_cut_into_pieces(self):
+        text = "x" * 200
+        phrase = _phrase(text, limit=30)
+        self.assertEqual(phrase, "\u2026" + "x" * 29)
+
+    def test_empty_text(self):
+        self.assertEqual(_phrase(""), "")
+        self.assertEqual(_phrase(None), "")
+
+
+class PhraseInFeedTests(unittest.TestCase):
+    def test_the_thinking_block_updates_its_phrase(self):
+        builder = feed([thinking("one"), thinking(" two"), thinking(" three")])
+        block = builder.export()["blocks"][0]
+        self.assertEqual(block["phrase"], "one two three")
