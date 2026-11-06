@@ -74,7 +74,8 @@ const DELEGATE_VIEW = {
     activeTitle: "",
     activeTask: null,      // {id, title, status, model, rounds, ...} of the open task
     turns: [],             // grouped like chat turns (steps + final messages)
-    liveStep: null,        // the round still streaming, shaped like a step
+    liveRun: null,         // the running task's feed: {blocks, steps, steps_done, step}
+    openBlocks: {},        // block id -> the user's own open/closed choice
     running: [],
     statusText: "",
     fontScale: 94,          // percent of the chat's text (module setting font_scale)
@@ -219,12 +220,138 @@ const DELEGATE_VIEW = {
             this.running = data.running || [];
 
             for (const event of (data.events || [])) this.applyEvent(event);
+            this.syncLive();           // the feed itself is built by the bus
         } catch (error) {
             /* backend restarting, module disabled, page on an old build — stay quiet */
         }
     },
 
-    /* ---- live events -> the live step (one growing chain station) ---- */
+    /* ---- the live feed ----
+
+       The ordered blocks come from the backend: events.py folds every emitted
+       event into a block list as the run streams, and `state` returns it per
+       running task. Nothing is folded here, on purpose — the event ring keeps
+       about a minute of stream and a panel opened mid-run, switched to another
+       task or refreshed never saw the earlier events, so a browser-side fold
+       dropped the earlier blocks. Reading `running[].blocks` every poll makes
+       all three cases correct with no cursor to replay. */
+    syncLive() {
+        const job = this.running.find((entry) => entry.task_id === this.activeId);
+        if (!job) {
+            if (this.liveRun) this.liveRun = null;   // the chain view takes over
+            return;
+        }
+        this.liveRun = job;
+        this.followLive();
+    },
+
+    scrollToBottom() {
+        // opening a task must land on its END: the last answer, or the live
+        // chain while it runs. Two frames: Alpine renders the new blocks in
+        // between, so the first frame would scroll to a height that is not
+        // final yet
+        const pane = document.querySelector(".dl-scroll");
+        if (!pane) return;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (pane.isConnected) pane.scrollTop = pane.scrollHeight;
+        }));
+    },
+
+    followLive() {
+        // follow the stream only when the view is already at the bottom, like
+        // the chat: reading an earlier block is never yanked back down
+        const pane = document.querySelector(".dl-scroll");
+        if (!pane) return;
+        const near = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 90;
+        if (!near) return;
+        requestAnimationFrame(() => {
+            if (pane.isConnected) pane.scrollTop = pane.scrollHeight;
+        });
+    },
+
+    followBox(el) {
+        // the reasoning box follows its own stream, unless the user scrolled up
+        // inside it (scrollTop 0 = nothing to lose, the block just started)
+        if (!el) return;
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        if (!near && el.scrollTop > 0) return;
+        requestAnimationFrame(() => {
+            if (el.isConnected) el.scrollTop = el.scrollHeight;
+        });
+    },
+
+    /* ---- reading the feed (the block model itself is server-side) ---- */
+    liveBlocks() {
+        return (this.liveRun && this.liveRun.blocks) || [];
+    },
+
+    liveStepsLabel() {
+        const run = this.liveRun || {};
+        const total = run.steps || 0;
+        const done = run.steps_done || 0;
+        // the step still in flight is shown as such, not counted as finished
+        if (run.step) return `(${done} of ${total} steps)`;
+        return total === 1 ? "(1 step)" : `(${total} steps)`;
+    },
+
+    blockOpen(block) {
+        // thinking starts COLLAPSED and only the user's click opens it; nothing
+        // auto-expands while a run streams (the previous version did, and the
+        // feed jumped around as blocks opened and closed by themselves)
+        if (!block) return false;
+        return Boolean(this.openBlocks[block.id]);
+    },
+
+    toggleBlock(block) {
+        if (!block) return;
+        this.openBlocks[block.id] = !this.blockOpen(block);
+    },
+
+    /* the thinking summary row: `Thinking: <last phrase>` (tools use call.label) */
+    blockLabel(block) {
+        if (!block) return "";
+        if (block.kind === "thinking") {
+            const phrase = dlString(block.phrase);
+            return phrase ? `Thinking: ${phrase}` : "Thinking";
+        }
+        return "";
+    },
+
+    /* the single most informative argument, like the chat's tool summaries */
+    callArgs(raw) {
+        const text = dlString(raw).trim();
+        if (!text) return "";
+
+        const parsed = dlTryJson(text);
+        const object = parsed.ok && parsed.value && typeof parsed.value === "object"
+            ? parsed.value
+            : null;
+
+        let chosen = "";
+        if (object) {
+            for (const key of ["path", "file_path", "filepath", "file", "filename", "url",
+                               "query", "pattern", "regex_pattern", "sub_path", "subfolder",
+                               "folder", "id", "name", "content", "text", "cmd"]) {
+                if (key in object) { chosen = dlString(object[key]); break; }
+            }
+            if (!chosen) {
+                const firstString = Object.values(object).find((value) => typeof value === "string");
+                if (firstString) chosen = firstString;
+            }
+            if (!chosen && Object.keys(object).length) chosen = JSON.stringify(object);
+        }
+        if (!chosen) chosen = text;
+
+        chosen = chosen.replace(/\s+/g, " ").trim();
+        if (chosen.length > 70) {
+            chosen = chosen.includes("/") ? ".." + chosen.slice(-68) : chosen.slice(0, 69) + "..";
+        }
+        return chosen;
+    },
+
+    /* ---- events: triggers only (auto-select, run_end -> the stored chain).
+       Their content is already in the bus-built blocks, so nothing is folded
+       here: a task switch or a refresh reads `running[].blocks` as-is. ---- */
     applyEvent(event) {
         if (!event) return;
 
@@ -240,101 +367,25 @@ const DELEGATE_VIEW = {
         if (kind === "run_start") {
             this.mode = "task";
             this.statusText = "running…";
-            this.liveStep = this.blankLiveStep();
+            this.liveRun = null;       // the next poll starts the feed
+            this.openBlocks = {};      // block ids restart with every run
             this.loadTasks();          // pick up the task that just appeared
             this.loadChain(this.activeId);
             return;
         }
         if (kind === "run_end" || kind === "run_error") {
             this.statusText = kind === "run_error" ? "error: " + dlString(event.text || "unknown") : "";
-            this.liveStep = null;
+            this.liveRun = null;       // the stored chain takes over
             this.loadTasks();          // status changed
-            this.loadChain(this.activeId);
+            this.loadChain(this.activeId);   // the final chain, exactly as before
             return;
         }
         if (kind === "run_note") {
+            // the note is also a block of the feed, in order (see events.py)
             this.statusText = dlString(event.text);
-            return;
         }
-        if (kind === "reasoning") {
-            this.ensureLiveStep().reasoning_content += dlString(event.text);
-            return;
-        }
-        if (kind === "content") {
-            this.ensureLiveStep().content += dlString(event.text);
-            return;
-        }
-        if (kind === "tool_call") {
-            this.addLiveTool(event);
-            return;
-        }
-        if (kind === "tool_result") {
-            this.finishLiveTool(event);
-        }
-    },
-
-    /* ---- the round still streaming, shaped like a grouped step ---- */
-    blankLiveStep() {
-        return {
-            step: 9999,
-            status: "running",
-            reasoning_content: "",
-            content: "",
-            tool_calls: [],
-            modules: [],
-        };
-    },
-
-    ensureLiveStep() {
-        if (!this.liveStep) this.liveStep = this.blankLiveStep();
-        return this.liveStep;
-    },
-
-    addLiveTool(event) {
-        const step = this.ensureLiveStep();
-        const name = dlString(event.name);
-        const rawArgs = dlString(event.args);
-        const parsed = dlTryJson(rawArgs);
-
-        step.tool_calls.push({
-            id: dlString(event.call_id),
-            type: "function",
-            function: { name, arguments: rawArgs },
-            _metadata: {
-                summary: "",
-                args_parsed: parsed.ok ? parsed.value : {},
-                response: null,
-                done: false,
-            },
-        });
-
-        // mirror the chat's "Module: action xN" chips
-        const [head, ...rest] = name.split("_");
-        const module = head ? head.charAt(0).toUpperCase() + head.slice(1) : name;
-        const action = (rest.length ? rest.join("_") : head || name).replaceAll("_", " ");
-
-        let group = step.modules.find((entry) => entry.module === module);
-        if (!group) {
-            group = { module, actions: [] };
-            step.modules.push(group);
-        }
-        const existing = group.actions.find((entry) => entry.name === action);
-        if (existing) existing.count += 1;
-        else group.actions.push({ name: action, count: 1 });
-    },
-
-    finishLiveTool(event) {
-        const step = this.liveStep;
-        if (!step) return;
-
-        const callId = dlString(event.call_id);
-        const call = [...step.tool_calls].reverse().find((entry) =>
-            !entry._metadata.done && (!callId || entry.id === callId)
-        );
-        if (!call) return;
-
-        call._metadata.response = dlString(event.text);
-        call._metadata.done = true;
+        // reasoning/content/tool_call/tool_result shape nothing here: the bus
+        // already folded them into the ordered blocks this store renders
     },
 
     /* ---- tasks ---- */
@@ -421,7 +472,8 @@ const DELEGATE_VIEW = {
                 this.activeTitle = "";
                 this.activeTask = null;
                 this.turns = [];
-                this.liveStep = null;
+                this.liveRun = null;
+                this.openBlocks = {};
                 this.mode = "list";
             }
             await this.loadTasks();
@@ -439,19 +491,26 @@ const DELEGATE_VIEW = {
         this.activeId = id;
         this.statusText = "";
         this.turns = [];
-        this.liveStep = null;
+        this.liveRun = null;
+        // the blocks of another run are not this task's: a switch starts clean,
+        // and the next poll (or the job already in `running`) fills the feed
+        this.openBlocks = {};
 
         const known = this.tasks.find((task) => task.id === id);
         this.activeTask = known || { id };
         this.activeTitle = known ? (known.title || known.id) : id;
 
-        if (this.running.some((job) => job.task_id === id)) {
+        const job = this.running.find((entry) => entry.task_id === id);
+        if (job) {
             this.statusText = "running…";
-            this.liveStep = this.blankLiveStep();
+            // the last poll already carries this run's whole feed, so a switch
+            // onto a running task shows its earlier blocks immediately
+            this.liveRun = job;
         }
 
-        // grouped rounds so far; the live step above covers the round in flight
+        // grouped rounds so far; the live feed above covers the run in flight
         await this.loadChain(id);
+        this.scrollToBottom();
     },
 
     backToList() {

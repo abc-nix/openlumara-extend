@@ -475,5 +475,162 @@ body[data-delegate="full"] .dl-cover {
     backdrop-filter: none;
 }
 
-/* the live station is informational only: no expand affordance */
-.dl-live .agent-chain-header { cursor: default; }
+/* ==========================================================================
+ * The live feed (a run in flight).
+ *
+ * One element per block, in stream order, at the chat chain's type scale (the
+ * same 0.85rem root the final chain uses), so the feed and the chain it turns
+ * into read the same size. Nothing here is shared with the stored chain: the
+ * final view keeps chat/combined_block.html untouched.
+ * ========================================================================== */
+.dl-live {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: calc(0.85rem * var(--dl-scale, 0.94));
+}
+
+/* the header: `Process (2 of 3 steps)` */
+.dl-live-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px;
+    color: var(--text-secondary, #a1a1aa);
+    font-size: 0.85em;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+.dl-live-head svg { width: 12px; height: 12px; flex: none; }
+.dl-live-head .label { flex: none; }
+.dl-live-head .activity {
+    color: var(--text-muted, #52525b);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 1em;
+}
+
+.dl-live-blocks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.dl-block { min-width: 0; }
+
+/* ---- thinking: a summary row, collapsed by default, no animation ---- */
+.dl-think { min-width: 0; }
+.dl-think-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 3px 2px;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    color: var(--text-secondary, #a1a1aa);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    font-size: 0.95em;
+}
+.dl-think-summary:hover {
+    color: var(--text-primary, #fafafa);
+    background: var(--bg-tertiary, #111115);
+}
+.dl-think-chevron {
+    flex: none;
+    width: 10px;
+    text-align: center;
+    transition: transform .12s ease;
+}
+.dl-think-chevron.open { transform: rotate(90deg); }
+.dl-think-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* the opened reasoning: scrollable, follows its own stream; capped HERE only, so
+   a collapsed block never reserves height (that was the old 220px hole) */
+.dl-think-body {
+    margin: 2px 0 4px 3px;
+    padding: 0 0 0 10px;
+    border-left: 1px solid var(--border-color, #1e1e24);
+    max-height: 40vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--code-font, monospace);
+    font-size: 0.95em;
+    line-height: 1.45;
+    color: var(--text-muted, #52525b);
+}
+
+/* ---- tool calls: one plain row per call, its result underneath ---- */
+.dl-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+.dl-tool {
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-tertiary, #111115);
+    padding: 4px 7px;
+    min-width: 0;
+}
+.dl-tool.done { border-color: var(--border-message, #252530); }
+.dl-tool-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+.dl-tool-name {
+    flex: none;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--code-font, monospace);
+    font-size: 0.9em;
+    color: var(--text-secondary, #a1a1aa);
+}
+.dl-tool-args {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--code-font, monospace);
+    font-size: 0.85em;
+    color: var(--text-muted, #52525b);
+}
+.dl-tool-result {
+    margin: 3px 0 0;
+    max-height: 140px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--code-font, monospace);
+    font-size: 0.85em;
+    color: var(--text-muted, #52525b);
+}
+
+/* a normal response: renders like the final answer, at full width */
+.dl-live-text {
+    width: 100%;
+    min-width: 0;
+}
+.dl-live-text .content { font-size: 1em; width: 100%; }
+
+/* a run_note line */
+.dl-live-note {
+    font-size: 0.95em;
+    color: var(--text-secondary, #a1a1aa);
+    padding: 2px 0;
+}

@@ -322,7 +322,15 @@ class Delegate(core.module.Module):
     # ---------------------------------------------------------------- webui
     @webui.route("state")
     async def _route_state(self, body=None, query=None):
-        """new live events since a cursor, plus the tasks currently running"""
+        """new live events since a cursor, plus the tasks currently running.
+
+        `events`/`seq` stay as they were (the panel triggers on run_start/
+        run_end/run_error), and each running task also carries its live feed:
+        `blocks` in stream order, `steps` started, `steps_done`, the `step` in
+        flight and how many old blocks the cap dropped. The feed is built in the
+        bus, so a panel opened mid-run gets the whole run, not just what
+        arrived after it started polling.
+        """
         events, seq = self.bus.since((query or {}).get("since"))
         return {"seq": seq, "events": events, "running": self.bus.running_list()}
 
@@ -345,7 +353,7 @@ class Delegate(core.module.Module):
 
         return {
             "tasks": tasks,
-            "running": [job["task_id"] for job in self.bus.running_list()],
+            "running": self.bus.running_ids(),
             "today": chat_listing.local_today(tz_offset).isoformat(),
             "font_scale": self._font_scale(),
         }

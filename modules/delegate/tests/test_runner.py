@@ -31,6 +31,7 @@ sys.path.insert(0, str(MODULE_DIR.parent))
 
 from delegate import runner as runner_module  # noqa: E402  (needs the stub above first)
 from delegate import store as store_module    # noqa: E402  (repair(): transcript validity)
+from delegate.events import BlockBuilder      # noqa: E402  (the live block feed)
 
 
 CALL = {
@@ -60,6 +61,14 @@ RECURSIVE_CALL_2 = {
 
 def tool_token(call_id):
     return {"type": "tool", "tool_call_id": call_id, "content": f"output of {call_id}"}
+
+
+def reasoning_token(text):
+    return {"type": "reasoning", "content": text}
+
+
+def content_token(text):
+    return {"type": "content", "content": text}
 
 
 def final_token(text="the answer"):
@@ -488,6 +497,121 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("tool", roles)
         self.assertIn("assistant", roles)
         self.assertEqual(module.store.tasks["T1"]["status"], "interrupted")
+
+
+# a three-round run whose every round streams reasoning + content before its
+# call, so the live feed gets a thinking/text/tool block per round
+THREE_ROUNDS = [
+    tool_token("call-1"), reasoning_token("r1"), content_token("c1"),
+    RECURSIVE_CALL, tool_token("call-2"), reasoning_token("r2"), content_token("c2"),
+    RECURSIVE_CALL_2, tool_token("call-3"), reasoning_token("r3"), content_token("c3"),
+    final_token("done"),
+]
+
+
+def of_kind(events, kind):
+    return [fields for name, _task, fields in events if name == kind]
+
+
+class LiveFieldTests(unittest.IsolatedAsyncioTestCase):
+    """the fields the live block feed needs (step/round), on a multi-round run.
+
+    `step` is the run-local index of the assistant message a chunk belongs to:
+    one message = one step = the unit the stored chain shows. `round` stays the
+    task's cumulative tool-round counter, so the old event shape is intact.
+    """
+
+    def setUp(self):
+        self._core_config = sys.modules["core"].config.config
+        self._core_config.clear()
+
+    async def test_every_stream_event_carries_its_step_and_round(self):
+        module, delegate = make(
+            [[reasoning_token("r0"), content_token("preamble"), CALL]],
+            sub_tokens=list(THREE_ROUNDS),
+        )
+
+        await delegate.run("T1", "hi", "test-model", [], 40)
+
+        # one step per assistant message: the preamble and each round's
+        # follow-up, then the last message
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "reasoning")],
+                         [1, 2, 3, 4])
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "content")],
+                         [1, 2, 3, 4])
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "tool_call")],
+                         [1, 2, 3])
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "tool_result")],
+                         [1, 2, 3])
+
+        # `round` is unchanged: the cumulative counter, as before this change
+        self.assertEqual([event["round"] for event in of_kind(module.bus.events, "tool_call")],
+                         [1, 2, 3])
+        self.assertEqual([event["round"] for event in of_kind(module.bus.events, "reasoning")],
+                         [0, 1, 2, 3])
+        self.assertEqual([event["round"] for event in of_kind(module.bus.events, "tool_result")],
+                         [1, 2, 3])
+
+    async def test_a_plain_answer_is_step_one(self):
+        module, delegate = make([[reasoning_token("why"), content_token("hello")]])
+
+        await delegate.run("T1", "hi", "test-model", [], 40)
+
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "reasoning")], [1])
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "content")], [1])
+        self.assertEqual(of_kind(module.bus.events, "tool_call"), [])
+
+    async def test_the_step_starts_at_one_on_a_continuation(self):
+        # `rounds` is cumulative across continuations (30 here) but `step` is
+        # run-local: the feed of this run starts at 1 however old the task is
+        module, delegate = make([
+            [reasoning_token("r0"), CALL],
+            [content_token("answer")],
+        ], sub_tokens=[tool_token("call-1")])
+        module.store.tasks["T1"]["rounds"] = 30
+
+        await delegate.run("T1", "hi", "test-model", [], 40)
+
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "reasoning")], [1])
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "tool_call")], [1])
+        self.assertEqual([event["step"] for event in of_kind(module.bus.events, "content")], [2])
+        # the round counter keeps its cumulative meaning
+        self.assertEqual([event["round"] for event in of_kind(module.bus.events, "tool_call")], [31])
+
+    async def test_the_announced_events_build_ordered_blocks(self):
+        """the contract between runner and bus: replaying what the runner emits
+        through the block builder gives one thinking/tool/text run per step."""
+        module, delegate = make(
+            [[reasoning_token("r0"), content_token("preamble"), CALL]],
+            sub_tokens=list(THREE_ROUNDS),
+        )
+
+        await delegate.run("T1", "hi", "test-model", [], 40)
+
+        builder = BlockBuilder()
+        for kind, task_id, fields in module.bus.events:
+            if kind == "rounds":      # set_rounds: not a display event
+                continue
+            builder.apply({"kind": kind, "task_id": task_id, **fields})
+
+        blocks = builder.export()["blocks"]
+        self.assertEqual(
+            [block["kind"] for block in blocks],
+            ["thinking", "text", "tool"] * 3 + ["thinking", "text"],
+        )
+        self.assertEqual([block["step"] for block in blocks],
+                         [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4])
+
+        # every tool block collapsed on its own result
+        self.assertTrue(all(block["state"] == "collapsed"
+                            for block in blocks if block["kind"] == "tool"))
+        self.assertTrue(all(block["state"] == "collapsed"
+                            for block in blocks if block["kind"] == "thinking"))
+
+        state = builder.export()
+        self.assertEqual(state["steps"], 4)
+        self.assertEqual(state["step"], 4)      # the last answer is still streaming
+        self.assertEqual(state["steps_done"], 3)
 
 
 class TrailingPartialTests(unittest.TestCase):

@@ -17,6 +17,12 @@ they do for the main agent), with three differences that matter here:
 
 `ctx` stays wire-clean: `_absorb()` moves `reasoning_content` into the rich
 copy's `_metadata` as messages appear, so `process()` never re-sends it.
+
+Every event the panel receives carries two counters: `round` (the task's
+cumulative tool-round count, unchanged) and `step` (this run's 1-based
+assistant-message index). `step` is what the live block feed in events.py
+groups chunks, calls and results by - one step = one assistant message = the
+unit the stored chain counts as a "step".
 """
 
 import asyncio
@@ -44,6 +50,19 @@ class DelegateRunner:
         self.module = module
         self._model = ""        # model this run is on, recorded per assistant message
         self._announced_calls = set()   # call ids already sent to the panel (this run)
+        self._round_base = 0    # task's cumulative rounds at the start of this run
+
+    # ----------------------------------------------------------- run-local step
+    def _step_now(self, rounds):
+        """the run-local index of the assistant message being streamed. 1-based,
+        so the panel's live feed can group one message's chunks into one step and
+        count the run's steps the way the stored chain does."""
+        return max(1, int(rounds) - self._round_base + 1)
+
+    def _step_of_round(self, rounds):
+        """the step of the message that carried a tool call of round `rounds`
+        (the round counter is already incremented when a call is announced)"""
+        return max(1, int(rounds) - self._round_base)
 
     # ------------------------------------------------------------ model scope
     def _use_model(self, model):
@@ -135,7 +154,12 @@ class DelegateRunner:
             self.module.bus.emit(
                 task_id,
                 "tool_call",
+                # `round` is the task's cumulative round counter (unchanged, it
+                # is what the panel's round badge used), `step` is this run's
+                # 1-based assistant-message index, which is what the live feed
+                # groups calls/blocks by
                 round=round_no,
+                step=self._step_of_round(round_no),
                 call_id=call_id,
                 name=function.get("name", ""),
                 args=_short(function.get("arguments", ""), PANEL_ARGS_LIMIT),
@@ -176,6 +200,7 @@ class DelegateRunner:
         effective_model = model or module.manager.API.get_model() or ""
         self._model = effective_model
         self._announced_calls = set()   # fresh per run: the calls already announced
+        self._round_base = rounds        # run-local steps start at 1, see _step_now
 
         bus.start(task_id, title=task.get("title", ""), model=effective_model, rounds=rounds)
 
@@ -210,11 +235,17 @@ class DelegateRunner:
                         if token_type == "content":
                             chunk = token.get("content") or ""
                             content.append(chunk)
-                            bus.emit(task_id, "content", text=chunk)
+                            bus.emit(
+                                task_id, "content",
+                                text=chunk, round=rounds, step=self._step_now(rounds),
+                            )
                         elif token_type == "reasoning":
                             chunk = token.get("content") or ""
                             reasoning.append(chunk)
-                            bus.emit(task_id, "reasoning", text=chunk)
+                            bus.emit(
+                                task_id, "reasoning",
+                                text=chunk, round=rounds, step=self._step_now(rounds),
+                            )
                         elif token_type == "error":
                             raise RuntimeError(str(token.get("content") or "the API returned an error"))
                         elif token_type == "tool_calls":
@@ -276,13 +307,27 @@ class DelegateRunner:
                                         bus.emit(
                                             task_id,
                                             "tool_result",
+                                            # a result belongs to the message that
+                                            # carried the call: core yields a
+                                            # round's results before the next
+                                            # round's stream, so `rounds` is it
+                                            round=rounds,
+                                            step=self._step_of_round(rounds),
                                             call_id=sub_token.get("tool_call_id", ""),
                                             text=_short(sub_token.get("content")),
                                         )
                                     elif sub_type == "content":
-                                        bus.emit(task_id, "content", text=sub_token.get("content") or "")
+                                        bus.emit(
+                                            task_id, "content",
+                                            text=sub_token.get("content") or "",
+                                            round=rounds, step=self._step_now(rounds),
+                                        )
                                     elif sub_type == "reasoning":
-                                        bus.emit(task_id, "reasoning", text=sub_token.get("content") or "")
+                                        bus.emit(
+                                            task_id, "reasoning",
+                                            text=sub_token.get("content") or "",
+                                            round=rounds, step=self._step_now(rounds),
+                                        )
                                     elif sub_type == "error":
                                         raise RuntimeError(
                                             str(sub_token.get("content") or "the API returned an error")

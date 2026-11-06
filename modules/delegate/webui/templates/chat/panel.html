@@ -10,8 +10,10 @@
    comes from /api/ext/delegate/chain, grouped by core's turn collector into
    turns with `steps` (exactly what chat/combined_block.html expects), so the
    collapsed chain, fonts, node dots and tool chips look like the chat window.
-   While a round is still streaming it is shown as one extra live station built
-   from the polled events; on run_end the grouped view replaces it.
+   While a run is still streaming its blocks are shown instead (the live feed
+   below, rendered from the backend's ordered block list - not with
+   combined_block.html); on run_end the grouped chain above takes over, with
+   exactly the look it had before.
 
    Everything from the backend is rendered through x-text / x-md, never as raw
    HTML (titles, prompts and tool output are untrusted text). #}
@@ -212,29 +214,87 @@
             </div>
         </template>
 
-        {# the round still streaming: one live station, the grouped view takes over on run_end #}
-        <template x-if="$store.delegateView.liveStep">
-            <div class="agent-chain is-streaming dl-live"
-                 x-data="{ get step() { return $store.delegateView.liveStep } }">
-                <div class="agent-chain-header">
+        {# ---- the live feed: one element per block, in stream order ----
+
+           The blocks are built by the backend (events.py emits -> one ordered
+           list per running task), so the feed is the run itself, not a fold of
+           whatever events this browser happened to receive. Per block kind:
+             * thinking - streams in a scrollable box that follows itself, then
+               collapses to a dot reading `Thinking: <last phrase>`;
+             * tool     - one row per call of the round, collapses to the tool
+               name plus part of its args once every call answered;
+             * text     - a normal response: streams, renders, never collapses;
+             * note     - a run_note line, in order.
+           Clicking a collapsed dot re-expands that block (live if still
+           streaming). On run_end the panel swaps to the stored chain above. #}
+        <template x-if="$store.delegateView.liveRun">
+            <div class="dl-live">
+                <div class="dl-live-head">
                     {% include 'svg/gear.svg' %}
                     <span class="label">Process</span>
-                    <span class="activity">(working…)</span>
+                    <span class="activity" x-text="$store.delegateView.liveStepsLabel()"></span>
                 </div>
-                <div class="agent-chain-body">
-                    <div class="chain-station">
-                        <div class="chain-rail"><div class="chain-dot"></div></div>
-                        <div class="chain-content">
-                            {% set combined_stream = False %}
-                            {% include 'chat/combined_block.html' %}
+
+                <div class="dl-live-blocks">
+                    <template x-for="block in $store.delegateView.liveBlocks()" :key="'block-' + block.id">
+                        <div class="dl-block" :class="'dl-block-' + block.kind">
+
+                            {# a run_note: a plain line, in order #}
+                            <template x-if="block.kind === 'note'">
+                                <div class="dl-live-note" x-text="block.text"></div>
+                            </template>
+
+                            {# a normal response: streams and renders, never collapses #}
+                            <template x-if="block.kind === 'text'">
+                                <div class="dl-live-text">
+                                    <div class="content"
+                                         x-md="{ message: { role: 'assistant', content: block.text }, live: true }"></div>
+                                </div>
+                            </template>
+
+                            {# thinking: a one-line summary, collapsed by default #}
+                            <template x-if="block.kind === 'thinking'">
+                                <div class="dl-think">
+                                    <button type="button" class="dl-think-summary"
+                                            :aria-expanded="$store.delegateView.blockOpen(block)"
+                                            @click="$store.delegateView.toggleBlock(block)">
+                                        <span class="dl-think-chevron"
+                                              :class="{ open: $store.delegateView.blockOpen(block) }">&rsaquo;</span>
+                                        <span class="dl-think-label"
+                                              x-text="$store.delegateView.blockLabel(block)"></span>
+                                    </button>
+                                    <pre class="dl-think-body" x-show="$store.delegateView.blockOpen(block)"
+                                         x-text="block.text"
+                                         x-effect="block.text; $store.delegateView.followBox($el)"></pre>
+                                </div>
+                            </template>
+
+                            {# tool calls: a plain row per call, its result underneath #}
+                            <template x-if="block.kind === 'tool'">
+                                <div class="dl-tools">
+                                    <template x-for="(call, callIndex) in (block.calls ?? [])"
+                                              :key="'call-' + callIndex + '-' + call.call_id">
+                                        <div class="dl-tool" :class="{ done: call.done }">
+                                            <div class="dl-tool-head">
+                                                <span class="dl-tool-name"
+                                                      x-text="call.label || call.name || 'tool'"></span>
+                                                <span class="dl-tool-args"
+                                                      x-text="$store.delegateView.callArgs(call.args)"></span>
+                                            </div>
+                                            <pre class="dl-tool-result" x-show="call.result"
+                                                 x-text="call.result"></pre>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
                         </div>
-                    </div>
+                    </template>
                 </div>
             </div>
         </template>
 
         <div class="dl-empty"
-             x-show="$store.delegateView.turns.length === 0 && !$store.delegateView.liveStep" x-cloak>
+             x-show="$store.delegateView.turns.length === 0 && !$store.delegateView.liveRun" x-cloak>
             Nothing to show for this task yet.
         </div>
     </div>
