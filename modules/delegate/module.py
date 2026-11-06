@@ -77,6 +77,10 @@ class Delegate(core.module.Module):
             "max": 10,
             "description": "How many delegated tasks may run in the background at once (1 = one). A background request beyond this is refused with a message to run it in the foreground; a run that would detach at the tool deadline waits for a free slot instead. Background runs are limited to the chat's current model.",
         },
+        "verbose_logs": {
+            "default": False,
+            "description": "Log the delegate's diagnostics: timings, the Python call chain, detach decisions, per-round notes and the live-feed route. Off keeps one line per run (task id, title, model, foreground/background) plus real errors.",
+        },
         "font_scale": {
             "type": "number",
             "default": 94,
@@ -123,6 +127,22 @@ class Delegate(core.module.Module):
         if isinstance(value, bool):
             return value
         return str(value or "").strip().lower() in ("1", "true", "yes", "on", "background")
+
+    def _verbose(self):
+        """log the diagnostics (timings, call chains, detach decisions)?"""
+        return bool(self.config.get("verbose_logs", False))
+
+    def _debug(self, message):
+        """a diagnostic log line: only with `verbose_logs` on"""
+        if self._verbose():
+            self.log("delegate", message)
+
+    @staticmethod
+    def _run_label(task, background):
+        """the one line every run logs: id | title | model | foreground/background"""
+        title = str(task.get("title") or "")[:60]
+        mode = "background" if background else "foreground"
+        return f"{task.get('id')} | {title} | {task.get('model') or '?'} | {mode}"
 
     def _max_background(self):
         """how many delegated runs may sit in the background at once"""
@@ -181,7 +201,7 @@ class Delegate(core.module.Module):
         `background=True` runs it in the background. `model` defaults to the
         current model.
         """
-        self.log("delegate", f"new: called via {self._call_chain()}")
+        self._debug(f"new: called via {self._call_chain()}")
         background = self._as_bool(background)
 
         prompt = (prompt or "").strip()
@@ -209,6 +229,7 @@ class Delegate(core.module.Module):
             channel_name=self.channel.name,
             chat_id=chat.get("id"),
         )
+        self.log("delegate", self._run_label(task, background))
 
         system_prompt = await self._system_prompt()
         history = [{"role": "system", "content": system_prompt}] if system_prompt else []
@@ -256,20 +277,18 @@ class Delegate(core.module.Module):
             task = self.store.find(identifier)
 
         started = time.monotonic()
-        self.log(
-            "delegate",
+        self._debug(
             f"send {identifier}: accepted (status={task.get('status')}, "
-            f"rounds={task.get('rounds')}) via {self._call_chain()}",
+            f"rounds={task.get('rounds')}) via {self._call_chain()}"
         )
 
         history, dropped = repair(self.store.load(identifier))
         if dropped:
             self.store.save(identifier, history)
 
-        self.log(
-            "delegate",
+        self._debug(
             f"send {identifier}: history loaded in {time.monotonic() - started:.2f}s "
-            f"({len(history)} messages, dropped={dropped})",
+            f"({len(history)} messages, dropped={dropped})"
         )
         if not any(message.get("role") == "system" for message in history):
             system_prompt = await self._system_prompt()
@@ -278,6 +297,7 @@ class Delegate(core.module.Module):
                 self.store.save(identifier, history)
 
         self.store.update(identifier, status="running", last_error=None)
+        self.log("delegate", self._run_label(task, background))
 
         return await self._execute_or_detach(
             task, prompt, model_name or task.get("model") or None, history, background
@@ -385,7 +405,7 @@ class Delegate(core.module.Module):
         if background:
             self._bg_runs[task_id] = work
             work.add_done_callback(lambda _done, tid=task_id: self._bg_runs.pop(tid, None))
-            self.log("delegate", f"task {task_id} started in the background; returning at once")
+            self._debug(f"task {task_id} started in the background; returning at once")
             announce = asyncio.create_task(self._announce(task_id, work))
             self._background.add(announce)
             announce.add_done_callback(self._background.discard)
@@ -437,10 +457,7 @@ class Delegate(core.module.Module):
                 "note": "the user stopped this run from the delegate panel",
             })
 
-        self.log(
-            "delegate",
-            f"task {task_id} silent at the tool deadline; detached from the tool call",
-        )
+        self._debug(f"task {task_id} at the tool deadline with no tool call; detached")
         self._bg_runs[task_id] = work
         work.add_done_callback(lambda _done, tid=task_id: self._bg_runs.pop(tid, None))
         announce = asyncio.create_task(self._announce(task_id, work))
@@ -507,10 +524,9 @@ class Delegate(core.module.Module):
 
         busy = bool(getattr(self.channel, "sending_message", False))
         route = policy.announce_delivery(mode, busy, len(self._runs))
-        self.log(
-            "delegate",
+        self._debug(
             f"announcing task {task_id}: {route} (sending_message={busy}, "
-            f"live_runs={len(self._runs)})",
+            f"live_runs={len(self._runs)})"
         )
 
         try:
@@ -548,7 +564,7 @@ class Delegate(core.module.Module):
                 f"{type(error).__name__}: {error}",
             )
             for line in trace[-12:]:
-                self.log("delegate", f"  {line}")
+                self._debug(f"  {line}")
 
     async def _start_turn(self, note):
         """run a turn with `note` as the user message, the way a typed message does.

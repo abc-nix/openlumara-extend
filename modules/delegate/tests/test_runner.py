@@ -261,6 +261,15 @@ class FakeModule:
     def log(self, category, message):
         self.logs.append((category, message))
 
+    # the module's diagnostic channel (verbose_logs): off by default, so the
+    # runner's timings are silent unless a test switches it on
+    def _verbose(self):
+        return bool(self.config.get("verbose_logs", False))
+
+    def _debug(self, message):
+        if self._verbose():
+            self.log("delegate", message)
+
 
 def make(script, final_message=None, sub_tokens=None):
     module = FakeModule(script, final_message, sub_tokens)
@@ -855,3 +864,29 @@ class ToolClockTests(unittest.TestCase):
         runner._tool_at.pop("A", None)              # run() finally
 
         self.assertIsNone(runner.seconds_since_tool("A"))
+
+
+class LoggingTests(unittest.IsolatedAsyncioTestCase):
+    """diagnostics live behind verbose_logs; a clean run logs nothing by default"""
+
+    def setUp(self):
+        self._core_config = sys.modules["core"].config.config
+        self._core_config.clear()
+
+    async def test_a_clean_run_logs_nothing_by_default(self):
+        module, delegate = make([[{"type": "content", "content": "ok"}]])
+
+        await delegate.run("T1", "hi", "test-model", [], 40)
+
+        self.assertEqual(module.logs, [])
+
+    async def test_verbose_turns_the_timings_on(self):
+        module, delegate = make([[{"type": "content", "content": "ok"}]])
+        module.config.values["verbose_logs"] = True
+
+        await delegate.run("T1", "hi", "test-model", [], 40)
+
+        messages = [message for _, message in module.logs]
+        self.assertTrue(any("start (" in message for message in messages))
+        self.assertTrue(any("first token after" in message for message in messages))
+        self.assertTrue(any("done in " in message for message in messages))

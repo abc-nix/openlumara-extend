@@ -303,11 +303,10 @@ class DelegateRunner:
             timeout_now = core.config.get("core", "tool_timeout", default=10.0)
         except Exception:
             timeout_now = "?"
-        module.log(
-            "delegate",
+        module._debug(
             f"run {task_id}: start ({len(ctx)} messages, {size} chars, "
             f"model={effective_model}, keep_reasoning={self._keep_reasoning()}, "
-            f"tool_timeout={timeout_now})",
+            f"tool_timeout={timeout_now})"
         )
 
         # the delegate's answer is everything it said after its last tool round.
@@ -337,10 +336,9 @@ class DelegateRunner:
                     async for token in stream:
                         if first_token:
                             first_token = False
-                            module.log(
-                                "delegate",
+                            module._debug(
                                 f"run {task_id}: first token after "
-                                f"{time.monotonic() - started_at:.2f}s (round {rounds})",
+                                f"{time.monotonic() - started_at:.2f}s (round {rounds})"
                             )
                         if module.manager.API.cancel_request:
                             raise DelegateCancelled("cancelled by the user")
@@ -479,9 +477,9 @@ class DelegateRunner:
                     # cancellation and stores what it had), so the next part
                     # continues the same sentence instead of a new paragraph.
                     if self._trailing_partial(ctx, request):
-                        self.module.log(
-                            "delegate",
-                            f"task {task_id}: round {rounds} was interrupted mid-answer; asking again to finish it",
+                        self.module._debug(
+                            f"task {task_id}: round {rounds} was interrupted mid-answer; "
+                            f"asking again to finish it"
                         )
                         bus.emit(task_id, "run_note", text="the response was interrupted — continuing")
                         answer_cut = True
@@ -509,9 +507,9 @@ class DelegateRunner:
 
             store.update(task_id, status="done", rounds=rounds, last_error=None)
             bus.stop(task_id)
-            module.log(
-                "delegate",
-                f"run {task_id}: done in {time.monotonic() - started_at:.2f}s ({rounds} rounds)",
+            module._debug(
+                f"run {task_id}: done in {time.monotonic() - started_at:.2f}s "
+                f"({rounds} rounds)"
             )
             return answer
 
@@ -531,10 +529,9 @@ class DelegateRunner:
                 last_error="cancelled before the delegate finished",
             )
             bus.stop(task_id, error="cancelled before the delegate finished")
-            module.log(
-                "delegate",
+            module._debug(
                 f"run {task_id}: CANCELLED after {time.monotonic() - started_at:.2f}s "
-                f"({rounds} rounds) - the tool call was cut, not the model",
+                f"({rounds} rounds) - the tool call was cut, not the model"
             )
             raise
 
