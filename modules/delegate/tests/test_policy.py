@@ -95,21 +95,16 @@ class StartRefusalTest(unittest.TestCase):
 class ShouldDetachTest(unittest.TestCase):
     def test_no_slot_never_detaches(self):
         self.assertFalse(should_detach(None, 0))
-        self.assertFalse(should_detach(9.0, 0))
 
-    def test_silent_run_detaches_with_a_slot(self):
-        self.assertTrue(should_detach(2.5, 1))
-
-    def test_run_without_any_tool_call_detaches(self):
+    def test_a_tool_less_run_detaches_with_a_slot(self):
         self.assertTrue(should_detach(None, 1))
+        self.assertTrue(should_detach(None, 3))
 
-    def test_tool_call_in_flight_keeps_blocking(self):
+    def test_any_tool_call_in_the_run_keeps_it_blocking(self):
+        # not "in the last second": one tool call anywhere in the run is enough
         self.assertFalse(should_detach(0.2, 1))
-        self.assertFalse(should_detach(1.0, 1))     # threshold is strict
-
-    def test_threshold_is_configurable(self):
-        self.assertTrue(should_detach(3.0, 1, quiet_threshold=2.0))
-        self.assertFalse(should_detach(1.5, 1, quiet_threshold=2.0))
+        self.assertFalse(should_detach(30.0, 1))
+        self.assertFalse(should_detach(600.0, 3))
 
 
 class AnnounceDeliveryTest(unittest.TestCase):

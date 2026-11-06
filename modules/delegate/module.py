@@ -12,8 +12,10 @@ that subagents cannot do:
 
 A run normally blocks the calling turn: the delegate's final message is returned
 as the tool result. `background=True` returns at once instead (`{task_id,
-status: "running"}`); a run that is still silent when the caller's tool deadline
-approaches detaches by itself so it is not cut. Background runs are capped
+status: "running"}`); a run that has never called a tool detaches by itself when the
+caller's tool deadline approaches, so the call can return `running` instead of
+waiting out the generation, while a run that HAS used a tool keeps blocking.
+Background runs are capped
 (`max_background_tasks`, default 1) and must use the chat's current model: core
 keeps its model pointer on the run's model for the run's whole life, so another
 model there would leak into the chat's own requests. A background request that
@@ -397,13 +399,14 @@ class Delegate(core.module.Module):
                 ),
             })
 
-        # Block normally, and keep blocking through the caller's deadline while
-        # the run is showing tool activity - a tool-active run is not cut in
-        # practice. Detach only when there has been no tool call in the last
-        # second as the deadline arrives, one second early, so the tool call
-        # returns `running` instead of being cut - and only while a background
-        # slot is free. The cap is hard: with no slot the call keeps holding and
-        # re-checks every second, so it can take the moment one frees up.
+        # Block normally. A run that has made a tool call keeps blocking for as
+        # long as it needs: it is the caller's foreground work and must not be
+        # turned into a background run behind their back. Only a run with NO tool
+        # call at all detaches, one second before the caller's deadline, so its
+        # call can return `running` instead of waiting out the generation - and
+        # only while a background slot is free. The cap is hard: with no slot the
+        # call keeps holding and re-checks every second, so it can take the moment
+        # one frees up.
         limit = self._timeout_limit()
         deadline = time.monotonic() + max(2.0, limit - 1.0)
 

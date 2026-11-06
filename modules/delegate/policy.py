@@ -102,18 +102,16 @@ def announce_delivery(mode, turn_running, delegate_runs):
     return DEFERRED if turn_running else TAIL
 
 
-def should_detach(quiet_seconds, slots, quiet_threshold=1.0):
-    """detach a run at the caller's deadline: only with a slot, only when silent.
+def should_detach(quiet_seconds, slots):
+    """detach a run at the caller's deadline: only with a slot, only if tool-less.
 
-    `quiet_seconds` is None when the run has not made a tool call yet. A run
-    that is still inside a tool call keeps blocking (empirically those survive
-    the deadline); a silent run detaches so the tool call can return `running`
-    instead of being cut. Never above the cap: with no slot free the run keeps
-    blocking and re-checks every second, so it can take the slot the moment the
+    `quiet_seconds` is None exactly when the run has made no tool call at all.
+    A run that has used a tool keeps blocking for as long as it needs - the call
+    is the caller's foreground work and must not be turned into a background run
+    behind their back (2026-11-06 rule). Only a run that never called a tool is
+    detached, so its call can return `running` instead of waiting out the whole
+    generation. Never above the cap: with no slot free the run also keeps
+    blocking, and re-checks every second so it can take the slot the moment the
     current background run ends.
     """
-    if slots <= 0:
-        return False
-    if quiet_seconds is None:
-        return True
-    return quiet_seconds > quiet_threshold
+    return slots > 0 and quiet_seconds is None
