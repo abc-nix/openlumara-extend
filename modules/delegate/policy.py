@@ -70,6 +70,33 @@ def start_refusal(background, cap, running, effective_model, current_model):
     return None
 
 
+# how a completion notice reaches the channel (see announce_completion)
+TAIL = "tail"            # push(defer=False): appended and displayed now
+DEFERRED = "deferred"    # push(defer=True): appended after the turn ends
+STEERING = "steering"    # queue_steering_message: next round boundary, or a fresh turn
+
+
+def announce_delivery(mode, turn_running, delegate_runs):
+    """where a completion notice goes: TAIL / DEFERRED / STEERING.
+
+    `mode` is "push" or "wake" (the caller handles "off").
+    - push: never starts a turn. Tail when idle, deferred otherwise.
+    - wake: use the channel's steering slot while a normal turn is running, so the
+      model reads the notice at its next tool-round boundary (toolcalls.py:294);
+      if that turn ends first, core answers the queued message as a fresh turn
+      (channel.py:799 / :882) - the intent channel.send() had, without the
+      duplicated turn. With a delegated run also live the slot would be stolen
+      (core drains queued_message with no `context is None` guard) and with no
+      turn running there is nothing to inject into: both fall back to the tail.
+    """
+    woken = str(mode or "").strip().lower() == "wake"
+    if woken and turn_running and not delegate_runs:
+        return STEERING
+    if turn_running:
+        return DEFERRED
+    return TAIL
+
+
 def should_detach(quiet_seconds, slots, quiet_threshold=1.0):
     """detach a run at the caller's deadline: only with a slot, only when silent.
 

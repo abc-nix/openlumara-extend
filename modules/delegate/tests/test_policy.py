@@ -18,6 +18,10 @@ MODULE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(MODULE_DIR.parent))
 
 from delegate.policy import (  # noqa: E402
+    DEFERRED,
+    STEERING,
+    TAIL,
+    announce_delivery,
     running_count,
     same_model,
     should_detach,
@@ -105,6 +109,33 @@ class ShouldDetachTest(unittest.TestCase):
     def test_threshold_is_configurable(self):
         self.assertTrue(should_detach(3.0, 1, quiet_threshold=2.0))
         self.assertFalse(should_detach(1.5, 1, quiet_threshold=2.0))
+
+
+class AnnounceDeliveryTest(unittest.TestCase):
+    """where a completion notice goes (Push vs Wake, turn running or not)"""
+
+    def test_push_never_starts_a_turn(self):
+        self.assertEqual(announce_delivery("push", False, 0), TAIL)
+        self.assertEqual(announce_delivery("push", True, 0), DEFERRED)
+        self.assertEqual(announce_delivery("push", True, 2), DEFERRED)
+
+    def test_wake_uses_the_steering_slot_mid_turn(self):
+        self.assertEqual(announce_delivery("wake", True, 0), STEERING)
+
+    def test_wake_name_is_normalised(self):
+        self.assertEqual(announce_delivery(" WAVE ".replace("WAVE", "Wake"), True, 0), STEERING)
+
+    def test_wake_falls_back_when_a_delegate_chain_is_live(self):
+        # it would steal the slot (core drains queued_message with no context guard)
+        self.assertEqual(announce_delivery("wake", True, 1), DEFERRED)
+
+    def test_wake_while_idle_only_appends(self):
+        # nothing to interrupt: no turn can be injected into, so it waits in context
+        self.assertEqual(announce_delivery("wake", False, 0), TAIL)
+
+    def test_unknown_mode_never_starts_a_turn(self):
+        self.assertEqual(announce_delivery("", True, 0), DEFERRED)
+        self.assertEqual(announce_delivery(None, False, 0), TAIL)
 
 
 if __name__ == "__main__":

@@ -89,8 +89,8 @@ class Delegate(core.module.Module):
             "description": "What happens when a background or detached delegated task finishes. Inline runs are unaffected: their answer was already returned.",
             "options": {
                 "Off": "Do nothing. The task just shows as done in the panel.",
-                "Push": "Add a one-line notice to the chat. The model sees it at its next turn and can call delegate_read for the answer.",
-                "Wake": "Start a model turn with that notice so the assistant can act on it immediately. Costs tokens unprompted, so use it only if you want that.",
+                "Push": "Add a one-line notice to the chat. The model sees it at its next turn and can call delegate_read for the answer. Never starts a turn.",
+                "Wake": "Deliver the notice where a steering message goes: the turn that is running reads it at its next tool round, and if that turn has already ended the notice is answered as a fresh turn. When the chat is idle the notice simply waits for the next turn. Costs tokens when it triggers a fresh turn.",
             },
         },
         "keep_reasoning_in_context": {
@@ -534,39 +534,40 @@ class Delegate(core.module.Module):
         if mode == "off":
             return
 
-        if mode == "wake":
-            # a real turn: the model reads the line and can act on it at once.
-            # If the channel is busy, core queues it as a steering message.
-            busy = getattr(self.channel, "sending_message", None)
+        busy = bool(getattr(self.channel, "sending_message", False))
+        route = policy.announce_delivery(mode, busy, len(self._runs))
+        self.log(
+            "delegate",
+            f"announcing task {task_id}: {route} (sending_message={busy}, "
+            f"live_runs={len(self._runs)})",
+        )
+
+        try:
+            if route == policy.STEERING:
+                # The slot a user steering message uses: the running chain drains
+                # it at its next tool-round boundary, and if that turn ends first
+                # the continuation loops answer it as a fresh turn. That is what
+                # channel.send() did for Wake - minus the duplicated turn (send()
+                # re-enters the whole user-facing send path).
+                await self.channel.queue_steering_message(note)
+            else:
+                # defer=True already gates on _chain_idle inside _push_consumer, so
+                # there is no wait of our own: that wait only added an ordering race
+                # against the next user message.
+                await self.channel.push(
+                    {"role": "assistant", "content": note},
+                    defer=route == policy.DEFERRED,
+                )
+        except Exception as error:
+            import traceback
+            trace = traceback.format_exc().strip().splitlines()
             self.log(
                 "delegate",
-                f"waking the model for task {task_id} (sending_message={busy}, "
-                f"queued={getattr(self.channel, 'queued_message', None) is not None})",
+                f"could not announce task {task_id} ({route}): "
+                f"{type(error).__name__}: {error}",
             )
-            try:
-                result = await self.channel.send(note)
-                self.log(
-                    "delegate",
-                    f"wake call returned for task {task_id}: {str(result)[:300]}",
-                )
-            except Exception as error:
-                import traceback
-                trace = traceback.format_exc().strip().splitlines()
-                self.log(
-                    "delegate",
-                    f"could not wake the model for task {task_id}: {type(error).__name__}: {error}",
-                )
-                for line in trace[-14:]:
-                    self.log("delegate", f"  {line}")
-            return
-
-        self.log("delegate", f"pushing completion notice for task {task_id}")
-        try:
-            if not self.channel._chain_idle.is_set():
-                await self.channel._chain_idle.wait()
-            await self.channel.push({"role": "assistant", "content": note}, defer=True)
-        except Exception as error:
-            self.log("delegate", f"could not announce task {task_id}: {error}")
+            for line in trace[-12:]:
+                self.log("delegate", f"  {line}")
 
     async def _execute(self, task, prompt, model, history):
         """run the task inside the delegation context.
