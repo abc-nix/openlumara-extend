@@ -34,6 +34,7 @@ from .runner import DelegateRunner, DelegateCancelled
 TOOL_NEW = "delegate_new"
 TOOL_SEND = "delegate_send"
 TOOL_LIST = "delegate_list"
+TOOL_READ = "delegate_read"
 
 DELEGATE_PREAMBLE = (
     "\n\n# Delegation\n"
@@ -87,6 +88,13 @@ class Delegate(core.module.Module):
             task.cancel()
         self._background.clear()
 
+    @staticmethod
+    def _as_bool(value):
+        """tool arguments arrive as JSON: tolerate real bools and the usual strings"""
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in ("1", "true", "yes", "on", "background")
+
     def _call_chain(self):
         """debug: the immediate Python callers of a tool call.
 
@@ -102,7 +110,7 @@ class Delegate(core.module.Module):
 
     # ------------------------------------------------------------------ tools
     @core.module.tool(bypass_timeout=True)
-    async def new(self, prompt: str, title: str = "", model: str = "") -> dict:
+    async def new(self, prompt: str, title: str = "", model: str = "", background: bool = False) -> dict:
         """Delegate a self-contained task to a separate AI session with its own context.
 
         The delegate sees this chat's system prompt but none of its history, so the
@@ -111,17 +119,19 @@ class Delegate(core.module.Module):
         task_id: the user can watch it live in the delegate panel, and you can
         continue the same conversation later with delegate_send(task_id, ...).
 
-        This call blocks until the delegate finishes; its final answer is the result.
+        This call blocks until the delegate finishes and returns its final answer, unless `background=True`, which returns at once with status running.
 
         Args:
             prompt: the task, written self-contained (the delegate cannot see this chat).
             title: short display label for the panel and task list. Derived from the prompt when empty.
             model: model to run the delegate on. Defaults to the current model; must be one of the available models.
+            background: return immediately with status running instead of waiting for the run (default False). The run continues in the background; check it with delegate_list or read it in the panel.
 
         Returns:
-            {task_id, status, model, rounds, result}
+            {task_id, status, model, rounds, result} - or {task_id, status: "running", background: true} when background=True
         """
         self.log("delegate", f"new: called via {self._call_chain()}")
+        background = self._as_bool(background)
 
         prompt = (prompt or "").strip()
         if not prompt:
@@ -148,10 +158,10 @@ class Delegate(core.module.Module):
         system_prompt = await self._system_prompt()
         history = [{"role": "system", "content": system_prompt}] if system_prompt else []
 
-        return await self._execute_or_detach(task, prompt, model_name, history)
+        return await self._execute_or_detach(task, prompt, model_name, history, background)
 
     @core.module.tool(bypass_timeout=True)
-    async def send(self, task_id: str, prompt: str, model: str = "") -> dict:
+    async def send(self, task_id: str, prompt: str, model: str = "", background: bool = False) -> dict:
         """Continue a delegated task: a follow-up message in the same conversation.
 
         The delegate resumes with its full stored context (every message and tool
@@ -163,10 +173,12 @@ class Delegate(core.module.Module):
             task_id: id of the task, as returned by delegate_new (for example "01AB3F7G").
             prompt: the follow-up request.
             model: switch the task to another model. Defaults to the model the task already uses.
+            background: return immediately with status running instead of waiting for the run (default False); the run continues in the background.
 
         Returns:
-            {task_id, status, model, rounds, result}
+            {task_id, status, model, rounds, result} - or {task_id, status: "running", background: true} when background=True
         """
+        background = self._as_bool(background)
         prompt = (prompt or "").strip()
         if not prompt:
             return self.result("prompt must not be blank", success=False)
@@ -218,7 +230,7 @@ class Delegate(core.module.Module):
         self.store.update(identifier, status="running", last_error=None)
 
         return await self._execute_or_detach(
-            task, prompt, model_name or task.get("model") or None, history
+            task, prompt, model_name or task.get("model") or None, history, background
         )
 
     @core.module.tool()
@@ -271,6 +283,53 @@ class Delegate(core.module.Module):
             "truncated": len(matched) > limit,
         })
 
+    @core.module.tool()
+    async def read(self, task_id: str, chars: int = 4000) -> dict:
+        """Read a delegated task's final answer (its last assistant message).
+
+        Use this to collect a run that was started with background=True or was
+        detached from its tool call - no panel and no file access needed. It also
+        reports the task's current status, so it can be polled while it runs.
+
+        Args:
+            task_id: id of the task, as returned by delegate_new / delegate_list.
+            chars: return only the last N characters of the answer (default 4000, max 40000); 0 returns it whole.
+
+        Returns:
+            {task_id, status, model, rounds, result, truncated}
+        """
+        task = self.store.find(task_id)
+        if task is None:
+            return self.result(f"no delegate task with id '{task_id}'", success=False)
+
+        messages, dropped = repair(self.store.load(task["id"]))
+        answer = ""
+        for message in reversed(messages):
+            if message.get("role") == "assistant" and str(message.get("content") or "").strip():
+                answer = str(message.get("content"))
+                break
+
+        try:
+            limit = int(chars)
+        except (TypeError, ValueError):
+            limit = 4000
+        limit = max(0, min(40000, limit))
+
+        truncated = False
+        if limit and len(answer) > limit:
+            answer = answer[-limit:]
+            truncated = True
+
+        return self.result({
+            "task_id": task["id"],
+            "status": task.get("status") or "",
+            "model": task.get("model") or "",
+            "rounds": task.get("rounds") or 0,
+            "result": answer,
+            "truncated": truncated,
+            "dropped": dropped,
+        })
+
     # ------------------------------------------------------------- execution
     def _timeout_limit(self):
         """the deadline core will put on this tool call (it reads the same value)"""
@@ -279,13 +338,25 @@ class Delegate(core.module.Module):
         except Exception:
             return 10.0
 
-    async def _execute_or_detach(self, task, prompt, model, history):
+    async def _execute_or_detach(self, task, prompt, model, history, background=False):
         task_id = task["id"]
         self._active_task = task_id      # claimed before the task is scheduled
 
         work = asyncio.create_task(self._execute(task, prompt, model, history))
         self._background.add(work)
         work.add_done_callback(self._background.discard)
+
+        if background:
+            self.log("delegate", f"task {task_id} started in the background; returning at once")
+            return self.result({
+                "task_id": task_id,
+                "status": "running",
+                "background": True,
+                "note": (
+                    "started in the background; it keeps running and the panel shows it "
+                    "live. Check it with delegate_list, or open the task."
+                ),
+            })
 
         # Block normally, and keep blocking through the caller's deadline while
         # the run is showing tool activity - a tool-active run is not cut in
@@ -560,18 +631,24 @@ class Delegate(core.module.Module):
             "- A run that outlives the caller's tool deadline comes back as `{task_id, status: "
             "\"running\", detached: true}` instead of the final text. It keeps running in the "
             "background: check it with `delegate_list`, read it in the delegate panel, or "
-            "`delegate_send` once it is done.\n"
+            "`delegate_send` once it is done. `delegate_read(task_id)` returns its final answer. "
+            "Pass `background=True` to skip the wait entirely and get the task id at once.\n"
             "Delegated tasks inherit your tools."
         )
 
     def on_tool_summary(self, name, args, response):
         """one-line hint for the collapsed tool card: id · rounds · status"""
-        if name not in (TOOL_NEW, TOOL_SEND, TOOL_LIST):
+        if name not in (TOOL_NEW, TOOL_SEND, TOOL_LIST, TOOL_READ):
             return ""
 
         payload = response.get("content") if isinstance(response, dict) else None
         if not isinstance(payload, dict):
             return ""
+
+        if name == TOOL_READ:
+            text = str(payload.get("result") or "")
+            status = str(payload.get("status") or "?")
+            return f"{status} · {len(text)} chars" if text else status
 
         if name == TOOL_LIST:
             count = payload.get("count")
