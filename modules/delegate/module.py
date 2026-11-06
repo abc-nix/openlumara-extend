@@ -502,7 +502,17 @@ class Delegate(core.module.Module):
                 # The slot a user steering message uses: the running chain drains
                 # it at its next tool-round boundary, and if that turn ends first
                 # the continuation loops answer it as a fresh turn.
-                await self.channel.queue_steering_message(note)
+                # The web UI shows queued steering as a waiting pill, but that
+                # event is only broadcast by ws_manager.start_stream() - a
+                # module-side queue has to send it itself, or the notice waits
+                # invisibly.
+                descriptor = await self.channel.queue_steering_message(note)
+                manager = getattr(self.channel, "websocket_manager", None)
+                if descriptor and manager is not None:
+                    await manager.broadcast({
+                        "type": "queue_queued",
+                        "messages": [descriptor],
+                    })
             elif route == policy.START_TURN:
                 await self._start_turn(note)
             else:
