@@ -10,11 +10,11 @@ that subagents cannot do:
   * the same conversation can be continued later with delegate_send(task_id,
     ...), replaying the full stored context instead of re-summarising it.
 
-A run normally blocks the calling turn: the delegate's final message is returned
-as the tool result. `background=True` returns at once instead (`{task_id,
-status: "running"}`); a run that has never called a tool detaches by itself when the
-caller's tool deadline approaches, so the call can return `running` instead of
-waiting out the generation, while a run that HAS used a tool keeps blocking.
+A run normally blocks the calling turn until it finishes: the delegate's final
+message is returned as the tool result. `background=True` returns at once instead
+(`{task_id, status: "running"}`). Nothing detaches, and nothing cuts the call: the
+delegate tools carry `bypass_timeout`, and core's tools_call bridge now honours the
+proxied tool's flag too (local core patch, see the handoff note).
 Background runs are capped
 (`max_background_tasks`, default 1) and must use the chat's current model: core
 keeps its model pointer on the run's model for the run's whole life, so another
@@ -75,11 +75,11 @@ class Delegate(core.module.Module):
             "default": 1,
             "min": 1,
             "max": 10,
-            "description": "How many delegated tasks may run in the background at once (1 = one). A background request beyond this is refused with a message to run it in the foreground; a run that would detach at the tool deadline waits for a free slot instead. Background runs are limited to the chat's current model.",
+            "description": "How many delegated tasks may run in the background at once (1 = one). A background request beyond this is refused with a message to run it in the foreground. Background runs are limited to the chat's current model.",
         },
         "verbose_logs": {
             "default": False,
-            "description": "Log the delegate's diagnostics: timings, the Python call chain, detach decisions, per-round notes and the live-feed route. Off keeps one line per run (task id, title, model, foreground/background) plus real errors.",
+            "description": "Log the delegate's diagnostics: timings, the Python call chain, the announce route, per-round notes and the live-feed route. Off keeps one line per run (task id, title, model, foreground/background) plus real errors.",
         },
         "font_scale": {
             "type": "number",
@@ -92,7 +92,7 @@ class Delegate(core.module.Module):
         "announce_completion": {
             "type": "select",
             "default": "Push",
-            "description": "What happens when a background or detached delegated task finishes. Inline runs are unaffected: their answer was already returned.",
+            "description": "What happens when a background delegated task finishes. Inline (foreground) runs are unaffected: their answer was already returned.",
             "options": {
                 "Off": "Do nothing. The task just shows as done in the panel.",
                 "Push": "Add a one-line notice to the chat. The model sees it at its next turn and can call delegate_read for the answer. Never starts a turn.",
@@ -116,7 +116,7 @@ class Delegate(core.module.Module):
         self.store.mark_stale()
 
     async def on_shutdown(self):
-        # a module reload must not leave a detached run writing into a dead store
+        # a module reload must not leave a background run writing into a dead store
         for task in list(self._background):
             task.cancel()
         self._background.clear()
@@ -129,7 +129,7 @@ class Delegate(core.module.Module):
         return str(value or "").strip().lower() in ("1", "true", "yes", "on", "background")
 
     def _verbose(self):
-        """log the diagnostics (timings, call chains, detach decisions)?"""
+        """log the diagnostics (timings, call chains, announce routes)?"""
         return bool(self.config.get("verbose_logs", False))
 
     def _debug(self, message):
@@ -234,7 +234,7 @@ class Delegate(core.module.Module):
         system_prompt = await self._system_prompt()
         history = [{"role": "system", "content": system_prompt}] if system_prompt else []
 
-        return await self._execute_or_detach(task, prompt, model_name, history, background)
+        return await self._start_run(task, prompt, model_name, history, background)
 
     @core.module.tool(bypass_timeout=True)
     async def send(self, task_id: str, prompt: str, model: str = "", background: bool = False) -> dict:
@@ -299,7 +299,7 @@ class Delegate(core.module.Module):
         self.store.update(identifier, status="running", last_error=None)
         self.log("delegate", self._run_label(task, background))
 
-        return await self._execute_or_detach(
+        return await self._start_run(
             task, prompt, model_name or task.get("model") or None, history, background
         )
 
@@ -377,14 +377,7 @@ class Delegate(core.module.Module):
         })
 
     # ------------------------------------------------------------- execution
-    def _timeout_limit(self):
-        """the deadline core will put on this tool call (it reads the same value)"""
-        try:
-            return float(core.config.get("core", "tool_timeout", default=10.0))
-        except Exception:
-            return 10.0
-
-    async def _execute_or_detach(self, task, prompt, model, history, background=False):
+    async def _start_run(self, task, prompt, model, history, background=False):
         task_id = task["id"]
 
         # authoritative start policy: `new`/`send` pre-check it for a clean error,
@@ -419,34 +412,15 @@ class Delegate(core.module.Module):
                 ),
             })
 
-        # Block normally. A run that has made a tool call keeps blocking for as
-        # long as it needs: it is the caller's foreground work and must not be
-        # turned into a background run behind their back. Only a run with NO tool
-        # call at all detaches, one second before the caller's deadline, so its
-        # call can return `running` instead of waiting out the generation - and
-        # only while a background slot is free. The cap is hard: with no slot the
-        # call keeps holding and re-checks every second, so it can take the moment
-        # one frees up.
-        limit = self._timeout_limit()
-        deadline = time.monotonic() + max(2.0, limit - 1.0)
-
+        # Foreground: block until the run finishes. Nothing cuts this call any more
+        # - the delegate tools carry bypass_timeout, and the tools_call bridge now
+        # honours the proxied tool's flag too - so there is no deadline to dance
+        # around and nothing detaches.
         try:
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining > 0:
-                    try:
-                        return await asyncio.wait_for(asyncio.shield(work), timeout=remaining)
-                    except asyncio.TimeoutError:
-                        pass        # the slice elapsed: is the run still active?
-
-                quiet = self.runner.seconds_since_tool(task_id)
-                slots = policy.slots_left(self._max_background(), self._bg_runs)
-                if policy.should_detach(quiet, slots):
-                    break       # tool-less run and a free slot: detach before the deadline
-                deadline = time.monotonic() + 1.0   # tool in flight / no slot: hold
+            return await asyncio.shield(work)
         except asyncio.CancelledError:
             if not work.cancelled():
-                raise           # the caller was cancelled (deadline cut), not a stop
+                raise           # the caller was cancelled; the run stays shielded
             # the panel's stop cancelled the run: report it as a definite outcome
             # instead of handing the caller a bare cancellation
             current = self.store.find(task_id) or task
@@ -456,23 +430,6 @@ class Delegate(core.module.Module):
                 "stopped": True,
                 "note": "the user stopped this run from the delegate panel",
             })
-
-        self._debug(f"task {task_id} at the tool deadline with no tool call; detached")
-        self._bg_runs[task_id] = work
-        work.add_done_callback(lambda _done, tid=task_id: self._bg_runs.pop(tid, None))
-        announce = asyncio.create_task(self._announce(task_id, work))
-        self._background.add(announce)
-        announce.add_done_callback(self._background.discard)
-        return self.result({
-            "task_id": task_id,
-            "status": "running",
-            "detached": True,
-            "note": (
-                "the run is still going; it keeps running in the background and the "
-                "panel shows it live. Use delegate_list to check it, or open the task; "
-                "delegate_send on it is refused until it finishes."
-            ),
-        })
 
     def _announce_mode(self):
         """`announce_completion`: Off / Push / Wake (see the module settings)"""
@@ -486,7 +443,7 @@ class Delegate(core.module.Module):
             return "push"
 
     async def _announce(self, task_id, work):
-        """push a one-line notice when a detached / background run finishes.
+        """push a one-line notice when a background run finishes.
 
         Only the status and the size travel - never the answer. The transcript
         keeps the text and `delegate_read` fetches it when it is actually wanted,
@@ -871,11 +828,9 @@ class Delegate(core.module.Module):
             "so an id can be recovered instead of asking the user.\n"
             "- `delegate_new`, `delegate_send` and `delegate_list` are preloaded tools: call them "
             "directly by name, not through `tools_call`.\n"
-            "- A run that outlives the caller's tool deadline comes back as `{task_id, status: "
-            "\"running\", detached: true}` instead of the final text. It keeps running in the "
-            "background: check it with `delegate_list`, read it in the delegate panel, or "
-            "`delegate_send` once it is done. `delegate_read(task_id)` returns its final answer. "
-            "Pass `background=True` to skip the wait entirely and get the task id at once.\n"
+            "- A foreground run blocks until it finishes and returns the answer. Pass "
+            "`background=True` to skip the wait entirely and get the task id at once; then "
+            "`delegate_read(task_id)` returns the final answer, or open the task in the panel.\n"
             "- `background=True` needs a free background slot (`max_background_tasks`, default 1) "
             "and the chat's current model; a refusal names the reason, and retrying without "
             "`background` runs the task in the foreground. While a background task runs you can "

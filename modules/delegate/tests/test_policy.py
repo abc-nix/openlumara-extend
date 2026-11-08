@@ -25,7 +25,6 @@ from delegate.policy import (  # noqa: E402
     announce_delivery,
     running_count,
     same_model,
-    should_detach,
     slots_left,
     start_refusal,
 )
@@ -90,21 +89,6 @@ class StartRefusalTest(unittest.TestCase):
         # both rules broken: the message names the cap (the actionable one)
         message = start_refusal(True, 1, {"a": 1}, "qwen3.5-9b", "gemma-4-31b-it-qat")
         self.assertIn("slot", message)
-
-
-class ShouldDetachTest(unittest.TestCase):
-    def test_no_slot_never_detaches(self):
-        self.assertFalse(should_detach(None, 0))
-
-    def test_a_tool_less_run_detaches_with_a_slot(self):
-        self.assertTrue(should_detach(None, 1))
-        self.assertTrue(should_detach(None, 3))
-
-    def test_any_tool_call_in_the_run_keeps_it_blocking(self):
-        # not "in the last second": one tool call anywhere in the run is enough
-        self.assertFalse(should_detach(0.2, 1))
-        self.assertFalse(should_detach(30.0, 1))
-        self.assertFalse(should_detach(600.0, 3))
 
 
 class AnnounceDeliveryTest(unittest.TestCase):
