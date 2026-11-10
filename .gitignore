@@ -1,5 +1,6 @@
 __pycache__/
 tests/
+modules/*/tests/
 *.py[cod]
 *.bak
 *~
