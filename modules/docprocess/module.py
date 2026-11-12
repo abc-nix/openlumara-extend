@@ -16,7 +16,7 @@ try:
     from . import extras as _extras
 except Exception:                                   # pragma: no cover
     _extras = None
-from .htmlmd import html_tables_to_md
+from .htmlmd import html_tables_to_md, unescape_angles
 
 # webui extension routes (@_ui_route -> /api/ext/docprocess/...). Guarded so
 # the offline core-stub harnesses (tmp/docprocess) keep working without a webui.
@@ -340,7 +340,8 @@ class DocProcess(core.module.Module):
         notable = [l for l in job["log"]
                    if any(k in l for k in ("tier", "SKIPPED", "WATCHDOG",
                                            "vlm usage", "cropbox", "raster plan", "audit",
-                                           "stylefix", "textfix", "extras", "fields"))]
+                                           "stylefix", "textfix", "extras", "fields",
+                                           "office"))]
         if notable:
             line += "\n" + "\n".join(notable[-5:])
         if job["include_content"]:
@@ -413,18 +414,14 @@ class DocProcess(core.module.Module):
                         log=log)
             else:
                 import mimetypes
-                tier = job["mode"] if job["mode"] in ("tesseract", "paddle", "off") else "tesseract"
+                # Not a PDF: no ladder, no OCR tier, no page rasters. xberg reads
+                # Office/text formats natively, so the only relevant knobs are
+                # the output format and the timeout (pipeline.build_office_config).
                 if job["mode"] in ("auto", "vlm"):
-                    log(f"ladder/vlm modes are PDF-only; this document uses the '{tier}' tier")
-                from xberg import ExtractInput, extract
-                inp = ExtractInput(kind="bytes", bytes=data,
-                                   filename=os.path.basename(job["input"]),
-                                   mime_type=mimetypes.guess_type(job["input"])[0])
-                cfg = pipeline.build_config(tier, timeout, langs, force_ocr)
-                import asyncio as aio
-                out_obj = await aio.wait_for(extract(inp, cfg), timeout=timeout)
-                docs = getattr(out_obj, "results", None) or []
-                res = pipeline.summarize(docs[0], time.monotonic()) if docs else None
+                    log("ladder/vlm modes are PDF-only; this file is read as an office document")
+                res = await pipeline.extract_office(
+                    data, os.path.basename(job["input"]),
+                    mimetypes.guess_type(job["input"])[0], timeout, log)
 
             if not res or not res["markdown"].strip():
                 job["status"], job["error"] = "error", "extraction produced no content"
@@ -433,6 +430,10 @@ class DocProcess(core.module.Module):
             content = html_tables_to_md(
                 res["markdown"].strip(),
                 mode=str(self.config.get("html_tables") or "convert"))
+            if not job["is_pdf"]:
+                # office documents carry real inline markup (<u>, <w:br> ...);
+                # unescaping it here is a render fix, not a PDF concern
+                content = unescape_angles(content)
             if self.config.get("fix_text", True):
                 content = textfix.repair(content,
                                          pdf_bytes=data if job["is_pdf"] else None,

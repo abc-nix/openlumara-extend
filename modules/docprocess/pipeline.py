@@ -140,6 +140,39 @@ def assemble_pages(doc, data, log=lambda m: None):
     return "\n\n".join(parts)
 
 
+def build_office_config(timeout=240):
+    """xberg config for Office/text formats: markdown, and NO OCR.
+
+    An Office document is not a scan; routing it through the tesseract tier (what
+    the module used to do) only produced a misleading log line and applied a
+    page-OCR pipeline to a file that has no pages. Embedded raster images are
+    left alone: OCR'ing them is a separate decision (extract_images /
+    ocr_embedded_images), and for a text document it is noise.
+    """
+    from xberg import ExtractionConfig, OcrConfig
+    return ExtractionConfig(output_format="markdown",
+                            extraction_timeout_secs=int(timeout),
+                            ocr=OcrConfig(enabled=False))
+
+
+async def extract_office(data, filename, mime_type, timeout,
+                         log=lambda m: None):
+    """Extract a non-PDF document (docx/odt/doc/xlsx/pptx/html/...) to markdown."""
+    from xberg import ExtractInput, extract
+    inp = ExtractInput(kind="bytes", bytes=data, filename=filename,
+                       mime_type=mime_type)
+    cfg = build_office_config(timeout)
+    t0 = time.monotonic()
+    out = await asyncio.wait_for(extract(inp, cfg), timeout=timeout + 5)
+    docs = getattr(out, "results", None) or []
+    if not docs:
+        raise RuntimeError(f"xberg returned no documents (file={filename})")
+    res = summarize(docs[0], t0)
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "?")[:6].lower()
+    log(f"office .{ext}: {res['chars']}ch method={res['method']} {res['secs']}s")
+    return res
+
+
 async def extract_pdf(data, mode, timeout, languages, force_ocr,
                       vlm=None, images=None, plan=None, layout_tables=True,
                       field_tables=True, log=lambda m: None):

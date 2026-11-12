@@ -79,6 +79,19 @@ def _to_md(rows):
     return "\n".join(out)
 
 
+def unescape_angles(text):
+    """Restore `<` and `>` that xberg escaped, for office documents only.
+
+    Word's underline arrives in the extracted markdown as `\\<u\\>Section B\\</u\\>`
+    (escape_markdown protects angle brackets), which is not markup a reader can
+    see: it prints as a literal backslash-tag. In a PDF those brackets are
+    noise, but in an Office document they are real inline markup, and unescaping
+    them yields `<u>Section B</u>`, which markdown renders as intended. Only the
+    angle brackets are touched - the pipe/asterisk escapes stay escaped.
+    """
+    return (text or "").replace("\\<", "<").replace("\\>", ">")
+
+
 _TABLE_RE = re.compile(r"<table\b.*?</table>", re.S | re.I)
 
 
