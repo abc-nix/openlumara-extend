@@ -37,6 +37,13 @@ def _ui_route(path, method="GET"):
 _CONVERT_FORMATS = {"markdown": ".md", "plain": ".txt"}
 _MODES = ("auto", "tesseract", "paddle", "vlm", "off")
 
+# Uploaded files this module takes over from core's fallback. Core's branch for
+# anything that is neither image/audio/PDF is `file_data.decode('utf-8')`, so a
+# docx reached the model as "[Binary file: name.docx]" - a filename and nothing
+# else. Deliberately a whitelist (html and md are left to core for now, and
+# images/audio keep their native blocks).
+_OFFICE_EXTS = {"docx", "doc", "odt", "rtf", "xlsx", "xls", "ods", "pptx", "odp"}
+
 
 class DocProcess(core.module.Module):
     """
@@ -469,8 +476,14 @@ class DocProcess(core.module.Module):
         or failed -> built-in extractor handles it untouched."""
         if not self.config.get("enabled"):
             return None
-        if not (file_data[:4] == b"%PDF" or b"%PDF" in file_data[:1024]):
+        import os
+        ext = os.path.splitext(filename)[1].lower().lstrip(".")
+        is_pdf = file_data[:4] == b"%PDF" or b"%PDF" in file_data[:1024]
+        if not is_pdf and ext not in _OFFICE_EXTS:
             return None
+        if not is_pdf:
+            return await self._office_block(filename, file_data, ext,
+                                            bool(self.config.get("debug")))
         limit = float(self.config.get("max_size_mb") or 0)
         if limit > 0 and len(file_data) > limit * 1048576:
             self.channel.log(self.name, f"'{filename}': {len(file_data)/1048576:.1f}MB over max_size_mb, using built-in extractor")
@@ -541,6 +554,54 @@ class DocProcess(core.module.Module):
             return None
         except Exception as e:
             self.channel.log(self.name, f"'{filename}': {type(e).__name__}: {str(e)[:200]} - using built-in extractor")
+            return None
+
+    async def _office_block(self, filename: str, file_data: bytes, ext: str,
+                            debug: bool):
+        """Turn an uploaded Office document into a text block for the chat.
+
+        Same contract as the PDF takeover: return None on ANY doubt or failure so
+        core's own handler still gets a chance (today that handler answers
+        "[Binary file: …]" for a docx, i.e. the model sees a filename and no
+        content). Series profiles are not applied - their matches() read PDF
+        metadata (producer/creator/fonts) that an Office file does not carry.
+        """
+        limit = float(self.config.get("max_size_mb") or 0)
+        if limit > 0 and len(file_data) > limit * 1048576:
+            self.channel.log(self.name,
+                             f"'{filename}': {len(file_data) / 1048576:.1f}MB over max_size_mb, using built-in extractor")
+            return None
+        log = ((lambda m: self.channel.log(self.name, m)) if debug
+               else (lambda m: None))
+        timeout = float(self.config.get("timeout_seconds") or 240)
+        try:
+            import mimetypes
+            res = await pipeline.extract_office(
+                file_data, filename, mimetypes.guess_type(filename)[0], timeout, log)
+            content = html_tables_to_md(
+                res["markdown"].strip(),
+                str(self.config.get("html_tables") or "convert"))
+            content = unescape_angles(content)
+            if content and self.config.get("fix_text", True):
+                # pdf_bytes=None: no reference text layer, so only the structural
+                # repairs run (punctuation, paragraph merge, quotes)
+                content = textfix.repair(content, pdf_bytes=None, log=log)
+            if not content:
+                self.channel.log(self.name,
+                                 f"'{filename}': office conversion produced no content, using built-in extractor")
+                return None
+            self.channel.log(self.name,
+                             f"'{filename}': office .{ext} method={res['method']} "
+                             f"{res['secs']}s {res['chars']}ch")
+            return {"type": "text",
+                    "text": f"File: {filename}\n\n```markdown\n{content}\n```"}
+        except asyncio.TimeoutError:
+            self.channel.log(self.name,
+                             f"'{filename}': timed out after {timeout}s, using built-in extractor")
+            return None
+        except Exception as e:
+            self.channel.log(self.name,
+                             f"'{filename}': {type(e).__name__}: {str(e)[:200]} - using built-in extractor")
             return None
 
     # -------------------------
