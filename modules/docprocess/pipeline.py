@@ -103,9 +103,46 @@ def summarize(doc, t0):
             "secs": round(time.monotonic() - t0, 2)}
 
 
+def assemble_pages(doc, data, log=lambda m: None):
+    """Rebuild the document page by page, using pdffields where it proves a form.
+
+    Returns None (the caller keeps xberg's own markdown) unless at least one page
+    was rebuilt: a page that pdffields refuses must keep exactly what the
+    converter produced, and joining pages for nothing would change the output of
+    every prose document and scan. Pages that are kept are joined behind a
+    `<!-- page N/M -->` marker, so a multi-page document stops being one
+    undifferentiated stream.
+    """
+    try:
+        from . import pdffields
+    except Exception as e:
+        log(f"fields: pdffields unavailable ({type(e).__name__}: {e})")
+        return None
+    pages = list(getattr(doc, "pages", None) or [])
+    if not pages:
+        return None
+    rebuilt, parts = 0, []
+    for i, page in enumerate(pages):
+        text = (getattr(page, "content", "") or "").strip()
+        tables = None
+        try:
+            tables = pdffields.page_markdown(data, i)
+        except Exception as e:
+            log(f"fields: page {i+1} skipped ({type(e).__name__}: {str(e)[:120]})")
+        if tables:
+            text = tables
+            rebuilt += 1
+        if text:
+            parts.append(f"<!-- page {i+1}/{len(pages)} -->\n\n{text}")
+    if not rebuilt:
+        return None
+    log(f"fields: {rebuilt}/{len(pages)} page(s) rebuilt as field tables")
+    return "\n\n".join(parts)
+
+
 async def extract_pdf(data, mode, timeout, languages, force_ocr,
                       vlm=None, images=None, plan=None, layout_tables=True,
-                      log=lambda m: None):
+                      field_tables=True, log=lambda m: None):
     from xberg import ExtractInput, extract
     inp = ExtractInput(kind="bytes", bytes=data, mime_type="application/pdf")
     cfg = build_config(mode, timeout, languages, force_ocr, layout_tables,
@@ -116,6 +153,11 @@ async def extract_pdf(data, mode, timeout, languages, force_ocr,
     if not docs:
         raise RuntimeError(f"xberg returned no documents (mode={mode})")
     res = summarize(docs[0], t0)
+    if field_tables:
+        md = assemble_pages(docs[0], data, log)
+        if md:
+            res["markdown"] = md
+            res["chars"] = len(md)
     log(f"tier {mode}: {res['chars']}ch method={res['method']} "
         f"q={res['quality']:.3f} {res['secs']}s")
     return res
@@ -138,12 +180,13 @@ def vlm_watchdog(usage, log=lambda m: None):
 
 
 async def extract_ladder(data, timeout, languages, force_ocr,
-                         vlm=None, images=None, plan=None, log=lambda m: None):
+                         vlm=None, images=None, plan=None,
+                         field_tables=True, log=lambda m: None):
     """auto: tesseract tier -> quality floor -> (vlm if configured & budget)
     -> paddle+layout tier. Returns best summary dict found."""
     t_start = time.monotonic()
     best = await extract_pdf(data, "tesseract", timeout, languages, force_ocr,
-                             log=log)
+                             field_tables=field_tables, log=log)
     if best["quality"] >= QUALITY_FLOOR:
         return best
     try:
@@ -162,7 +205,7 @@ async def extract_ladder(data, timeout, languages, force_ocr,
                 log(f"escalating to vlm ({vlm['model']})")
                 v = await extract_pdf(data, "vlm", remaining, languages,
                                       True, vlm=vlm, images=images, plan=plan,
-                                      log=log)
+                                      field_tables=field_tables, log=log)
                 vlm_watchdog(v["usage"], log)
                 if v["chars"]:
                     return v
@@ -177,7 +220,7 @@ async def extract_ladder(data, timeout, languages, force_ocr,
     log(f"escalating to paddle+layout ({remaining:.0f}s budget, {pages} pages)")
     try:
         return await extract_pdf(data, "paddle", remaining, languages, force_ocr,
-                                 log=log)
+                                 field_tables=field_tables, log=log)
     except Exception as e:
         log(f"paddle tier failed: {type(e).__name__}: {str(e)[:200]}")
         return best

@@ -81,6 +81,10 @@ class DocProcess(core.module.Module):
             "type": "boolean", "default": True,
             "description": "PaddleOCR tier: detect table layout and output real markdown tables.",
         },
+        "field_tables": {
+            "type": "boolean", "default": True,
+            "description": "Rebuild printed forms as label/value tables from the page's own geometry (pypdf spans), instead of the flat prose the converter produces. Only pages whose layout proves a field grid are rebuilt; every other page keeps its normal markdown. Needs a text layer, so scans are unaffected.",
+        },
         "html_tables": {
             "type": "text", "default": "convert",
             "description": "convert|keep: turn HTML tables in VLM output into pipe tables.",
@@ -336,7 +340,7 @@ class DocProcess(core.module.Module):
         notable = [l for l in job["log"]
                    if any(k in l for k in ("tier", "SKIPPED", "WATCHDOG",
                                            "vlm usage", "cropbox", "raster plan", "audit",
-                                           "stylefix", "textfix", "extras"))]
+                                           "stylefix", "textfix", "extras", "fields"))]
         if notable:
             line += "\n" + "\n".join(notable[-5:])
         if job["include_content"]:
@@ -391,16 +395,21 @@ class DocProcess(core.module.Module):
                     if job["mode"] == "vlm":
                         res = await pipeline.extract_pdf(
                             data, "vlm", timeout, langs, True,
-                            vlm=vlm, images=images, plan=plan, log=log)
+                            vlm=vlm, images=images, plan=plan,
+                            field_tables=bool(self.config.get("field_tables", True)),
+                            log=log)
                         pipeline.vlm_watchdog(res["usage"], log)
                     else:
                         res = await pipeline.extract_ladder(
                             data, timeout, langs, force_ocr,
-                            vlm=vlm, images=images, plan=plan, log=log)
+                            vlm=vlm, images=images, plan=plan,
+                            field_tables=bool(self.config.get("field_tables", True)),
+                            log=log)
                 else:
                     res = await pipeline.extract_pdf(
                         data, job["mode"], timeout, langs, force_ocr,
                         layout_tables=bool(self.config.get("layout_tables")),
+                        field_tables=bool(self.config.get("field_tables", True)),
                         log=log)
             else:
                 import mimetypes
@@ -498,17 +507,22 @@ class DocProcess(core.module.Module):
                         return None
                     res = await pipeline.extract_pdf(data, "vlm", timeout, langs,
                                                      True, vlm=vlm, images=images,
-                                                     plan=plan, log=log)
+                                                     plan=plan,
+                                                     field_tables=bool(self.config.get("field_tables", True)),
+                                                     log=log)
                     pipeline.vlm_watchdog(res["usage"], log)
                 else:
                     res = await pipeline.extract_ladder(data, timeout, langs,
                                                        bool(self.config.get("force_ocr")),
                                                        vlm=vlm, images=images,
-                                                       plan=plan, log=log)
+                                                       plan=plan,
+                                                       field_tables=bool(self.config.get("field_tables", True)),
+                                                       log=log)
             else:
                 res = await pipeline.extract_pdf(
                     data, mode, timeout, langs, bool(self.config.get("force_ocr")),
-                    layout_tables=bool(self.config.get("layout_tables")), log=log)
+                    layout_tables=bool(self.config.get("layout_tables")),
+                    field_tables=bool(self.config.get("field_tables", True)), log=log)
 
             content = html_tables_to_md(res["markdown"].strip(),
                                         str(self.config.get("html_tables") or "convert"))
