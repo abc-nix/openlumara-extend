@@ -940,6 +940,7 @@ const LIBRETA_VIEW = {
     savedAt: 0,
     caret: "",             // "line:col" of the caret — Code mode readout in the doc bar
     goto: { open: false, value: "", error: "" },   // Ctrl+Alt+G palette
+    fitTabs: true,         // browser pref: tabs share the strip instead of their full name
     _silent: false,        // true while swapping docs / resetting buffers
     quick: { open: false, query: "", idx: 0, files: [], loadedFor: "", loadedAt: 0, ws: "", loading: false, error: "" },
 
@@ -992,6 +993,7 @@ const LIBRETA_VIEW = {
     /* ---- persistence ---- */
     restore() {
         this.lineNumbers = lbReadJson("libreta.lineNumbers", true) !== false;
+        this.fitTabs = lbReadJson("libreta.fitTabs", true) !== false;
         this.split = lbReadJson("libreta.split", false) === true;
         const view = lbReadJson(LB_LS.view, "full");
         this.view = LB_VIEWS.indexOf(view) >= 0 ? view : "full";
@@ -1442,6 +1444,17 @@ const LIBRETA_VIEW = {
         const tab = this.activeTab();
         if (!tab) return "";
         return tab.workspace + " / " + (tab.parent ? tab.parent + " / " : "") + tab.name;
+    },
+
+    // fit mode: tabs share the strip and long names ellipsize until the tab
+    // reaches --lb-tab-min; past that the strip scrolls as before. A browser
+    // preference, like line numbers, so no restart and no config key.
+    setFitTabs(on) {
+        this.fitTabs = !!on;
+        lbWriteJson("libreta.fitTabs", this.fitTabs);
+        if (LB_VIEW) {
+            requestAnimationFrame(() => { try { LB_VIEW.requestMeasure(); } catch (e) { /* not mounted */ } });
+        }
     },
 
     /* ---- go to line (Ctrl+Alt+G) + caret readout ---- */

@@ -278,6 +278,16 @@
                         <div class="lb-opt">
                             <label class="lb-opt-row">
                                 <input type="checkbox" class="lb-check"
+                                    :checked="$store.libretaView.fitTabs"
+                                    @change="$store.libretaView.setFitTabs($event.target.checked)">
+                                <span>Fit document tabs</span>
+                            </label>
+                            <div class="lb-opt-hint">Tabs share the tab strip and long names are shortened (the full name stays in the tooltip) until each tab reaches a minimum width; after that the strip scrolls instead of squashing them. A browser preference — applies immediately.</div>
+                        </div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-row">
+                                <input type="checkbox" class="lb-check"
                                     :checked="$store.libretaView.lineNumbers"
                                     @change="$store.libretaView.setLineNumbers($event.target.checked)">
                                 <span>Show line numbers</span>

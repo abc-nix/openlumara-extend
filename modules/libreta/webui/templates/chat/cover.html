@@ -9,7 +9,7 @@
     {# ---------------- document tabs ---------------- #}
     <div class="lb-tabbar" x-show="$store.libretaView.view === 'full'">
         {# only the tab strip scrolls; the bar buttons stay pinned on the right #}
-        <div class="lb-tabs">
+        <div class="lb-tabs" :class="{ fit: $store.libretaView.fitTabs }">
             <template x-for="tab in $store.libretaView.tabs" :key="tab.key">
                 <div class="lb-tab" :class="{ on: tab.key === $store.libretaView.active }"
                     :title="tab.workspace + '/' + tab.path"

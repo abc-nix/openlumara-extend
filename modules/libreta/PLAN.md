@@ -115,6 +115,16 @@ Routes: `workspaces` · `tree` · `read` · `save` · `preview` · `create` ·
    `data/libreta/hotkeys.json` behind a `state/hotkeys` route (same shape as
    `data/libreta/autosave.json`); everything reads through `lbHotkeyMap()`, so
    the swap stays inside that file.
+   - **Rebinding Ctrl+/ (toggle comment) still leaves the old chord working**
+   (reported 2026-11-13, parked). Most likely because `defaultKeymap` also binds
+   `Mod-/` to `toggleComment`, and `lbFilterKeymap()` only filters
+   `searchKeymap` and `foldKeymap`. Fix shape: include a `comment` rule for
+   `defaultKeymap` (pattern `/^(Mod|Ctrl)-\/$/` and the `Shift-` variant), then
+   re-check every action the same way — the general rule is "whatever CM binds
+   for an action we expose must be filtered, not just the two maps we knew
+   about". `Alt-Alt`/`Shift-` variants matter: filter on the key pattern, not on
+   an exact string.
+
 9. **The dirty flag never clears on undo** (reported 2026-11-13): any doc change
    sets `tab.dirty = true` and nothing re-evaluates it, so undoing back to the
    text that is on disk leaves the Save button lit. Fix shape: keep the saved

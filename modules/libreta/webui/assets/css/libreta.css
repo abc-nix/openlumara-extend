@@ -345,7 +345,19 @@ body[data-lb="floating"] .lb-cover {
     font-weight: 600;
 }
 
-.lb-tab-name { overflow: hidden; text-overflow: ellipsis; }
+.lb-tab-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* Fit mode (default, browser pref `libreta.fitTabs`): every tab takes an equal
+   share of the strip and long names ellipsize instead of forcing the strip to
+   scroll. min-width is the floor — once every tab is at the floor the strip
+   scrolls again rather than squashing names into slivers. The title attribute
+   still carries the full workspace/path. */
+.lb-tabs.fit .lb-tab {
+    flex: 1 1 0;
+    min-width: 76px;
+    max-width: 240px;
+}
+.lb-tabs.fit .lb-tab .lb-tab-name { flex: 0 1 auto; min-width: 0; }
 .lb-tab-dot {
     width: 6px;
     height: 6px;
