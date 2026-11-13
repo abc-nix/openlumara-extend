@@ -779,6 +779,45 @@ body[data-lb="floating"] .lb-cover {
 
 .lb-cover .lb-editor--code .cm-lineNumbers .cm-gutterElement { opacity: .75; }
 
+/* fold gutter (code mode only — see LB_COMP.fold in libreta.js) */
+.lb-cover .lb-editor .cm-foldGutter .cm-gutterElement {
+    padding: 0 4px 0 2px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.lb-cover .lb-editor .cm-foldGutter .cm-gutterElement:hover { color: var(--text-primary); }
+
+.lb-cover .lb-editor .cm-foldPlaceholder {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-muted);
+    padding: 0 4px;
+    margin: 0 2px;
+}
+
+/* bracket matching: the engine adds the class, the colours are ours */
+.lb-cover .lb-editor .cm-matchingBracket {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.lb-cover .lb-editor .cm-nonmatchingBracket {
+    background: color-mix(in srgb, var(--error) 25%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--error) 65%, transparent);
+}
+
+/* highlightSelectionMatches: same tint family as the find bar. The inline-code
+   chip paints its own opaque background as a *child*, exactly like .cm-searchMatch
+   (see the comment by that rule), so the chip fill is dropped while matched. */
+.lb-cover .lb-editor .cm-selectionMatch {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-radius: 2px;
+}
+.lb-cover .lb-editor .cm-selectionMatch .cm-atomic-inline-code,
+.lb-cover .lb-editor .cm-selectionMatch.cm-atomic-inline-code {
+    background-color: transparent;
+}
+
 /* notes live preview: the reading column */
 .lb-cover .lb-editor--prose .cm-content {
     max-width: 70ch;

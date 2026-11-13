@@ -244,7 +244,15 @@ let LB_CM6 = null;            // the vendored namespace (window.LibretaCM)
 let LB_VIEW = null;           // one EditorView; documents are swapped per tab
 const LB_STATES = new Map();  // tab key -> EditorState (deliberately outside Alpine's proxy)
 const LB_SCROLL = new Map();  // tab key -> scrollTop
-const LB_COMP = { wrap: null, numbers: null, lang: null, preview: null };
+const LB_COMP = {
+    wrap: null,
+    numbers: null,
+    lang: null,
+    preview: null,
+    fold: null,       // code mode: fold gutter; notes: empty
+    brackets: null,   // code mode: closeBrackets + its keymap
+    codeKeys: null,   // code mode only: Mod-/ toggle comment
+};
 
 function lbLoadScript(src) {
     return new Promise((resolve, reject) => {
@@ -278,6 +286,9 @@ function lbLoadCm6() {
             LB_COMP.numbers = new LB_CM6.Compartment();
             LB_COMP.lang = new LB_CM6.Compartment();
             LB_COMP.preview = new LB_CM6.Compartment();
+            LB_COMP.fold = new LB_CM6.Compartment();
+            LB_COMP.brackets = new LB_CM6.Compartment();
+            LB_COMP.codeKeys = new LB_CM6.Compartment();
         })();
     }
     return LB_CM6_LOAD;
@@ -473,10 +484,17 @@ function lbCm6Extensions() {
         // it. The browser's own ::selection draws above backgrounds.
         CM.highlightActiveLine(),
         CM.libretaHighlight,
+        // brackets light up on the pair around the caret; both modes, because a
+        // stray bracket in prose is just as confusing as in code
+        CM.bracketMatching(),
+        // other occurrences of the current selection, in the find bar's tint
+        CM.highlightSelectionMatches(),
         CM.keymap.of([
             ...CM.defaultKeymap,
             ...CM.historyKeymap,
             ...CM.searchKeymap,   // Mod-f / Mod-g / F3 / Escape while the panel is open
+            ...CM.foldKeymap,     // Ctrl+Shift+[ / ] etc. — no-ops without folding
+            ...CM.closeBracketsKeymap,
             CM.indentWithTab,
             { key: "Mod-s", run: () => { const store = lbStore(); if (store) store.save(); return !!store; } },
         ]),
@@ -507,6 +525,9 @@ function lbCm6Extensions() {
         LB_COMP.numbers.of([]),
         LB_COMP.lang.of([]),
         LB_COMP.preview.of([]),
+        LB_COMP.fold.of([]),
+        LB_COMP.brackets.of([]),
+        LB_COMP.codeKeys.of([]),
     ];
 }
 
@@ -1131,10 +1152,26 @@ const LIBRETA_VIEW = {
         if (!tab) return;
 
         const CM = LB_CM6;
-        const numbers = tab.mode === "notes" ? false : this.lineNumbers;
+        const code = tab.mode !== "notes";
+        const numbers = code ? this.lineNumbers : false;
         const languages = tab.prose ? CM.markdownSupport() : CM.languageForExt(lbExtensionOf(tab.path));
         const preview = this.livePreviewOn()
             ? [CM.inlinePreview({}), CM.tables({}), CM.imageBlocks()]
+            : [];
+
+        // Folding is a code-mode affordance: a prose note has no blocks worth
+        // collapsing, and the gutter would eat width in the reading column.
+        // foldGutter() already brings codeFolding() with it.
+        const fold = code ? CM.foldGutter() : [];
+        // Auto-closing brackets in prose is noise: markdown text is mostly
+        // brackets-as-content, not code to be closed.
+        const brackets = code
+            ? [CM.closeBrackets(), CM.keymap.of([...CM.closeBracketsKeymap])]
+            : [];
+        // Mod-/ only means something where the grammar names its comments;
+        // markdown has no commentTokens, so notes mode gets no binding at all.
+        const codeKeys = code
+            ? CM.keymap.of([{ key: "Mod-/", run: CM.toggleComment }])
             : [];
 
         LB_VIEW.dispatch({
@@ -1143,6 +1180,9 @@ const LIBRETA_VIEW = {
                 LB_COMP.numbers.reconfigure(numbers ? CM.lineNumbers() : []),
                 LB_COMP.lang.reconfigure(languages || []),
                 LB_COMP.preview.reconfigure(preview),
+                LB_COMP.fold.reconfigure(fold),
+                LB_COMP.brackets.reconfigure(brackets),
+                LB_COMP.codeKeys.reconfigure(codeKeys),
             ],
         });
     },

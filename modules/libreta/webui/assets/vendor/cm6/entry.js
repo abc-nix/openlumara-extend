@@ -28,7 +28,13 @@ import {
     highlightActiveLine,
     placeholder,
 } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import {
+    defaultKeymap,
+    history,
+    historyKeymap,
+    indentWithTab,
+    toggleComment,
+} from "@codemirror/commands";
 import {
     SearchQuery,
     RegExpCursor,
@@ -45,13 +51,24 @@ import {
     replaceNext,
     replaceAll,
     selectMatches,
+    highlightSelectionMatches,
 } from "@codemirror/search";
 import {
     syntaxHighlighting,
     HighlightStyle,
     LanguageDescription,
+    bracketMatching,
+    codeFolding,
+    foldGutter,
+    foldKeymap,
+    foldCode,
+    unfoldCode,
+    foldAll,
+    unfoldAll,
 } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Table } from "@lezer/markdown";
 import { javascript } from "@codemirror/lang-javascript";
@@ -259,4 +276,28 @@ export {
     selectMatches,
     setSearchQuery,
     tables,
+
+    // --- parity extras (2026-11-13) ----------------------------------------
+    // None of these were in the original bundle: entry.js never imported them,
+    // so esbuild tree-shook the code out. The module wires them per mode.
+    bracketMatching,
+    codeFolding,
+    foldGutter,
+    foldKeymap,
+    foldCode,
+    unfoldCode,
+    foldAll,
+    unfoldAll,
+    closeBrackets,
+    closeBracketsKeymap,
+    toggleComment,
+    insertNewlineContinueMarkup,
+    highlightSelectionMatches,
+
+    // --- theme primitives (data-driven code themes, see the theme plan) ------
+    // A theme file becomes a HighlightStyle at runtime; these are the building
+    // blocks. The existing libretaHighlight stays as the "theme" default.
+    HighlightStyle,
+    syntaxHighlighting,
+    t as tags,
 };

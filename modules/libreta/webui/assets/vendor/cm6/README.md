@@ -16,17 +16,24 @@ way `webui/assets/vendor/codemirror` shipped CodeMirror 5.
 - `@lezer/markdown` (with the GFM table extension)
 - the Obsidian-style live preview engine from `@plannotator/atomic-editor`
   (MIT): `inlinePreview()`, `tables()`, `imageBlocks()`
+- parity extras (2026-11-13): `foldGutter`/`codeFolding`, `bracketMatching`,
+  `closeBrackets` + keymap (from `@codemirror/autocomplete`), `highlightSelectionMatches`,
+  `toggleComment`, `insertNewlineContinueMarkup` — all wired per mode in
+  `libreta.js` (fold/brackets/comment toggle are code-mode only)
+- theme primitives for the data-driven code themes: `HighlightStyle`,
+  `syntaxHighlighting`, `tags`
 
 The bundle exposes `window.LibretaCM`. React is marked external and is **not**
 included (the live-preview engine's React wrapper is unused).
 
-Size: 645 277 B raw / 223 280 B gzipped (630 / 218 KB). CodeMirror 5 (the
+Size: 658 634 B raw / 227 717 B gzipped (643 / 222 KB). CodeMirror 5 (the
 previous engine, 1.2 MB on disk, 546 KB loaded) is no longer vendored here.
 
 ## How it is built
 
 `entry.js` is **committed next to this file** and is the whole build input —
-imports, the 36 exports, the highlight style, the extension→language map, the
+imports, the exports (36 at recovery, 52 with the parity extras), the highlight
+style, the extension→language map, the
 `codeLanguages` list and the frontmatter `MarkdownConfig`. It was missing until
 2026-11-13: the artifact shipped without its entry, so the old recipe could not
 reproduce it. It has since been reconstructed from the artifact itself, which
@@ -71,7 +78,8 @@ Two traps worth keeping written down:
 Compare against the previous artifact instead of trusting it by eye:
 
 1. **Export surface** — the artifact carries its table as `var Ew={};…(Ew,{...})`;
-   the rebuild must expose the same 36 names, in the same order.
+   the rebuild must expose the same names in the same order (36 at the 2026-11-13
+   recovery; 52 after the parity extras added 16).
 2. **Rendering** — CM6 renders only the viewport, so a single-page comparison
    covers ~40 lines and proves almost nothing. Jump across the document and diff
    the normalised `.cm-content` HTML at each stop (normalise `ͼ…` class names:
