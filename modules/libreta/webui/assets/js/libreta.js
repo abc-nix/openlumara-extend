@@ -450,6 +450,22 @@ function lbExtensionOf(path) {
     return String(path || "").split(".").pop().toLowerCase();
 }
 
+// go to line: "12" or "12:4" -> caret at that position. Deliberately not CM6's
+// gotoLine(), which opens its own dialog we would have to restyle; one dispatch
+// is enough and it keeps the palette look consistent with quick-open.
+function lbGotoLine(view, spec) {
+    const m = /^(\d+)(?:\s*[:.,]\s*(\d+))?$/.exec(String(spec || "").trim());
+    if (!m) return null;
+    const doc = view.state.doc;
+    const lineNo = Math.min(Math.max(1, parseInt(m[1], 10)), doc.lines);
+    const line = doc.line(lineNo);
+    const col = m[2] ? Math.min(Math.max(1, parseInt(m[2], 10)), line.text.length + 1) : 1;
+    const pos = line.from + col - 1;
+    view.dispatch({ selection: { anchor: pos }, scrollIntoView: true, userEvent: "select" });
+    view.focus();
+    return { line: lineNo, col };
+}
+
 // colours ride on CSS variables, so the editor follows the app theme without a
 // reconfigure on every theme switch.
 function lbCm6Theme() {
@@ -496,6 +512,10 @@ function lbCm6Extensions() {
             ...CM.foldKeymap,     // Ctrl+Shift+[ / ] etc. — no-ops without folding
             ...CM.closeBracketsKeymap,
             CM.indentWithTab,
+            {
+                key: "Mod-Alt-g",
+                run: () => { const s = lbStore(); if (s) s.openGoto(); return !!s; },
+            },
             { key: "Mod-s", run: () => { const store = lbStore(); if (store) store.save(); return !!store; } },
         ]),
         // atomic.css is scoped under this class
@@ -510,6 +530,8 @@ function lbCm6Extensions() {
             // the view is the source of truth for the open buffer; keep the
             // per-tab state (outside the reactive store) in step
             LB_STATES.set(tab.key, update.state);
+            // caret readout (doc bar, code mode): equality-guarded inside
+            if (update.selectionSet || update.docChanged) store.syncCaret();
             if (!update.docChanged) return;
             tab.dirty = true;
             if (tab.mode === "notes" && store.split) store.schedulePreview(tab);
@@ -887,6 +909,8 @@ const LIBRETA_VIEW = {
     cmFailed: false,       // CodeMirror could not load -> fall back to the rendered view
     pendingClose: null,    // {key, name} while an edited tab waits for a discard decision
     savedAt: 0,
+    caret: "",             // "line:col" of the caret — Code mode readout in the doc bar
+    goto: { open: false, value: "", error: "" },   // Ctrl+Alt+G palette
     _silent: false,        // true while swapping docs / resetting buffers
     quick: { open: false, query: "", idx: 0, files: [], loadedFor: "", loadedAt: 0, ws: "", loading: false, error: "" },
 
@@ -1196,6 +1220,7 @@ const LIBRETA_VIEW = {
 
         LB_VIEW.setState(lbStateFor(tab));
         this.applyEditorOptions(tab);
+        this.syncCaret();
 
         // the host may have been hidden while the editor measured itself
         requestAnimationFrame(() => {
@@ -1384,6 +1409,45 @@ const LIBRETA_VIEW = {
         const tab = this.activeTab();
         if (!tab) return "";
         return tab.workspace + " / " + (tab.parent ? tab.parent + " / " : "") + tab.name;
+    },
+
+    /* ---- go to line (Ctrl+Alt+G) + caret readout ---- */
+    openGoto() {
+        if (!this.isOpen) this.show();
+        this.goto.open = true;
+        this.goto.value = "";
+        this.goto.error = "";
+        requestAnimationFrame(() => {
+            const input = document.querySelector(".lb-goto-input");
+            if (input) { input.focus(); input.select(); }
+        });
+    },
+
+    closeGoto() {
+        this.goto.open = false;
+        this.goto.error = "";
+    },
+
+    gotoConfirm() {
+        const spec = String(this.goto.value || "").trim();
+        if (!spec) { this.goto.error = "enter a line number"; return; }
+        if (!LB_VIEW) { this.goto.error = "no editor"; return; }
+        const hit = lbGotoLine(LB_VIEW, spec);
+        if (!hit) { this.goto.error = "not a line number"; return; }
+        this.goto.open = false;
+        this.goto.error = "";
+        this.syncCaret();
+    },
+
+    // kept equality-guarded: this runs from the editor's update listener, and a
+    // reactive write on every keystroke would re-render the doc bar constantly.
+    syncCaret() {
+        if (!LB_VIEW) return;
+        const state = LB_VIEW.state;
+        const head = state.selection.main.head;
+        const line = state.doc.lineAt(head);
+        const text = line.number + ":" + (head - line.from + 1);
+        if (this.caret !== text) this.caret = text;
     },
 
     /* ---- quick-open (Ctrl/⌘+P) ---- */

@@ -418,7 +418,7 @@ body[data-lb="floating"] .lb-cover {
 .lb-star.on { color: var(--accent); }
 .lb-star.on svg { fill: currentColor; }
 
-/* autosave chip (config autosave_interval > 0) */
+/* caret position (code mode): line:column, quiet — it sits next to the buttons\n   and must never look like a control */\n.lb-caret {\n    flex-shrink: 0;\n    padding: 0 4px;\n    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\n    font-size: 11px;\n    font-variant-numeric: tabular-nums;\n    color: var(--text-muted);\n    white-space: nowrap;\n    cursor: default;\n}\n\n/* autosave chip (config autosave_interval > 0) */
 .lb-autotag.off { opacity: .55; }
 
 .lb-autotag {
