@@ -65,17 +65,22 @@ function lbWriteRaw(key, value) {
 }
 
 /* ---- diagnostics ---------------------------------------------------------
-   Console logging for the paths that fail silently in the UI. ON unless
-   localStorage "libreta.debug" is "0": this is a module in use, and a silent
-   failure costs more than a few console lines. Set it to "0" to silence.
-   The build marker is logged on load so a stale cached script is visible at a
-   glance — /ext-assets sends no Cache-Control (openlumara-issues.md #7). */
-const LB_BUILD = "2026-11-13e";
+   lbLog() is OFF by default. It traces the paths that fail silently (workspace
+   resolution, the new-file button) and is switched on when something misbehaves:
+       localStorage.setItem("libreta.debug", "1")   // then reload
+   The build marker stays UNCONDITIONAL (one line per page load) because a stale
+   cached script is the first thing to rule out: /ext-assets sends no
+   Cache-Control, so Chrome may reuse an old libreta.js after an edit
+   (openlumara-issues.md #7). If that line is missing or shows an old tag, no
+   other diagnosis is worth doing. */
+const LB_BUILD = "2026-11-13f";
 
 function lbLog(...args) {
     try {
-        if (localStorage.getItem("libreta.debug") === "0") return;
-    } catch (e) { /* storage disabled: keep logging */ }
+        if (localStorage.getItem("libreta.debug") !== "1") return;
+    } catch (e) {
+        return;   // storage disabled: nothing to read, stay quiet
+    }
     try { console.log("[libreta]", ...args); } catch (e) { /* ignore */ }
 }
 
@@ -2602,10 +2607,10 @@ window.LibretaHotkeysChanged = () => {
 
 // keep the docked panel and the space reserved for it in step when the window
 // resizes (the width is pinned in px so padding and panel share one base)
-// build marker: if this line is missing (or shows an older tag) in the console
-// after a reload, the browser is serving a cached libreta.js and no fix below
-// can be trusted.
-lbLog("libreta.js", LB_BUILD, "loaded");
+// build marker — deliberately NOT behind lbLog(): if this line is missing or
+// shows an older tag, the browser is serving a cached libreta.js and no other
+// diagnosis is worth doing.
+try { console.log("[libreta]", LB_BUILD, "loaded"); } catch (e) { /* ignore */ }
 
 window.addEventListener("resize", () => {
     try { Alpine.store("libretaView").syncDockWidth(); } catch (e) { /* store not ready */ }
