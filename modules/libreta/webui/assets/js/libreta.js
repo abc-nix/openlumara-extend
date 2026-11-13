@@ -70,7 +70,7 @@ function lbWriteRaw(key, value) {
    failure costs more than a few console lines. Set it to "0" to silence.
    The build marker is logged on load so a stale cached script is visible at a
    glance — /ext-assets sends no Cache-Control (openlumara-issues.md #7). */
-const LB_BUILD = "2026-11-13d";
+const LB_BUILD = "2026-11-13e";
 
 function lbLog(...args) {
     try {
@@ -1496,8 +1496,12 @@ const LIBRETA_VIEW = {
     // route refusing to overwrite, so no extra listing request is needed.
     async createQuickFile() {
         this.error = "";
-        lbLog("createQuickFile: setting =", JSON.stringify(this.newFileFolder), "wsName =", this.wsName());
-        const target = lbParseNewFileFolder(this.newFileFolder, this.wsName());
+        // quickWorkspace() is the store's own resolver (active tab, then the
+        // saved workspace). wsName() lives on the sidebar panel component, not
+        // here — using it threw "this.wsName is not a function".
+        const fallback = this.quickWorkspace();
+        lbLog("createQuickFile: setting =", JSON.stringify(this.newFileFolder), "workspace fallback =", fallback);
+        const target = lbParseNewFileFolder(this.newFileFolder, fallback);
         lbLog("createQuickFile: target =", target);
         if (!target.workspace) {
             this.error = "pick a workspace for new files (Options)";
