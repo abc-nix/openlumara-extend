@@ -35,7 +35,8 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
   seconds, 0 = off; one timer per open document, same mtime guard as Ctrl+S,
   banner per document). Next: the CM6 editor extras (fold, brackets, selection
   matches, smart Enter, Ctrl+/), go-to-line, caret position; optional
-  tree-sitter lint. Inventory and skip list live in `Notes/libreta-coder-parity.md`.
+  tree-sitter lint. Inventory and skip list live in
+  `Notes/libreta/libreta-coder-parity.md`.
 - **P2.0 — done (2026-11-04). Autosave.** `autosave_interval` (0 = off),
   `autosave_default` + per-file switch (caret next to Save) stored in
   `data/libreta/autosave.json`; the save button is always visible and highlights
@@ -46,7 +47,7 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
 - **P2.1 — done (9290ee4). Chat views.** full / docked (right panel, chat
   narrows) / floating (centred card, file picker instead of tabs), remembered in
   localStorage, one cycle button in the doc bar. Details:
-  `Notes/libreta-views-plan.md`.
+  `Notes/libreta/libreta-views-plan.md`.
 - **P3 — not started.** Wikilinks + backlinks, tags/properties, callouts,
   attachments, in-vault search.
 
@@ -107,3 +108,10 @@ Routes: `workspaces` · `tree` · `read` · `save` · `preview` · `create` ·
 6. Find & replace exists per document; cross-file search does not (backend route + results pane still to build).
 7. core `notes` module still enabled although unused; `codeeditor` still ships
    its own CM5 vendor (retire both once libreta covers them).
+8. **Keyboard shortcuts live in localStorage** (`libreta.keys`, edited by the
+   modal in `webui/assets/js/libreta-hotkeys.js`). Deliberate for now: it applies
+   immediately with no restart, like `show_line_numbers`. When the bindings
+   should follow the user between browsers, move that object to
+   `data/libreta/hotkeys.json` behind a `state/hotkeys` route (same shape as
+   `data/libreta/autosave.json`); everything reads through `lbHotkeyMap()`, so
+   the swap stays inside that file.

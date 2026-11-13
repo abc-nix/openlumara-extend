@@ -1342,3 +1342,107 @@ body[data-lb="floating"] .lb-cover {
     height: 16px;
     flex: 0 0 auto;
 }
+
+/* ---- keyboard shortcuts modal (libreta-hotkeys.js) ----
+   Rendered through the page-level slot, so the overlay must sit above the
+   settings modal as well as the cover; z-index 4000 is above both. */
+.lb-hk-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 4000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, .55);
+}
+
+.lb-hk-modal {
+    width: min(560px, 92vw);
+    max-height: 84vh;
+    overflow: auto;
+    padding: 18px 20px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+}
+
+.lb-hk-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lb-hk-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
+
+.lb-hk-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+}
+.lb-hk-close:hover { color: var(--text-primary); background: var(--bg-secondary); }
+
+.lb-hk-note { margin: 8px 0 14px; font-size: 12px; color: var(--text-muted); }
+
+.lb-hk-group { margin-bottom: 14px; }
+.lb-hk-grouptitle {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.lb-hk-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-top: 1px solid var(--border-color);
+}
+
+.lb-hk-label { font-size: 13px; }
+
+.lb-hk-chord {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    padding: 2px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.lb-hk-chord.empty { color: var(--text-muted); opacity: .7; }
+.lb-hk-chord.recording {
+    border-color: var(--accent);
+    color: var(--accent);
+    animation: lb-hk-pulse 1.2s ease-in-out infinite;
+}
+@keyframes lb-hk-pulse { 50% { opacity: .55; } }
+
+.lb-hk-btn {
+    font-size: 11px;
+    padding: 3px 8px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.lb-hk-btn:hover { border-color: var(--accent); }
+.lb-hk-btn.ghost { background: none; color: var(--text-muted); }
+
+.lb-hk-error { min-height: 16px; font-size: 12px; color: var(--error); }
+
+.lb-hk-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* the settings-module entry point */
+.lb-hk-setting { margin-top: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

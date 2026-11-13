@@ -401,6 +401,9 @@
                                 x-text="opts.saving ? 'Saving…' : 'Save'"
                                 title="Save these settings to config.yml"></button>
                             <span class="lb-opt-status" x-text="opts.status"></span>
+                            <button type="button" class="lb-btn lb-btn-ghost"
+                                @click="$store.libretaHotkeys.show()"
+                                title="View and change the keyboard shortcuts Libreta uses">Keyboard shortcuts…</button>
                         </div>
 
                         <div class="lb-opt-hint">These live in config.yml under user_modules → settings → libreta, so they also show up in the Settings screen.</div>

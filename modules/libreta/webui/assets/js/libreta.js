@@ -251,7 +251,7 @@ const LB_COMP = {
     preview: null,
     fold: null,       // code mode: fold gutter; notes: empty
     brackets: null,   // code mode: closeBrackets + its keymap
-    codeKeys: null,   // code mode only: Mod-/ toggle comment
+    keys: null,       // the user's rebound editor chords (libreta-hotkeys.js)
 };
 
 function lbLoadScript(src) {
@@ -288,7 +288,7 @@ function lbLoadCm6() {
             LB_COMP.preview = new LB_CM6.Compartment();
             LB_COMP.fold = new LB_CM6.Compartment();
             LB_COMP.brackets = new LB_CM6.Compartment();
-            LB_COMP.codeKeys = new LB_CM6.Compartment();
+            LB_COMP.keys = new LB_CM6.Compartment();
         })();
     }
     return LB_CM6_LOAD;
@@ -491,6 +491,38 @@ function lbCm6Theme() {
     }, { dark: false });
 }
 
+// A rebound action must MOVE, not gain a second chord: when the user changes an
+// action we also drop the CodeMirror default it used to occupy. `rules` maps
+// action id -> the default key pattern that belongs to it.
+function lbFilterKeymap(list, rules) {
+    if (typeof lbHotkeyChord !== "function") return list;
+    const moved = Object.keys(rules).filter((id) => lbHotkeyChord(id) !== lbHotkeyDef(id));
+    if (!moved.length) return list;
+    return list.filter((binding) => !moved.some((id) => rules[id].test(String(binding.key || ""))));
+}
+
+// editor-side actions only: save/quick open/paste are handled by the document
+// listener, so binding them here too would run them twice per keystroke.
+function lbEditorHotkeyBindings() {
+    const CM = LB_CM6;
+    if (!CM || typeof lbHotkeyChord !== "function") return [];
+    const runs = {
+        goto: () => { const s = lbStore(); if (s) s.openGoto(); return !!s; },
+        find: (view) => { CM.openSearchPanel(view); return true; },
+        comment: (view) => CM.toggleComment(view),
+        fold: (view) => CM.foldCode(view, view.state.selection.main.head),
+        unfold: (view) => CM.unfoldCode(view, view.state.selection.main.head),
+    };
+    const out = [];
+    for (const action of (window.LB_HOTKEY_ACTIONS || [])) {
+        const run = runs[action.id];
+        if (!run || action.where !== "editor") continue;
+        const chord = lbHotkeyChord(action.id);
+        if (chord) out.push({ key: chord, run });
+    }
+    return out;
+}
+
 function lbCm6Extensions() {
     const CM = LB_CM6;
     return [
@@ -508,14 +540,10 @@ function lbCm6Extensions() {
         CM.keymap.of([
             ...CM.defaultKeymap,
             ...CM.historyKeymap,
-            ...CM.searchKeymap,   // Mod-f / Mod-g / F3 / Escape while the panel is open
-            ...CM.foldKeymap,     // Ctrl+Shift+[ / ] etc. — no-ops without folding
+            ...lbFilterKeymap(CM.searchKeymap, { find: /^(Mod|Ctrl)-f$/ }),
+            ...lbFilterKeymap(CM.foldKeymap, { fold: /(Mod|Ctrl)-Shift-\[/, unfold: /(Mod|Ctrl)-Shift-\]/ }),
             ...CM.closeBracketsKeymap,
             CM.indentWithTab,
-            {
-                key: "Mod-Alt-g",
-                run: () => { const s = lbStore(); if (s) s.openGoto(); return !!s; },
-            },
             { key: "Mod-s", run: () => { const store = lbStore(); if (store) store.save(); return !!store; } },
         ]),
         // atomic.css is scoped under this class
@@ -549,7 +577,7 @@ function lbCm6Extensions() {
         LB_COMP.preview.of([]),
         LB_COMP.fold.of([]),
         LB_COMP.brackets.of([]),
-        LB_COMP.codeKeys.of([]),
+        LB_COMP.keys.of([]),
     ];
 }
 
@@ -1192,11 +1220,9 @@ const LIBRETA_VIEW = {
         const brackets = code
             ? [CM.closeBrackets(), CM.keymap.of([...CM.closeBracketsKeymap])]
             : [];
-        // Mod-/ only means something where the grammar names its comments;
-        // markdown has no commentTokens, so notes mode gets no binding at all.
-        const codeKeys = code
-            ? CM.keymap.of([{ key: "Mod-/", run: CM.toggleComment }])
-            : [];
+        // user rebindings ride at high precedence so they beat the defaults;
+        // lbFilterKeymap() already removed the CM default a moved action owned.
+        const keys = [CM.Prec.high(CM.keymap.of(lbEditorHotkeyBindings()))];
 
         LB_VIEW.dispatch({
             effects: [
@@ -1206,7 +1232,7 @@ const LIBRETA_VIEW = {
                 LB_COMP.preview.reconfigure(preview),
                 LB_COMP.fold.reconfigure(fold),
                 LB_COMP.brackets.reconfigure(brackets),
-                LB_COMP.codeKeys.reconfigure(codeKeys),
+                LB_COMP.keys.reconfigure(keys),
             ],
         });
     },
@@ -2360,17 +2386,22 @@ document.addEventListener("alpine:init", () => {
     }
 });
 
-// Ctrl/Cmd+S saves, Ctrl/Cmd+F opens find & replace. The editor's own keymap
-// already handles both while it has focus; this covers the cover being open
-// with focus somewhere else (chat_nav no longer steals Ctrl+F inside .lb-cover).
+// document-level shortcuts — one lookup into the same registry the hotkey modal
+// edits, so rebinding Save / Quick open / Find / paste-plain moves the real
+// action instead of adding a second chord. The lookup is cached in
+// libreta-hotkeys.js (one localStorage parse per rebind, not per keystroke).
 document.addEventListener("keydown", (event) => {
-    const key = String(event.key || "").toLowerCase();
-    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    // while the modal records, its capture handler already swallowed the event
+    let hk = null;
+    try { hk = Alpine.store("libretaHotkeys"); } catch (e) { /* not ready */ }
+    if (hk && hk.open) return;
 
-    // Ctrl/⌘+Shift+V asks for an unformatted paste even in Notes mode. The
-    // paste event cannot see the modifiers, so remember the chord here; the
-    // flag is one-shot (cleared by the paste handler) and expires on its own.
-    if (key === "v" && event.shiftKey) {
+    const action = (window.lbHotkeyAction || (() => ""))(event);
+    if (!action) return;
+
+    // paste as plain text: the paste event cannot see the modifiers, so the
+    // chord is remembered here; the flag is one-shot and expires on its own.
+    if (action === "pasteplain") {
         LB_PLAIN_PASTE = true;
         setTimeout(() => { LB_PLAIN_PASTE = false; }, 1200);
         return;
@@ -2380,17 +2411,16 @@ document.addEventListener("keydown", (event) => {
     try { view = Alpine.store("libretaView"); } catch (e) { return; }
     if (!view || !view.isOpen) return;
 
-    if (key === "s") {
+    if (action === "save") {
         event.preventDefault();
         view.save();
         return;
     }
 
-    if (key === "p") {
-        // only inside the cover: Ctrl+P is the browser's print shortcut
-        // everywhere else (coder hijacks it app-wide; libreta does not).
-        // The editor itself is contentEditable, so only real text fields are
-        // excluded here.
+    if (action === "quickopen") {
+        // only inside the cover: it is the browser's print shortcut elsewhere
+        // (coder hijacks it app-wide; libreta does not). The editor itself is
+        // contentEditable, so only real text fields are excluded here.
         const target = event.target;
         const tag = target ? String(target.tagName || "").toUpperCase() : "";
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -2399,7 +2429,7 @@ document.addEventListener("keydown", (event) => {
         return;
     }
 
-    if (key === "f") {
+    if (action === "find") {
         const target = event.target;
         const tag = target ? String(target.tagName || "").toUpperCase() : "";
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (target && target.isContentEditable)) return;
@@ -2409,20 +2439,27 @@ document.addEventListener("keydown", (event) => {
     }
 });
 
-// Esc closes the reading cover, except while typing in a field
+// Close-cover action (Escape by default, rebindable in the hotkey modal)
 document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
+    const isEsc = event.key === "Escape";
+    const action = (window.lbHotkeyAction || (() => ""))(event);
 
     let view = null;
     try { view = Alpine.store("libretaView"); } catch (e) { return; }
     if (!view || !view.isOpen) return;
 
-    // the quick-open palette closes first, then the cover
-    if (view.quick && view.quick.open) {
+    // the palettes close on Escape whatever the close-cover binding is
+    if (isEsc && view.quick && view.quick.open) {
         view.quickClose();
         event.preventDefault();
         return;
     }
+    if (isEsc && view.goto && view.goto.open) {
+        view.closeGoto();
+        event.preventDefault();
+        return;
+    }
+    if (action !== "closecover") return;
 
     const target = event.target;
     const tag = target ? String(target.tagName || "").toUpperCase() : "";
@@ -2430,6 +2467,15 @@ document.addEventListener("keydown", (event) => {
 
     view.hide();
 });
+
+// called by libreta-hotkeys.js after Save: the editor chords live in a
+// compartment, so a rebind applies immediately instead of on the next reload.
+window.LibretaHotkeysChanged = () => {
+    try {
+        const store = Alpine.store("libretaView");
+        if (store) store.applyEditorOptions();
+    } catch (e) { /* store not ready */ }
+};
 
 // keep the docked panel and the space reserved for it in step when the window
 // resizes (the width is pinned in px so padding and panel share one base)

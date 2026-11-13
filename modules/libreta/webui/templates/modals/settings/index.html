@@ -1,0 +1,9 @@
+{# Entry point 2: Settings ▸ Your Modules ▸ libreta.
+   The slot renders on every settings page, so visibility is decided in the
+   browser from the active drill-down — no core template change needed. #}
+{% macro settings_page() %}
+<div class="lb-hk-setting" x-show="activeCategory === 'user_modules' &amp;&amp; activeModule === 'libreta'" x-cloak>
+    <button type="button" class="lb-btn" @click="$store.libretaHotkeys.show()">Keyboard shortcuts&#8230;</button>
+    <span class="lb-opt-hint">View and change the keys Libreta uses (per browser).</span>
+</div>
+{% endmacro %}

@@ -1,0 +1,52 @@
+{# libreta fills the page-level slot: one hotkey modal, rendered outside the
+   sidebar and the chat window so it is visible from every entry point. #}
+{% macro below_page() %}
+<div class="lb-hk-overlay" x-show="$store.libretaHotkeys.open" x-cloak
+     @click.self="$store.libretaHotkeys.hide()">
+    <div class="lb-hk-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+        <div class="lb-hk-head">
+            <h3>Keyboard shortcuts</h3>
+            <button type="button" class="lb-hk-close" aria-label="Close"
+                @click="$store.libretaHotkeys.hide()">&#10005;</button>
+        </div>
+        <p class="lb-hk-note">
+            Only actions Libreta owns are listed. Changes apply to this browser and are
+            stored when you press <b>Save</b>.
+        </p>
+
+        <template x-for="group in $store.libretaHotkeys.groups()" :key="group">
+            <div class="lb-hk-group">
+                <div class="lb-hk-grouptitle" x-text="group"></div>
+                <template x-for="row in $store.libretaHotkeys.list().filter(r =&gt; r.group === group)" :key="row.id">
+                    <div class="lb-hk-row">
+                        <span class="lb-hk-label" x-text="row.label"></span>
+                        <span class="lb-hk-chord"
+                            :class="{ recording: $store.libretaHotkeys.recording === row.id, empty: !row.chord }"
+                            x-text="$store.libretaHotkeys.recording === row.id
+                                ? 'press keys\u2026'
+                                : (row.chord || 'unassigned')"></span>
+                        <button type="button" class="lb-hk-btn"
+                            @click="$store.libretaHotkeys.start(row.id)"
+                            x-text="$store.libretaHotkeys.recording === row.id ? 'Stop' : 'Record'"></button>
+                        <button type="button" class="lb-hk-btn ghost"
+                            @click="$store.libretaHotkeys.clear(row.id)"
+                            title="Remove this binding">Clear</button>
+                        <button type="button" class="lb-hk-btn ghost"
+                            x-show="row.custom"
+                            @click="$store.libretaHotkeys.reset(row.id)"
+                            title="Back to the default chord">Reset</button>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <div class="lb-hk-error" x-text="$store.libretaHotkeys.error"></div>
+
+        <div class="lb-hk-actions">
+            <button type="button" class="lb-btn" @click="$store.libretaHotkeys.save()">Save</button>
+            <button type="button" class="lb-btn lb-btn-ghost" @click="$store.libretaHotkeys.resetAll()">Reset all</button>
+            <button type="button" class="lb-btn lb-btn-ghost" @click="$store.libretaHotkeys.hide()">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endmacro %}
