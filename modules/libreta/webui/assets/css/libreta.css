@@ -1516,3 +1516,16 @@ body[data-lb="floating"] .lb-cover {
 
 /* the settings-module entry point */
 .lb-hk-setting { margin-top: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* windowed read banner: a file larger than max_read_bytes is opened read-only
+   with only its beginning in the buffer (see load()/save() in libreta.js) */
+.lb-window-note {
+    margin: 0 8px 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+}

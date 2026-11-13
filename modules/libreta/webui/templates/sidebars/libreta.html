@@ -205,6 +205,8 @@
                 <span class="lb-trash-count"
                     x-text="trashLoading ? 'loading…' : (trashEntries.length + (trashEntries.length === 1 ? ' file' : ' files'))"></span>
                 <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" x-show="trashEntries.length"
+                    @click="restoreAllTrash()" title="Put every trashed file back where it was">Restore all</button>
+                <button type="button" class="lb-btn lb-btn-sm lb-btn-ghost" x-show="trashEntries.length"
                     @click="askEmptyTrash()">Empty trash</button>
             </div>
 

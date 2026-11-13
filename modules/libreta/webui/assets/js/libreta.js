@@ -73,7 +73,7 @@ function lbWriteRaw(key, value) {
    Cache-Control, so Chrome may reuse an old libreta.js after an edit
    (openlumara-issues.md #7). If that line is missing or shows an old tag, no
    other diagnosis is worth doing. */
-const LB_BUILD = "2026-11-13f";
+const LB_BUILD = "2026-11-13g";
 
 function lbLog(...args) {
     try {
@@ -523,6 +523,65 @@ function lbFilterKeymap(list, rules) {
     const moved = Object.keys(rules).filter((id) => lbHotkeyChord(id) !== lbHotkeyDef(id));
     if (!moved.length) return list;
     return list.filter((binding) => !moved.some((id) => rules[id].test(String(binding.key || ""))));
+}
+
+// ---- notes: resolve relative images through the raw route -------------------
+// The preview renders <img src> exactly as written, so a relative path resolves
+// against the page URL and 404s. The extension API has no binary response, so
+// bytes come back base64 inside JSON (files.read_bytes) and are turned into a
+// blob: URL here, cached per workspace|path.
+const LB_IMG_CACHE = new Map();   // "workspace|path" -> objectURL
+const LB_IMG_BUSY = new Set();
+let LB_IMG_OBS = null;
+
+function lbNoteImagePath(tab, src) {
+    const clean = String(src || "").trim().replace(/^\.\//, "");
+    if (!clean) return "";
+    if (clean.startsWith("/")) return clean.slice(1);            // workspace root
+    return tab.parent ? tab.parent + "/" + clean : clean;        // the note's folder
+}
+
+async function lbLoadNoteImage(tab, img) {
+    const src = img.getAttribute("src") || "";
+    if (!src || img.dataset.lbImg) return;                        // one attempt per element
+    if (/^(https?:|data:|blob:|file:|\/\/)/i.test(src)) return;   // not ours to rewrite
+    const path = lbNoteImagePath(tab, src);
+    const key = tab.workspace + "|" + path;
+    img.dataset.lbImg = key;
+    if (LB_IMG_CACHE.has(key)) { img.src = LB_IMG_CACHE.get(key); return; }
+    if (LB_IMG_BUSY.has(key)) return;
+    LB_IMG_BUSY.add(key);
+    try {
+        const data = await simpleApiFetch(
+            "/api/ext/libreta/raw?workspace=" + encodeURIComponent(tab.workspace) +
+            "&path=" + encodeURIComponent(path)
+        );
+        const bytes = Uint8Array.from(atob(data.base64 || ""), (ch) => ch.charCodeAt(0));
+        const blob = new Blob([bytes], { type: data.content_type || "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        LB_IMG_CACHE.set(key, url);
+        img.src = url;
+    } catch (e) {
+        img.dataset.lbImgFailed = "1";
+        lbLog("note image failed (" + key + "):", lbErr(e));
+    } finally {
+        LB_IMG_BUSY.delete(key);
+    }
+}
+
+function lbStartNoteImages() {
+    if (LB_IMG_OBS || !LB_VIEW) return;
+    const scan = () => {
+        const store = lbStore();
+        const tab = store ? store.activeTab() : null;
+        if (!tab || tab.mode !== "notes") return;
+        for (const img of LB_VIEW.dom.querySelectorAll(".cm-atomic-image img")) {
+            lbLoadNoteImage(tab, img);
+        }
+    };
+    LB_IMG_OBS = new MutationObserver(scan);
+    LB_IMG_OBS.observe(LB_VIEW.dom, { childList: true, subtree: true });
+    scan();
 }
 
 // "workspace/folder/sub" -> {workspace, parent}. Empty means the active tab's
@@ -997,6 +1056,8 @@ const LIBRETA_VIEW = {
     savedAt: 0,
     caret: "",             // "line:col" of the caret — Code mode readout in the doc bar
     goto: { open: false, value: "", error: "" },   // Ctrl+Alt+G palette
+    find: { open: false, query: "", ws: "", results: [], loading: false, error: "", truncated: false },
+    _findTimer: null,
     fitTabs: true,         // browser pref: tabs share the strip instead of their full name
     codeScheme: "theme",   // browser pref: "theme" (adaptive) | "github-light" | "onedark"
     newFileFolder: "",     // "workspace/folder" the tab-strip + creates files in ("" = active root)
@@ -1319,6 +1380,7 @@ const LIBRETA_VIEW = {
         LB_VIEW.setState(lbStateFor(tab));
         this.applyEditorOptions(tab);
         this.syncCaret();
+        lbStartNoteImages();   // relative images -> raw route (no-op after the first call)
         // first time this buffer is seen: the state was built from what is on
         // disk, so it IS the saved baseline (save()/load() overwrite it later)
         if (!LB_SAVED.has(tab.key)) LB_SAVED.set(tab.key, LB_VIEW.state.doc);
@@ -1341,6 +1403,12 @@ const LIBRETA_VIEW = {
     async save(force) {
         const tab = this.activeTab();
         if (!tab) return;
+        // a windowed read holds only the beginning of the file: writing it back
+        // would truncate the rest, so this buffer can never be saved
+        if (tab.windowed) {
+            this.error = "this file is open read-only — only the first part of it is loaded";
+            return;
+        }
         // nothing pending: a save would only bump the file's mtime. Force (the
         // conflict banner's Overwrite) still writes.
         if (!force && !tab.dirty) return;
@@ -1468,7 +1536,7 @@ const LIBRETA_VIEW = {
     },
 
     scheduleAutosave(tab) {
-        if (!tab || !tab.key || !this.autosaveFor(tab)) return;
+        if (!tab || !tab.key || tab.windowed || !this.autosaveFor(tab)) return;
         clearTimeout(this._autosave[tab.key]);
         this._autosave[tab.key] = setTimeout(() => {
             delete this._autosave[tab.key];
@@ -1607,6 +1675,59 @@ const LIBRETA_VIEW = {
             lbLog("workspaces: fetch failed —", lbErr(e));
             return [];
         }
+    },
+
+    /* ---- search across the workspace (Ctrl+Shift+F) ---- */
+    openFind() {
+        if (!this.isOpen) this.show();
+        this.find.open = true;
+        this.find.error = "";
+        requestAnimationFrame(() => {
+            const input = document.querySelector(".lb-find-input");
+            if (input) { input.focus(); input.select(); }
+        });
+    },
+
+    closeFind() {
+        this.find.open = false;
+    },
+
+    // debounce: one request per pause, not one per keystroke
+    queueFind() {
+        clearTimeout(this._findTimer);
+        this._findTimer = setTimeout(() => this.runFind(), 250);
+    },
+
+    async runFind() {
+        const query = String(this.find.query || "").trim();
+        const ws = this.quickWorkspace();
+        this.find.ws = ws;
+        if (!query) { this.find.results = []; this.find.truncated = false; return; }
+        if (!ws) { this.find.error = "no workspace selected"; return; }
+        this.find.loading = true;
+        this.find.error = "";
+        try {
+            const data = await simpleApiPost("/api/ext/libreta/search", {
+                workspace: ws,
+                query: query,
+                max_results: 200,
+                max_per_file: 10,
+            });
+            this.find.results = Array.isArray(data.results) ? data.results : [];
+            this.find.truncated = !!data.truncated;
+        } catch (e) {
+            this.find.results = [];
+            this.find.error = lbErr(e);
+        } finally {
+            this.find.loading = false;
+        }
+    },
+
+    async findJump(hit) {
+        if (!hit) return;
+        this.find.open = false;
+        await this.open(this.find.ws || this.quickWorkspace(), hit.path);
+        if (LB_VIEW) lbGotoLine(LB_VIEW, hit.line + ":" + hit.col);
     },
 
     /* ---- go to line (Ctrl+Alt+G) + caret readout ---- */
@@ -1803,10 +1924,22 @@ const LIBRETA_VIEW = {
         this.cancelAutosave(tab.key);
         tab.conflict = null;
         try {
-            const data = await simpleApiFetch(
+            const readUrl =
                 "/api/ext/libreta/read?workspace=" + encodeURIComponent(tab.workspace) +
-                "&path=" + encodeURIComponent(tab.path)
-            );
+                "&path=" + encodeURIComponent(tab.path);
+            let data;
+            try {
+                data = await simpleApiFetch(readUrl);
+            } catch (first) {
+                if (!/too large/i.test(lbErr(first))) throw first;
+                // bigger than max_read_bytes: ask for one window and open it
+                // READ-ONLY — the buffer is partial, saving it would truncate
+                // the file on disk.
+                data = await simpleApiFetch(readUrl + "&offset=0&limit=1000000");
+                tab.windowed = true;
+            }
+            if (!tab.windowed) tab.windowed = !!data.windowed;
+            tab.total = data.total || data.size || 0;
             const raw = data.content || "";
             // the server sends the file verbatim (newline="" in files.py), but
             // CM6 works in LF: keep the file's endings for the save path and
@@ -2368,6 +2501,27 @@ const LIBRETA_PANEL = {
     },
 
     /* ---- trash ---- */
+    // restore everything this workspace has in its trash; a name that is already
+    // taken becomes a reported conflict instead of blocking the rest
+    async restoreAllTrash() {
+        this.treeError = "";
+        try {
+            const data = await simpleApiPost("/api/ext/libreta/trash/restore-all", {
+                workspace: this.wsName(),
+            });
+            const conflicts = Array.isArray(data.conflicts) ? data.conflicts.length : 0;
+            if (conflicts) {
+                this.treeError = conflicts === 1
+                    ? "1 file could not be restored: its original name is already taken"
+                    : conflicts + " files could not be restored: their original names are already taken";
+            }
+            await this.loadTrash();
+            await this.reload();
+        } catch (e) {
+            this.treeError = lbErr(e);
+        }
+    },
+
     async loadTrash() {
         this.trashLoading = true;
         try {
@@ -2633,6 +2787,15 @@ document.addEventListener("keydown", (event) => {
         if (!LB_VIEW || !LB_CM6) return;
         event.preventDefault();
         LB_CM6.openSearchPanel(LB_VIEW);
+        return;
+    }
+
+    if (action === "filesearch") {
+        const target = event.target;
+        const tag = target ? String(target.tagName || "").toUpperCase() : "";
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (target && target.isContentEditable)) return;
+        event.preventDefault();
+        view.openFind();
     }
 });
 

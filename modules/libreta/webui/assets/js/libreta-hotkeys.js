@@ -45,6 +45,7 @@
         { id: "quickopen", label: "Quick open a file", group: "Navigate", def: "Mod-p", where: "window" },
         { id: "goto", label: "Go to line", group: "Navigate", def: "Mod-Alt-g", where: "editor" },
         { id: "find", label: "Find & replace", group: "Search", def: "Mod-f", where: "window" },
+        { id: "filesearch", label: "Search across files", group: "Search", def: "Mod-Shift-f", where: "window" },
         { id: "comment", label: "Toggle comment (code mode)", group: "Code", def: "Mod-/", where: "editor" },
         { id: "fold", label: "Fold at cursor (code mode)", group: "Code", def: "Mod-Shift-[", where: "editor" },
         { id: "unfold", label: "Unfold at cursor (code mode)", group: "Code", def: "Mod-Shift-]", where: "editor" },

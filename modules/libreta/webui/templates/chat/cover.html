@@ -179,6 +179,13 @@
 
         <div class="lb-error" x-show="$store.libretaView.error" x-text="$store.libretaView.error"></div>
 
+        {# windowed read: only the beginning of the file is in the buffer, so the
+           tab is read-only and Save refuses — say so instead of failing silently #}
+        <div class="lb-window-note" x-show="$store.libretaView.activeTab() && $store.libretaView.activeTab().windowed">
+            This file is larger than the read limit: only the first part is loaded, so it is
+            <b>read-only</b>. Save and autosave are disabled to avoid truncating it.
+        </div>
+
         <div class="lb-empty-stage" x-show="!$store.libretaView.tabs.length">
             Open a file from the Libreta tab. <span class="lb-kbd">Esc</span> closes this view.
         </div>
@@ -236,6 +243,37 @@
                 <span class="lb-quick-ws" x-text="$store.libretaView.quick.ws"></span>
                 <span class="lb-kbd">↑↓</span><span>move</span>
                 <span class="lb-kbd">Enter</span><span>open</span>
+                <span class="lb-kbd">Esc</span><span>close</span>
+            </div>
+        </div>
+    </div>
+
+    {# ---------------- search across the workspace (Ctrl+Shift+F) ---------------- #}
+    <div class="lb-quick" x-show="$store.libretaView.find.open" x-cloak
+        @click.self="$store.libretaView.closeFind()"
+        @keydown.escape.window="$store.libretaView.closeFind()">
+        <div class="lb-quick-box" role="dialog" aria-label="Search across files">
+            <input type="text" class="lb-quick-input lb-find-input" placeholder="search all files…"
+                autocomplete="off" spellcheck="false"
+                x-model="$store.libretaView.find.query"
+                @input="$store.libretaView.queueFind()"
+                @keydown.enter.prevent="$store.libretaView.runFind()">
+            <div class="lb-quick-list">
+                <template x-for="hit in $store.libretaView.find.results" :key="hit.path + ':' + hit.line + ':' + hit.col">
+                    <div class="lb-quick-item" @click="$store.libretaView.findJump(hit)">
+                        <span class="lb-quick-name" x-text="hit.path.split('/').pop() + ':' + hit.line"></span>
+                        <span class="lb-quick-dir" x-text="hit.text"></span>
+                    </div>
+                </template>
+                <div class="lb-quick-empty" x-show="!$store.libretaView.find.results.length">
+                    <span x-show="$store.libretaView.find.loading">searching…</span>
+                    <span x-show="!$store.libretaView.find.loading"
+                        x-text="$store.libretaView.find.error || 'no match'"></span>
+                </div>
+            </div>
+            <div class="lb-quick-foot">
+                <span class="lb-quick-ws" x-text="$store.libretaView.find.ws"></span>
+                <span class="lb-kbd">Enter</span><span>search</span>
                 <span class="lb-kbd">Esc</span><span>close</span>
             </div>
         </div>
