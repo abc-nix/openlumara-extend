@@ -971,6 +971,7 @@ const LIBRETA_VIEW = {
     caret: "",             // "line:col" of the caret — Code mode readout in the doc bar
     goto: { open: false, value: "", error: "" },   // Ctrl+Alt+G palette
     fitTabs: true,         // browser pref: tabs share the strip instead of their full name
+    codeScheme: "theme",   // browser pref: "theme" (adaptive) | "github-light" | "onedark"
     newFileFolder: "",     // "workspace/folder" the tab-strip + creates files in ("" = active root)
     _silent: false,        // true while swapping docs / resetting buffers
     quick: { open: false, query: "", idx: 0, files: [], loadedFor: "", loadedAt: 0, ws: "", loading: false, error: "" },
@@ -1025,6 +1026,8 @@ const LIBRETA_VIEW = {
     restore() {
         this.lineNumbers = lbReadJson("libreta.lineNumbers", true) !== false;
         this.fitTabs = lbReadJson("libreta.fitTabs", true) !== false;
+        const scheme = String(lbReadRaw("libreta.codeScheme", "theme") || "theme");
+        this.codeScheme = ["theme", "github-light", "onedark"].includes(scheme) ? scheme : "theme";
         this.newFileFolder = String(lbReadRaw("libreta.newFileFolder", "") || "");
         this.split = lbReadJson("libreta.split", false) === true;
         const view = lbReadJson(LB_LS.view, "full");
@@ -1476,6 +1479,18 @@ const LIBRETA_VIEW = {
         const tab = this.activeTab();
         if (!tab) return "";
         return tab.workspace + " / " + (tab.parent ? tab.parent + " / " : "") + tab.name;
+    },
+
+    // code theme: pure data (CSS variable blocks in libreta.css), so switching
+    // is instant and needs no bundle work. "theme" derives the tokens from the
+    // app's own colours; the explicit schemes are fixed palettes.
+    setCodeScheme(value) {
+        const next = ["theme", "github-light", "onedark"].includes(value) ? value : "theme";
+        this.codeScheme = next;
+        lbWriteRaw("libreta.codeScheme", next);
+        if (LB_VIEW) {
+            requestAnimationFrame(() => { try { LB_VIEW.requestMeasure(); } catch (e) { /* not mounted */ } });
+        }
     },
 
     // fit mode: tabs share the strip and long names ellipsize until the tab

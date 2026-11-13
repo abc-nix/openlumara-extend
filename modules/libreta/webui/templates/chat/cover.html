@@ -194,6 +194,7 @@
             {# CodeMirror 6 host: Code mode, Notes live preview, and split-view
                source. Always in the DOM so it can measure itself. #}
             <div class="lb-editor" id="lb-editor-host"
+                :data-lb-scheme="$store.libretaView.codeScheme"
                 :class="$store.libretaView.livePreviewOn() ? 'lb-editor--prose' : 'lb-editor--code'"
                 x-show="($store.libretaView.modeOf() === 'code' || $store.libretaView.livePreviewOn() || $store.libretaView.splitActive()) &amp;&amp; !$store.libretaView.cmFailed"></div>
 

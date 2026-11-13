@@ -779,6 +779,38 @@ body[data-lb="floating"] .lb-cover {
     --lb-mono-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* Explicit code schemes (Options ▸ Code theme), same variables, fixed values —
+   a scheme is data, so adding one is a new block, not a rebuild. The attribute
+   lives on #lb-editor-host, set by libreta.js from the browser preference. */
+.lb-cover .lb-editor[data-lb-scheme="github-light"] .atomic-cm-editor {
+    --lb-hl-keyword: #cf222e;
+    --lb-hl-string: #0a3069;
+    --lb-hl-number: #0550ae;
+    --lb-hl-comment: #6e7781;
+    --lb-hl-type: #953800;
+    --lb-hl-function: #8250df;
+    --lb-hl-property: #0550ae;
+    --lb-hl-variable: #24292f;
+    --lb-hl-operator: #57606a;
+    --lb-hl-tag: #116329;
+    --lb-hl-invalid: #82071e;
+}
+
+/* One Dark: meant for dark backgrounds — see the picker's hint. */
+.lb-cover .lb-editor[data-lb-scheme="onedark"] .atomic-cm-editor {
+    --lb-hl-keyword: #c792ea;
+    --lb-hl-string: #98c379;
+    --lb-hl-number: #d19a66;
+    --lb-hl-comment: #7f848e;
+    --lb-hl-type: #e5c07b;
+    --lb-hl-function: #61afef;
+    --lb-hl-property: #61afef;
+    --lb-hl-variable: #abb2bf;
+    --lb-hl-operator: #56b6c2;
+    --lb-hl-tag: #e06c75;
+    --lb-hl-invalid: #f44747;
+}
+
 .lb-cover .lb-editor .cm-scroller { overflow: visible; }
 .lb-cover .lb-editor .cm-content { padding: 6px 0 72px; }
 

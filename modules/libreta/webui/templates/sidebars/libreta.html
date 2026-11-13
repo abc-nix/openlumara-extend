@@ -297,6 +297,18 @@
                         </div>
 
                         <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-scheme">Code theme</label>
+                            <select id="lb-opt-scheme" class="lb-wspick"
+                                :value="$store.libretaView.codeScheme"
+                                @change="$store.libretaView.setCodeScheme($event.target.value)">
+                                <option value="theme">Follow the app theme</option>
+                                <option value="github-light">GitHub light</option>
+                                <option value="onedark">One Dark (for dark backgrounds)</option>
+                            </select>
+                            <div class="lb-opt-hint">Colours of the editor only. “Follow the app theme” derives every token from the five colours each theme family defines, so it stays readable in light and dark. The other two are fixed palettes. A browser preference — applies immediately.</div>
+                        </div>
+
+                        <div class="lb-opt">
                             <label class="lb-opt-row">
                                 <input type="checkbox" class="lb-check"
                                     :checked="$store.libretaView.lineNumbers"
