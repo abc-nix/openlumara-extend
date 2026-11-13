@@ -101,38 +101,33 @@ Routes: `workspaces` · `tree` · `read` · `save` · `preview` · `create` ·
 
 ## Known limitations to revisit
 
-1. Folder rename/delete is refused by the backend.
-2. Trash has no “restore all” and shows the current workspace only.
-3. `read` refuses files larger than `max_read_bytes` (1 MB) instead of windowing.
-4. Wiki links are supported by the engine but not wired to the vault.
-5. Relative image paths resolve against the page URL, not the workspace.
-6. Find & replace exists per document; cross-file search does not (backend route + results pane still to build).
-7. Both retirements are done at config level: core `notes` and `codeeditor` are
-   in the `disabled` lists, and core `coder` too (their CM5 vendor still sits in
-   the trees, unused). Re-enabling either would load a second editor engine for
-   no reason.
-8. **Keyboard shortcuts live in localStorage** (`libreta.keys`, edited by the
-   modal in `webui/assets/js/libreta-hotkeys.js`). Deliberate for now: it applies
-   immediately with no restart, like `show_line_numbers`. When the bindings
-   should follow the user between browsers, move that object to
-   `data/libreta/hotkeys.json` behind a `state/hotkeys` route (same shape as
-   `data/libreta/autosave.json`); everything reads through `lbHotkeyMap()`, so
-   the swap stays inside that file.
-   - **Rebinding Ctrl+/ (toggle comment) still leaves the old chord working**
-   (reported 2026-11-13, parked). Most likely because `defaultKeymap` also binds
-   `Mod-/` to `toggleComment`, and `lbFilterKeymap()` only filters
-   `searchKeymap` and `foldKeymap`. Fix shape: include a `comment` rule for
-   `defaultKeymap` (pattern `/^(Mod|Ctrl)-\/$/` and the `Shift-` variant), then
-   re-check every action the same way — the general rule is "whatever CM binds
-   for an action we expose must be filtered, not just the two maps we knew
-   about". `Alt-Alt`/`Shift-` variants matter: filter on the key pattern, not on
-   an exact string.
+**Done in the 2026-11-13 backend batch (routes + UI wiring, 88 tests):** folder
+rename/delete (directories allowed, folder-into-itself refused, subtree moved to
+the trash, `state.json`/`autosave.json` keys rebased, and the UI refuses while a
+file inside is dirty); trash **restore-all** with reported conflicts; **cross-file
+search** (literal only — no regex, per the decision that day) behind a
+`Ctrl+Shift+F` palette; **relative note images** through the `raw` route (bytes
+travel base64 inside JSON because the extension API has no binary response);
+**windowed read** for files over `max_read_bytes` (read-only, banner, save and
+autosave refused). Two parked bugs were also closed: the `Ctrl+/` rebind (now
+shadowed against `defaultKeymap`) and dirty-on-undo (`LB_SAVED` baseline).
 
-9. **The dirty flag never clears on undo** (reported 2026-11-13): any doc change
-   sets `tab.dirty = true` and nothing re-evaluates it, so undoing back to the
-   text that is on disk leaves the Save button lit. Fix shape: keep the saved
-   `Text` per tab (module-level Map keyed by tab, NOT in the Alpine store — a
-   CM `Text` inside the proxy is asking for trouble) and recompute the flag only
-   on history transactions (`tr.isUserEvent("undo")` / `"redo"`), comparing
-   `state.doc.eq(savedText)`. Doing it on every keystroke would be an O(n)
-   compare per key; on undo/redo alone it is rare and cheap.
+Still open:
+
+1. **Wiki links** are supported by the preview engine but not wired to the vault
+   (no backlinks, no vault-wide resolution).
+2. **Tags / properties / callouts / in-vault search** — P3, not started.
+3. **`raw` first-render 404**: the image widget loads the relative path before the
+   MutationObserver swaps in the blob URL. The final state is correct and the one
+   console 404 is cosmetic; killing it means rewriting `src` inside the bundle,
+   so it rides on a future rebuild.
+4. **Keyboard shortcuts live in localStorage** (`libreta.keys`). To make them
+   follow the user between browsers, move that object to
+   `data/libreta/hotkeys.json` behind a `state/hotkeys` route; `lbHotkeyMap()` is
+   the only reader, so the swap stays inside `libreta-hotkeys.js`.
+5. **Retirements are done at config level**: core `notes`, `codeeditor` and
+   `coder` are disabled; their CM5 vendor trees remain, unused.
+6. **Round 2 parity (optional)**: tree-sitter lint (`/lint` + `@codemirror/lint`)
+   and vim. Both need a restart; lint also needs a bundle rebuild.
+7. **Theme Tier 2**: a JSON theme file compiled into a real `HighlightStyle`
+   (~30 token slots). Rides on the same rebuild as item 6.
