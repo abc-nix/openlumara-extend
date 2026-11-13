@@ -27,6 +27,9 @@
 
     const MOD_ORDER = ["Mod", "Alt", "Shift"];
 
+    // keydown fires for these before the real key; they are never a binding.
+    const MODIFIER_KEYS = ["Control", "Shift", "Alt", "Meta", "OS", "AltGraph", "CapsLock"];
+
     // base key for the punctuation a US layout produces while Shift is held
     const SHIFTED = {
         "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6",
@@ -151,6 +154,8 @@
     function lbChordAllowed(chord) {
         if (!chord) return false;
         const key = chord.split("-").pop();
+        // a modifier alone is not a chord, whatever the event order said
+        if (MODIFIER_KEYS.includes(key) || key === "") return false;
         if (key === "Escape") return true;
         if (/^F\d{1,2}$/.test(key)) return true;
         return chord.includes("Mod-") || chord.startsWith("Alt-") || chord.includes("-Alt-") || chord.includes("-Shift-");
@@ -283,6 +288,11 @@
 
             event.preventDefault();
             event.stopImmediatePropagation();
+
+            // Pressing Ctrl/Shift/Alt on its own is the START of a chord, not a
+            // chord: keydown fires for the modifier first, and treating that as
+            // the finished binding ended recording before the letter arrived.
+            if (MODIFIER_KEYS.includes(event.key)) return;
 
             if (event.key === "Escape") {
                 store.stop();
