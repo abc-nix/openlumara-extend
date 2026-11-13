@@ -64,6 +64,21 @@ function lbWriteRaw(key, value) {
     try { localStorage.setItem(key, String(value)); } catch (e) { /* private mode */ }
 }
 
+/* ---- diagnostics ---------------------------------------------------------
+   Console logging for the paths that fail silently in the UI. ON unless
+   localStorage "libreta.debug" is "0": this is a module in use, and a silent
+   failure costs more than a few console lines. Set it to "0" to silence.
+   The build marker is logged on load so a stale cached script is visible at a
+   glance — /ext-assets sends no Cache-Control (openlumara-issues.md #7). */
+const LB_BUILD = "2026-11-13d";
+
+function lbLog(...args) {
+    try {
+        if (localStorage.getItem("libreta.debug") === "0") return;
+    } catch (e) { /* storage disabled: keep logging */ }
+    try { console.log("[libreta]", ...args); } catch (e) { /* ignore */ }
+}
+
 function lbIsProse(path) {
     return /\.(md|markdown|mdx)$/i.test(String(path || ""));
 }
@@ -1481,13 +1496,17 @@ const LIBRETA_VIEW = {
     // route refusing to overwrite, so no extra listing request is needed.
     async createQuickFile() {
         this.error = "";
+        lbLog("createQuickFile: setting =", JSON.stringify(this.newFileFolder), "wsName =", this.wsName());
         const target = lbParseNewFileFolder(this.newFileFolder, this.wsName());
+        lbLog("createQuickFile: target =", target);
         if (!target.workspace) {
             this.error = "pick a workspace for new files (Options)";
+            lbLog("createQuickFile: no workspace resolved, stopping");
             return;
         }
         for (let i = 0; i < 50; i += 1) {
             const name = i === 0 ? "Untitled.md" : "Untitled " + i + ".md";
+            lbLog("createQuickFile: attempt", name, "in", target);
             try {
                 await simpleApiPost("/api/ext/libreta/create", {
                     workspace: target.workspace,
@@ -1496,19 +1515,39 @@ const LIBRETA_VIEW = {
                     content: "",
                 });
                 const path = target.parent ? target.parent + "/" + name : name;
+                lbLog("createQuickFile: created", target.workspace + "|" + path);
                 await this.open(target.workspace, path);
+                lbLog("createQuickFile: opened", path);
                 return;
             } catch (e) {
                 const message = lbErr(e);
+                lbLog("createQuickFile: refused —", message);
                 // only a name clash is worth retrying; anything else (missing
                 // workspace/folder) would just fail 50 times over
                 if (!/exist/i.test(message)) {
                     this.error = message;
+                    // the usual cause is a workspace name that does not exist:
+                    // log what the backend actually offers, so it is one glance
+                    this.logWorkspaces();
                     return;
                 }
             }
         }
         this.error = "could not find a free name for the new file";
+        lbLog("createQuickFile: gave up after 50 names");
+    },
+
+    // diagnostics only: list the workspace names the backend knows about
+    async logWorkspaces() {
+        try {
+            const data = await simpleApiFetch("/api/ext/libreta/workspaces");
+            const names = (data.workspaces || []).map((entry) => entry.name);
+            lbLog("workspaces the backend offers:", names);
+            return names;
+        } catch (e) {
+            lbLog("workspaces: fetch failed —", lbErr(e));
+            return [];
+        }
     },
 
     /* ---- go to line (Ctrl+Alt+G) + caret readout ---- */
@@ -2559,6 +2598,11 @@ window.LibretaHotkeysChanged = () => {
 
 // keep the docked panel and the space reserved for it in step when the window
 // resizes (the width is pinned in px so padding and panel share one base)
+// build marker: if this line is missing (or shows an older tag) in the console
+// after a reload, the browser is serving a cached libreta.js and no fix below
+// can be trusted.
+lbLog("libreta.js", LB_BUILD, "loaded");
+
 window.addEventListener("resize", () => {
     try { Alpine.store("libretaView").syncDockWidth(); } catch (e) { /* store not ready */ }
 });
