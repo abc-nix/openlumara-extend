@@ -22,6 +22,18 @@
                     </button>
                 </div>
             </template>
+            {# Obsidian-style new tab: creates Untitled.md (then Untitled 1.md, …)
+               in the folder configured in Options, and opens it. #}
+            <button type="button" class="lb-newtab"
+                :title="$store.libretaView.newFileFolder
+                    ? 'New file in ' + $store.libretaView.newFileFolder
+                    : 'New file in the current workspace root'"
+                @click.stop="$store.libretaView.createQuickFile()">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <line x1="12" y1="6" x2="12" y2="18"/><line x1="6" y1="12" x2="18" y2="12"/>
+                </svg>
+            </button>
         </div>
         <div class="lb-tabbar-actions">
             <button type="button" class="lb-iconbtn" title="Reload the open file from disk"

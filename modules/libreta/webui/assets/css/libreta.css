@@ -391,6 +391,27 @@ body[data-lb="floating"] .lb-cover {
 
 .lb-tabbar-spacer { flex: 1; }
 
+/* new-file button at the end of the tab strip (Obsidian style). It sits inside
+   .lb-tabs so it scrolls with the tabs, and never shrinks. */
+.lb-newtab {
+    flex: 0 0 auto;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 24px;
+    margin-left: 2px;
+    padding: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.lb-newtab:hover { color: var(--text-primary); background: var(--bg-secondary); border-color: var(--border-color); }
+.lb-newtab svg { width: 14px; height: 14px; }
+
 /* ---- document bar ---- */
 .lb-docbar {
     display: flex;

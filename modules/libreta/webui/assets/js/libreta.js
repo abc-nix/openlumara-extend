@@ -501,6 +501,16 @@ function lbFilterKeymap(list, rules) {
     return list.filter((binding) => !moved.some((id) => rules[id].test(String(binding.key || ""))));
 }
 
+// "workspace/folder/sub" -> {workspace, parent}. Empty means the active tab's
+// workspace root; a bare name ("Inbox") is read as a folder of that workspace.
+function lbParseNewFileFolder(setting, fallbackWorkspace) {
+    const raw = String(setting || "").trim().replace(/^\/+|\/+$/g, "");
+    if (!raw) return { workspace: fallbackWorkspace || "", parent: "" };
+    const parts = raw.split("/").filter(Boolean);
+    if (parts.length === 1) return { workspace: fallbackWorkspace || "", parent: parts[0] };
+    return { workspace: parts[0], parent: parts.slice(1).join("/") };
+}
+
 // editor-side actions only: save/quick open/paste are handled by the document
 // listener, so binding them here too would run them twice per keystroke.
 function lbEditorHotkeyBindings() {
@@ -941,6 +951,7 @@ const LIBRETA_VIEW = {
     caret: "",             // "line:col" of the caret — Code mode readout in the doc bar
     goto: { open: false, value: "", error: "" },   // Ctrl+Alt+G palette
     fitTabs: true,         // browser pref: tabs share the strip instead of their full name
+    newFileFolder: "",     // "workspace/folder" the tab-strip + creates files in ("" = active root)
     _silent: false,        // true while swapping docs / resetting buffers
     quick: { open: false, query: "", idx: 0, files: [], loadedFor: "", loadedAt: 0, ws: "", loading: false, error: "" },
 
@@ -994,6 +1005,7 @@ const LIBRETA_VIEW = {
     restore() {
         this.lineNumbers = lbReadJson("libreta.lineNumbers", true) !== false;
         this.fitTabs = lbReadJson("libreta.fitTabs", true) !== false;
+        this.newFileFolder = String(lbReadRaw("libreta.newFileFolder", "") || "");
         this.split = lbReadJson("libreta.split", false) === true;
         const view = lbReadJson(LB_LS.view, "full");
         this.view = LB_VIEWS.indexOf(view) >= 0 ? view : "full";
@@ -1455,6 +1467,48 @@ const LIBRETA_VIEW = {
         if (LB_VIEW) {
             requestAnimationFrame(() => { try { LB_VIEW.requestMeasure(); } catch (e) { /* not mounted */ } });
         }
+    },
+
+    // folder for the tab-strip "+": "workspace", "workspace/folder", or "" for
+    // the active tab's workspace root. A browser preference like line numbers.
+    setNewFileFolder(value) {
+        this.newFileFolder = String(value || "").trim();
+        lbWriteRaw("libreta.newFileFolder", this.newFileFolder);
+    },
+
+    // Obsidian-style new tab: create "Untitled.md", then "Untitled 1.md", … in
+    // the configured folder and open it. The numbering comes from the create
+    // route refusing to overwrite, so no extra listing request is needed.
+    async createQuickFile() {
+        this.error = "";
+        const target = lbParseNewFileFolder(this.newFileFolder, this.wsName());
+        if (!target.workspace) {
+            this.error = "pick a workspace for new files (Options)";
+            return;
+        }
+        for (let i = 0; i < 50; i += 1) {
+            const name = i === 0 ? "Untitled.md" : "Untitled " + i + ".md";
+            try {
+                await simpleApiPost("/api/ext/libreta/create", {
+                    workspace: target.workspace,
+                    parent: target.parent,
+                    name,
+                    content: "",
+                });
+                const path = target.parent ? target.parent + "/" + name : name;
+                await this.open(target.workspace, path);
+                return;
+            } catch (e) {
+                const message = lbErr(e);
+                // only a name clash is worth retrying; anything else (missing
+                // workspace/folder) would just fail 50 times over
+                if (!/exist/i.test(message)) {
+                    this.error = message;
+                    return;
+                }
+            }
+        }
+        this.error = "could not find a free name for the new file";
     },
 
     /* ---- go to line (Ctrl+Alt+G) + caret readout ---- */

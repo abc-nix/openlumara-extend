@@ -265,6 +265,17 @@
                 <template x-if="opts.loaded">
                     <div class="lb-opts-form">
 
+                        <div class="lb-opt-title">Files</div>
+
+                        <div class="lb-opt">
+                            <label class="lb-opt-label" for="lb-opt-newfolder">Folder for new files</label>
+                            <input id="lb-opt-newfolder" type="text" class="lb-input"
+                                placeholder="e.g. Notes/Inbox"
+                                :value="$store.libretaView.newFileFolder"
+                                @change="$store.libretaView.setNewFileFolder($event.target.value)">
+                            <div class="lb-opt-hint">The <b>+</b> at the end of the tab strip creates <code>Untitled.md</code> (then <code>Untitled 1.md</code>, …) here and opens it. <code>workspace/folder</code>, or a bare folder name inside the current workspace; empty = the workspace root. A browser preference — applies immediately.</div>
+                        </div>
+
                         <div class="lb-opt-title">Reading</div>
 
                         <div class="lb-opt">
