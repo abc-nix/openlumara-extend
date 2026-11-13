@@ -347,15 +347,20 @@ body[data-lb="floating"] .lb-cover {
 
 .lb-tab-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
-/* Fit mode (default, browser pref `libreta.fitTabs`): every tab takes an equal
-   share of the strip and long names ellipsize instead of forcing the strip to
-   scroll. min-width is the floor — once every tab is at the floor the strip
-   scrolls again rather than squashing names into slivers. The title attribute
+/* Fit mode (default, browser pref `libreta.fitTabs`): a tab is as wide as its
+   name, so two tabs keep their natural size in a half-empty strip. Names only
+   start ellipsizing when the strip runs out of room (flex-shrink), and every tab
+   stops at a 76px floor; past that the strip scrolls instead of squashing names
+   into slivers. No max-width: a long name may take the whole strip while there
+   is room, and shrinks as soon as a neighbour needs it. The title attribute
    still carries the full workspace/path. */
 .lb-tabs.fit .lb-tab {
-    flex: 1 1 0;
+    /* content-sized, never stretched: two tabs keep their natural width even
+       when the strip is half empty. `shrink` only kicks in once the strip runs
+       out of room, and each tab stops at the 76px floor. */
+    flex: 0 1 auto;
     min-width: 76px;
-    max-width: 240px;
+    max-width: none;
 }
 .lb-tabs.fit .lb-tab .lb-tab-name { flex: 0 1 auto; min-width: 0; }
 .lb-tab-dot {
