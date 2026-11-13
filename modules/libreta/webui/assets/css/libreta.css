@@ -719,6 +719,26 @@ body[data-lb="floating"] .lb-cover {
     --atomic-editor-body-size: 15.5px;
     --atomic-editor-body-leading: 1.75;
     --atomic-editor-measure: 70ch;
+
+    /* Syntax palette. The engine declares every token colour as
+       var(--lb-hl-*, <fallback>) and the fallbacks are the One Dark pastels
+       (#c792ea keywords, #c3e88d strings, #89ddff operators) — tuned for a dark
+       background. Nothing ever defined these variables, so on a light theme the
+       editor painted pale green and pale blue on white. Defining them here is
+       enough: no rebuild, no restart, and they follow the theme because the five
+       semantic variables below are re-painted per mode by theming.js. */
+    --lb-hl-keyword: var(--accent);
+    --lb-hl-string: var(--info);
+    --lb-hl-number: color-mix(in srgb, var(--info) 60%, var(--text-primary));
+    --lb-hl-comment: color-mix(in srgb, var(--text-primary) 55%, var(--bg-primary));
+    --lb-hl-type: color-mix(in srgb, var(--accent) 70%, var(--info));
+    --lb-hl-function: color-mix(in srgb, var(--accent) 55%, var(--info));
+    --lb-hl-property: var(--accent);
+    --lb-hl-variable: var(--text-primary);
+    --lb-hl-operator: var(--text-primary);
+    --lb-hl-tag: var(--error);
+    --lb-hl-invalid: var(--error);
+    --lb-mono-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .lb-cover .lb-editor .cm-scroller { overflow: visible; }
