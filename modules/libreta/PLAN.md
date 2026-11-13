@@ -30,13 +30,14 @@ One user-facing text surface for OpenLumara: **Notes** (rendered prose) and
   editor (Obsidian style): markdown stays the text, formatting renders in place,
   markers appear only on the caret's line. Split view survives as an optional
   escape hatch; block-by-block editing is removed. Code view moved to CM6 too.
-- **P2 — in progress (parity with coder/codeeditor).** Quick-open Ctrl/⌘+P
-  done (route + palette); codeeditor disabled. **Autosave done** (`autosave_interval`,
+- **P2 — done (Round 1 parity with coder/codeeditor).** Quick-open Ctrl/⌘+P
+  (route + palette); codeeditor disabled. **Autosave** (`autosave_interval`,
   seconds, 0 = off; one timer per open document, same mtime guard as Ctrl+S,
-  banner per document). Next: the CM6 editor extras (fold, brackets, selection
-  matches, smart Enter, Ctrl+/), go-to-line, caret position; optional
-  tree-sitter lint. Inventory and skip list live in
-  `Notes/libreta/libreta-coder-parity.md`.
+  banner per document) with the per-file switch. **CM6 extras**: fold gutter +
+  keys, bracket matching, auto-closing brackets, selection matches, comment
+  toggle, smart Enter (markdownKeymap). **Go to line** (Ctrl+Alt+G) and the
+  `line:col` caret readout. Round 2 (optional): tree-sitter lint, vim. Inventory
+  and skip list live in `Notes/libreta/libreta-coder-parity.md`.
 - **P2.0 — done (2026-11-04). Autosave.** `autosave_interval` (0 = off),
   `autosave_default` + per-file switch (caret next to Save) stored in
   `data/libreta/autosave.json`; the save button is always visible and highlights
@@ -85,7 +86,7 @@ workspaces the editor module already has.
 ```
 module.py                        settings + /api/ext/libreta routes (no tools)
 files.py                         containment, listing, reading, writing, trash
-tests/                           52 unit tests (throwaway vaults in /tmp)
+tests/                           56 unit tests (throwaway vaults in /tmp)
 webui/templates/sidebars/libreta.html (+ .svg)   the tab
 webui/templates/chat/index.html                  claims the below_header slot
 webui/templates/chat/cover.html                  the reading cover
@@ -106,8 +107,10 @@ Routes: `workspaces` · `tree` · `read` · `save` · `preview` · `create` ·
 4. Wiki links are supported by the engine but not wired to the vault.
 5. Relative image paths resolve against the page URL, not the workspace.
 6. Find & replace exists per document; cross-file search does not (backend route + results pane still to build).
-7. core `notes` module still enabled although unused; `codeeditor` still ships
-   its own CM5 vendor (retire both once libreta covers them).
+7. Both retirements are done at config level: core `notes` and `codeeditor` are
+   in the `disabled` lists, and core `coder` too (their CM5 vendor still sits in
+   the trees, unused). Re-enabling either would load a second editor engine for
+   no reason.
 8. **Keyboard shortcuts live in localStorage** (`libreta.keys`, edited by the
    modal in `webui/assets/js/libreta-hotkeys.js`). Deliberate for now: it applies
    immediately with no restart, like `show_line_numbers`. When the bindings

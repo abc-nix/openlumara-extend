@@ -264,6 +264,10 @@ let LB_CM6 = null;            // the vendored namespace (window.LibretaCM)
 let LB_VIEW = null;           // one EditorView; documents are swapped per tab
 const LB_STATES = new Map();  // tab key -> EditorState (deliberately outside Alpine's proxy)
 const LB_SCROLL = new Map();  // tab key -> scrollTop
+// tab key -> the Text that is on disk. Used only to answer "did undo bring us
+// back to the saved state?" — an O(n) compare, so it runs on undo/redo only and
+// never on ordinary typing.
+const LB_SAVED = new Map();
 const LB_COMP = {
     wrap: null,
     numbers: null,
@@ -531,6 +535,17 @@ function lbParseNewFileFolder(setting, fallbackWorkspace) {
     return { workspace: parts[0], parent: parts.slice(1).join("/") };
 }
 
+// A CodeMirror default that our registry also owns: defaultKeymap binds Mod-/
+// to toggleComment, so a rebind of "comment" left the old chord working. This
+// consumes the old chord at high precedence (returning true swallows it) instead
+// of letting the default fire — filtering defaultKeymap itself would move every
+// other default with it.
+function lbShadowDefault(id, key) {
+    if (typeof lbHotkeyChord !== "function") return [];
+    if (lbHotkeyChord(id) === lbHotkeyDef(id)) return [];
+    return [{ key, run: () => true }];
+}
+
 // editor-side actions only: save/quick open/paste are handled by the document
 // listener, so binding them here too would run them twice per keystroke.
 function lbEditorHotkeyBindings() {
@@ -592,7 +607,19 @@ function lbCm6Extensions() {
             // caret readout (doc bar, code mode): equality-guarded inside
             if (update.selectionSet || update.docChanged) store.syncCaret();
             if (!update.docChanged) return;
-            tab.dirty = true;
+            // Undo/redo can bring the buffer back to exactly what is on disk:
+            // recompute against the saved Text then, and only then. Typing
+            // always dirties the tab (an O(n) Text compare per keystroke would
+            // be far more expensive than the flag it maintains).
+            const historical = update.transactions.some(
+                (tr) => tr.isUserEvent("undo") || tr.isUserEvent("redo")
+            );
+            if (historical) {
+                const savedDoc = LB_SAVED.get(tab.key);
+                tab.dirty = savedDoc ? !savedDoc.eq(update.state.doc) : true;
+            } else {
+                tab.dirty = true;
+            }
             if (tab.mode === "notes" && store.split) store.schedulePreview(tab);
             store.scheduleAutosave(tab);
         }),
@@ -1266,6 +1293,7 @@ const LIBRETA_VIEW = {
             ...lbEditorHotkeyBindings(),
             ...lbFilterKeymap(CM.searchKeymap, { find: /^(Mod|Ctrl)-f$/ }),
             ...lbFilterKeymap(CM.foldKeymap, { fold: /(Mod|Ctrl)-Shift-\[/, unfold: /(Mod|Ctrl)-Shift-\]/ }),
+            ...lbShadowDefault("comment", "Mod-/"),
         ]))];
 
         LB_VIEW.dispatch({
@@ -1291,6 +1319,9 @@ const LIBRETA_VIEW = {
         LB_VIEW.setState(lbStateFor(tab));
         this.applyEditorOptions(tab);
         this.syncCaret();
+        // first time this buffer is seen: the state was built from what is on
+        // disk, so it IS the saved baseline (save()/load() overwrite it later)
+        if (!LB_SAVED.has(tab.key)) LB_SAVED.set(tab.key, LB_VIEW.state.doc);
 
         // the host may have been hidden while the editor measured itself
         requestAnimationFrame(() => {
@@ -1343,6 +1374,7 @@ const LIBRETA_VIEW = {
             tab.mtime = data.mtime || tab.mtime;
             tab.size = data.size || tab.size;
             tab.dirty = false;
+            if (LB_VIEW) LB_SAVED.set(tab.key, LB_VIEW.state.doc);
             tab.codeHtml = lbCodeHtml(tab.content, tab.path);
             tab.html = lbRender(tab.content);
             tab.conflict = null;
@@ -1541,6 +1573,9 @@ const LIBRETA_VIEW = {
                 const path = target.parent ? target.parent + "/" + name : name;
                 lbLog("createQuickFile: created", target.workspace + "|" + path);
                 await this.open(target.workspace, path);
+                // the sidebar tree is a separate component: ask it to refresh so
+                // the new file shows up without switching tabs
+                window.dispatchEvent(new CustomEvent("libreta:tree-changed"));
                 lbLog("createQuickFile: opened", path);
                 return;
             } catch (e) {
@@ -1783,6 +1818,7 @@ const LIBRETA_VIEW = {
             tab.parent = data.parent || "";
             tab.loaded = true;
             tab.dirty = false;
+            LB_SAVED.delete(tab.key);             // re-read: a fresh baseline
             this.dropEditorState(tab);            // fresh buffer; undo history starts here
             tab.codeHtml = lbCodeHtml(tab.content, tab.path);
             if (tab.mode === "notes") tab.html = lbRender(tab.content);
@@ -1833,6 +1869,7 @@ const LIBRETA_VIEW = {
         this.cancelAutosave(key);
         LB_STATES.delete(key);
         LB_SCROLL.delete(key);
+        LB_SAVED.delete(key);   // only once the tab is really gone (after the dirty confirm)
         this.tabs.splice(index, 1);
         if (this.active === key) {
             const next = this.tabs[Math.min(index, this.tabs.length - 1)];

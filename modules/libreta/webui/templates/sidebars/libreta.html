@@ -1,6 +1,7 @@
 {# libreta sidebar tab: title row + Files / Recent / Pinned, one body each.
    Logic lives in assets/js/libreta.js (global LIBRETA_PANEL). #}
-<div class="lb-panel" x-data="LIBRETA_PANEL" x-intersect.enter="onShow()">
+<div class="lb-panel" x-data="LIBRETA_PANEL" x-intersect.enter="onShow()"
+    @libreta:tree-changed.window="reload()">
 
     <div class="lb-head">
         <span class="lb-title">Libreta</span>
