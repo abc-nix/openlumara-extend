@@ -350,20 +350,45 @@ class Libreta(core.module.Module):
 
         return {"workspace": os.path.basename(root) or root, "files": paths}
 
+    @staticmethod
+    def _optional_int(value):
+        """offset/limit arrive as query strings; '' and None mean 'not set'."""
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise files.FileError("offset and limit must be whole numbers")
+
     @webui.route("read")
     async def _route_read(self, body=None, query=None):
-        selector = (query or {}).get("workspace", "")
-        rel = (query or {}).get("path", "")
+        """a whole file, or - with offset/limit - one window of it.
+
+        A windowed answer carries windowed=True, offset, total and read_only=True:
+        the buffer the UI holds is PARTIAL, so it must refuse to save it back.
+        """
+        body = body or {}
+        params = query or {}
+        selector = params.get("workspace", body.get("workspace", ""))
+        rel = params.get("path", body.get("path", ""))
         if not rel:
             return self.result("path is required", success=False)
 
         try:
+            offset = self._optional_int(params.get("offset", body.get("offset")))
+            limit = self._optional_int(params.get("limit", body.get("limit")))
             root = self._root(selector)
-            data = files.read_text(root, rel, max_bytes=self.config.get("max_read_bytes"))
+            data = files.read_text(
+                root,
+                rel,
+                max_bytes=self.config.get("max_read_bytes"),
+                offset=offset,
+                limit=limit,
+            )
         except files.FileError as e:
             return self.result(str(e), success=False)
 
-        return {
+        payload = {
             "workspace": os.path.basename(root) or root,
             "path": files.safe_rel(rel),
             "parent": files.parent_of(rel),
@@ -371,7 +396,68 @@ class Libreta(core.module.Module):
             "mtime": data["mtime"],
             "size": data["size"],
             "mode": data["mode"],
+            "total": data["total"],
+            "windowed": data["windowed"],
+            "read_only": data["read_only"],
         }
+        if data["windowed"]:
+            payload["offset"] = data["offset"]
+        return payload
+
+    @webui.route("raw")
+    async def _route_raw(self, body=None, query=None):
+        """one file's bytes as base64, for images embedded in notes.
+
+        Every /api/ext route answers JSON (the core wraps the result), so there
+        is no binary/streaming response and the bytes ride inside the payload;
+        files.read_bytes enforces the RAW_MAX_BYTES cap.
+        """
+        params = query or {}
+        selector = params.get("workspace", "")
+        rel = params.get("path", "")
+        if not rel:
+            return self.result("path is required", success=False)
+
+        try:
+            root = self._root(selector)
+            data = files.read_bytes(root, rel)
+        except files.FileError as e:
+            return self.result(str(e), success=False)
+
+        return {"workspace": os.path.basename(root) or root, **data}
+
+    @webui.route("search", method="POST")
+    async def _route_search(self, body=None, query=None):
+        """literal search across one workspace, line by line.
+
+        The query is matched as text: no re module ever sees it, so 'a.*b'
+        searches for that exact string. Cap per file and overall keep the
+        answer renderable; `truncated` says the overall cap was hit.
+        """
+        body = body or {}
+        needle = body.get("query")
+        if not isinstance(needle, str) or not needle:
+            return self.result("query is required", success=False)
+
+        workspace = str(body.get("workspace") or "")
+        try:
+            root = self._root(workspace)
+            result = files.search_files(
+                root,
+                needle,
+                case_sensitive=bool(body.get("case_sensitive")),
+                whole_word=bool(body.get("whole_word")),
+                max_results=max(1, min(1000, int(body.get("max_results") or 200))),
+                max_per_file=max(1, min(100, int(body.get("max_per_file") or 10))),
+                show_hidden=bool(self.config.get("show_hidden")),
+                skip_dirs=self._skip_dirs(),
+            )
+        except files.FileError as e:
+            return self.result(str(e), success=False)
+        except (TypeError, ValueError):
+            return self.result("max_results and max_per_file must be whole numbers", success=False)
+
+        return {"workspace": os.path.basename(root) or root, "query": needle, **result}
 
     @webui.route("save", method="POST")
     async def _route_save(self, body=None, query=None):
@@ -465,7 +551,61 @@ class Libreta(core.module.Module):
         except files.FileError as e:
             return self.result(str(e), success=False)
 
-        return {"workspace": os.path.basename(root) or root, **result}
+        name = os.path.basename(root) or root
+        if result.get("dir"):
+            # a folder rename invalidates every key that pointed inside it:
+            # recents, pins and the per-file autosave switches all store
+            # "workspace|path". Rebase the prefix instead of orphaning them.
+            self._rebase_state_prefix(name, str(path), result["path"])
+
+        return {"workspace": name, **result}
+
+    def _rebase_state_prefix(self, workspace, old_rel, new_rel):
+        """rewrite every stored path that lived inside a renamed folder."""
+        old_rel = str(old_rel).strip("/")
+        new_rel = str(new_rel).strip("/")
+        if not old_rel or not new_rel or old_rel == new_rel:
+            return
+        old_prefix = old_rel + "/"
+
+        def rebase(path):
+            text = str(path or "")
+            if text == old_rel:
+                return new_rel
+            if text.startswith(old_prefix):
+                return new_rel + text[len(old_rel):]
+            return text
+
+        state = self._state()
+        changed = False
+        for key in ("recent", "pinned"):
+            items = self._clean(state.get(key))
+            for item in items:
+                if item.get("workspace") == workspace:
+                    moved = rebase(item.get("path", ""))
+                    if moved != item["path"]:
+                        item["path"] = moved
+                        changed = True
+            state[key] = items
+
+        store = self._autosave_store()
+        off, on_list = self._autosave_lists()
+        prefix_key = f"{workspace}|{old_rel}"
+        moved_off, moved_on = [], []
+        for source, target in ((off, moved_off), (on_list, moved_on)):
+            for entry in source:
+                if entry == prefix_key or entry.startswith(prefix_key + "/"):
+                    target.append(f"{workspace}|{new_rel}" + entry[len(prefix_key):])
+                    changed = True
+                else:
+                    target.append(entry)
+        if moved_off != off or moved_on != on_list:
+            store["off"] = moved_off
+            store["on"] = moved_on
+            store.save()
+
+        if changed:
+            state.save()
 
     @webui.route("delete", method="POST")
     async def _route_delete(self, body=None, query=None):
@@ -527,6 +667,26 @@ class Libreta(core.module.Module):
         try:
             root = self._root(workspace)
             result = files.restore_trash(root, trashed)
+        except files.FileError as e:
+            return self.result(str(e), success=False)
+
+        return {"workspace": os.path.basename(root) or root, **result}
+
+    @webui.route("trash/restore-all", method="POST")
+    async def _route_trash_restore_all(self, body=None, query=None):
+        """restore every trashed file of one workspace in one request.
+
+        A name that is already taken must not abort the batch: the entries that
+        still fit come back in `restored`, the rest in `conflicts` with the
+        reason, so the user can deal with them in a second pass.
+        """
+        if self.config.get("read-only"):
+            return self.result("libreta is in read-only mode", success=False)
+
+        workspace = str((body or {}).get("workspace") or "")
+        try:
+            root = self._root(workspace)
+            result = files.restore_all_trash(root)
         except files.FileError as e:
             return self.result(str(e), success=False)
 

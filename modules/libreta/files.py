@@ -14,8 +14,11 @@ Path contract:
     workspace cannot point elsewhere; symlinks found while listing are skipped.
 """
 
+import base64
+import mimetypes
 import os
 import re
+import shutil
 import time
 
 
@@ -24,6 +27,16 @@ PROSE_EXTS = (".md", ".markdown", ".mdx")
 # files are "deleted" by moving them here (inside the workspace, dot-prefixed so
 # the tree hides it). a notes app must never make a delete unrecoverable.
 TRASH_DIR = ".libreta-trash"
+
+# raw bytes are for images embedded in notes. every /api/ext route answers JSON,
+# so the bytes travel base64-encoded: that costs a third more, and the whole
+# payload is held in memory twice, hence a cap far below what a text read allows.
+RAW_MAX_BYTES = 8 * 1024 * 1024
+
+# cross-file search is a live scan, not an index: one stray dump or video in a
+# workspace must not stall the request, so oversized files are skipped, not read.
+SEARCH_MAX_FILE_BYTES = 1_000_000
+SEARCH_MAX_LINE_CHARS = 400
 
 # zero-width space: CodeMirror and our own line renderer put it inside EMPTY
 # lines as a caret placeholder, and it travels with copied text. It is invisible
@@ -203,32 +216,107 @@ def _stat_file(target) -> os.stat_result:
         raise FileError(str(e)) from e
 
 
-def read_text(root, rel, max_bytes=1_000_000) -> dict:
-    """whole file as text, with the mtime the write path will guard on later."""
+def read_text(root, rel, max_bytes=1_000_000, offset=None, limit=None) -> dict:
+    """whole file as text, or one byte window of it, with the mtime the write
+    path will guard on later.
+
+    Without offset/limit nothing changes: the file must fit in max_bytes and is
+    decoded strictly, so a binary file is refused. With a window only that byte
+    range is read, decoded with errors="replace" (a window can cut a multi-byte
+    character in half) and the payload carries `read_only: True`: the caller
+    holds a PARTIAL buffer and must never save it back over the whole file.
+    `total` is always the real file size, `offset` the position actually read
+    (clamped to EOF when the caller asked for more than the file holds).
+    """
     target = resolve(root, rel)
     stat = _stat_file(target)
+    total = stat.st_size
+    windowed = offset is not None or limit is not None
 
-    if stat.st_size > int(max_bytes):
+    payload = {
+        "mtime": stat.st_mtime,
+        "size": total,
+        "mode": mode_for(rel),
+        "total": total,
+        "windowed": windowed,
+        "read_only": windowed,
+    }
+
+    if not windowed:
+        max_bytes = 1_000_000 if max_bytes is None else int(max_bytes)
+        if total > max_bytes:
+            raise FileError(
+                f"file is too large to open here ({total} bytes, limit {max_bytes})"
+            )
+
+        try:
+            # newline="" disables universal-newline translation: a CRLF file must
+            # reach the editor with its \r intact, otherwise the first save would
+            # rewrite every line ending (and show up as a whole-file diff).
+            with open(target, "r", encoding="utf-8", newline="") as f:
+                content = f.read()
+        except UnicodeDecodeError as e:
+            raise FileError("this looks like a binary file and cannot be opened here") from e
+        except OSError as e:
+            raise FileError(str(e)) from e
+
+        payload["content"] = content
+        return payload
+
+    start = 0 if offset is None else max(0, int(offset))
+    if start > total:
+        start = total
+    span = None if limit is None else max(0, int(limit))
+
+    try:
+        with open(target, "rb") as f:
+            f.seek(start)
+            raw = f.read() if span is None else f.read(span)
+    except OSError as e:
+        raise FileError(str(e)) from e
+
+    payload["content"] = raw.decode("utf-8", errors="replace")
+    payload["offset"] = start
+    return payload
+
+
+def raw_type(name) -> str:
+    """mimetype for a file name; a generic binary type when it cannot be guessed."""
+    guessed = mimetypes.guess_type(str(name or ""))[0]
+    return guessed or "application/octet-stream"
+
+
+def read_bytes(root, rel, max_bytes=None) -> dict:
+    """one file's bytes as base64, for images embedded in notes.
+
+    The extension API has no binary/streaming response, so the bytes have to
+    travel inside JSON. Containment is exactly the read path's: '..' and
+    absolute paths are refused, a symlink that resolves outside the workspace
+    is refused (resolve realpaths before the containment check), folders and
+    missing files are refused.
+    """
+    target = resolve(root, rel)
+    if os.path.isdir(target):
+        raise FileError("that path is a folder")
+    stat = _stat_file(target)
+
+    cap = RAW_MAX_BYTES if max_bytes is None else int(max_bytes)
+    if stat.st_size > cap:
         raise FileError(
-            f"file is too large to open here ({stat.st_size} bytes, limit {int(max_bytes)})"
+            f"file is too large to show inline ({stat.st_size} bytes, limit {cap})"
         )
 
     try:
-        # newline="" disables universal-newline translation: a CRLF file must
-        # reach the editor with its \r intact, otherwise the first save would
-        # rewrite every line ending (and show up as a whole-file diff).
-        with open(target, "r", encoding="utf-8", newline="") as f:
-            content = f.read()
-    except UnicodeDecodeError as e:
-        raise FileError("this looks like a binary file and cannot be opened here") from e
+        with open(target, "rb") as f:
+            data = f.read()
     except OSError as e:
         raise FileError(str(e)) from e
 
     return {
-        "content": content,
-        "mtime": stat.st_mtime,
-        "size": stat.st_size,
-        "mode": mode_for(rel),
+        "path": safe_rel(rel),
+        "content_type": raw_type(rel),
+        "size": len(data),
+        "base64": base64.b64encode(data).decode("ascii"),
     }
 
 
@@ -243,6 +331,106 @@ def read_head(root, rel, max_chars=512) -> str:
         raise FileError("this looks like a binary file") from e
     except OSError as e:
         raise FileError(str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# cross-file search (literal, never a regex)
+# ---------------------------------------------------------------------------
+def _is_word_boundary(text, start, end) -> bool:
+    """true when `text[start:end]` is fenced by non-word characters (or the ends)."""
+    before = text[start - 1] if start > 0 else ""
+    after = text[end] if end < len(text) else ""
+    return not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_")
+
+
+def find_in_line(line, needle, case_sensitive=False, whole_word=False) -> int:
+    """1-based column of the first literal match of `needle` in `line`, or 0.
+
+    Literal only, on purpose: no re module ever touches the user's query, so
+    'a.*b' searches for that exact text instead of exploding into a pattern.
+    """
+    if not needle:
+        return 0
+
+    hay = str(line)
+    wanted = str(needle)
+    if not case_sensitive:
+        hay = hay.lower()
+        wanted = wanted.lower()
+
+    start = 0
+    while True:
+        index = hay.find(wanted, start)
+        if index < 0:
+            return 0
+        if not whole_word or _is_word_boundary(hay, index, index + len(wanted)):
+            return index + 1
+        start = index + 1
+
+
+def search_files(root, needle, case_sensitive=False, whole_word=False,
+                 max_results=200, max_per_file=10, show_hidden=False, skip_dirs=()) -> dict:
+    """literal search across every file of one workspace, line by line.
+
+    Walks files.list_files, so hidden entries, skip_dirs, the trash and symlinks
+    (a link inside the workspace pointing elsewhere) are already skipped.
+    Files over SEARCH_MAX_FILE_BYTES and files that fail utf-8 decode are
+    counted as skipped, never fatal: one dump or image must not kill a search
+    over the whole workspace.
+    """
+    needle = str(needle or "")
+    if not needle:
+        raise FileError("a search query is required")
+
+    max_results = max(0, int(max_results))
+    max_per_file = max(1, int(max_per_file))
+
+    results = []
+    truncated = False
+    scanned = 0
+    skipped = 0
+
+    for rel in list_files(root, show_hidden=show_hidden, skip_dirs=skip_dirs):
+        hits = []
+
+        try:
+            target = resolve(root, rel)
+            if os.stat(target).st_size > SEARCH_MAX_FILE_BYTES:
+                skipped += 1
+                continue
+            # the hits stay local until the file was read to the end: a decode
+            # error half way through must not leave half a file in the results
+            with open(target, "r", encoding="utf-8") as f:
+                for number, line in enumerate(f, 1):
+                    if len(hits) >= max_per_file:
+                        break
+                    column = find_in_line(line, needle, case_sensitive, whole_word)
+                    if column:
+                        hits.append({
+                            "path": rel,
+                            "line": number,
+                            "col": column,
+                            "text": line.strip()[:SEARCH_MAX_LINE_CHARS],
+                        })
+        except (FileError, OSError, UnicodeDecodeError):
+            skipped += 1
+            continue
+
+        scanned += 1
+        for hit in hits:
+            if len(results) >= max_results:
+                truncated = True
+                break
+            results.append(hit)
+        if truncated:
+            break
+
+    return {
+        "results": results,
+        "truncated": truncated,
+        "scanned_files": scanned,
+        "skipped_files": skipped,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -333,16 +521,22 @@ def make_dir(root, rel) -> dict:
 
 
 def rename_path(root, rel, new_rel) -> dict:
-    """rename/move a file inside the workspace; refuses to overwrite."""
+    """rename/move a file OR folder inside the workspace; refuses to overwrite.
+
+    A folder rename is refused when the destination lands inside the folder
+    itself (`a` -> `a/b`), because that tree would swallow its own root and
+    leave an unreachable copy. The caller (module.py) additionally rebases the
+    stored recents/pins/autosave keys after a folder move.
+    """
     src = resolve(root, rel)
     if not os.path.exists(src):
         raise FileError("file does not exist")
-    if os.path.isdir(src):
-        raise FileError("folders are not renamed here yet")
 
     dst = resolve(root, new_rel)
     if dst == src:
         raise FileError("nothing to rename")
+    if os.path.isdir(src) and dst.startswith(src.rstrip(os.sep) + os.sep):
+        raise FileError("cannot move a folder inside itself")
     if os.path.exists(dst):
         raise FileError("something already exists at the new name")
 
@@ -354,8 +548,11 @@ def rename_path(root, rel, new_rel) -> dict:
     except OSError as e:
         raise FileError(str(e)) from e
 
+    if os.path.isdir(dst):
+        return {"path": safe_rel(new_rel), "dir": True, "mtime": None, "size": None}
+
     stat = os.stat(dst)
-    return {"path": safe_rel(new_rel), "mtime": stat.st_mtime, "size": stat.st_size}
+    return {"path": safe_rel(new_rel), "dir": False, "mtime": stat.st_mtime, "size": stat.st_size}
 
 
 def delete_file(root, rel, use_trash=True) -> dict:
@@ -366,19 +563,21 @@ def delete_file(root, rel, use_trash=True) -> dict:
     tab. Without the trash the file is really removed — the UI asks first.
     """
     target = resolve(root, rel)
-    if os.path.isdir(target):
-        raise FileError("folders are not deleted here yet")
-    if not os.path.isfile(target):
+    is_dir = os.path.isdir(target)
+    if not is_dir and not os.path.isfile(target):
         raise FileError("file does not exist")
 
     rel = safe_rel(rel)
 
     if not use_trash:
         try:
-            os.remove(target)
+            if is_dir:
+                shutil.rmtree(target)
+            else:
+                os.remove(target)
         except OSError as e:
             raise FileError(str(e)) from e
-        return {"path": rel, "trashed": None}
+        return {"path": rel, "trashed": None, "dir": is_dir}
 
     root_real = resolve(root, "")
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -391,7 +590,7 @@ def delete_file(root, rel, use_trash=True) -> dict:
     except OSError as e:
         raise FileError(str(e)) from e
 
-    return {"path": rel, "trashed": dest_rel}
+    return {"path": rel, "trashed": dest_rel, "dir": is_dir}
 
 
 def _trash_root(root) -> str:
@@ -464,6 +663,28 @@ def restore_trash(root, trashed_rel) -> dict:
         raise FileError(str(e)) from e
 
     return {"path": original_rel, "restored_from": safe_rel(trashed_rel)}
+
+
+def restore_all_trash(root) -> dict:
+    """restore every trashed file of one workspace.
+
+    One collision must not abort the batch: each entry is restored on its own
+    and failures are collected, so the user gets one answer that says what came
+    back and what is still waiting. `conflicts[].path` is where the file would
+    have been restored to (the place that is occupied).
+    """
+    restored = []
+    conflicts = []
+
+    for entry in list_trash(root):
+        try:
+            result = restore_trash(root, entry["trashed"])
+        except FileError as e:
+            conflicts.append({"path": entry["original"], "reason": str(e)})
+            continue
+        restored.append(result["path"])
+
+    return {"restored": restored, "conflicts": conflicts}
 
 
 def purge_trash(root, trashed_rel) -> dict:

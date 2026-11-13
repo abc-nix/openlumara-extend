@@ -458,7 +458,7 @@
             <button type="button" class="lb-menu-item"
                 @click="menuAction((row) => askNewFolder(row))">New folder</button>
             <hr class="lb-menu-sep">
-            <button type="button" class="lb-menu-item" x-show="menu.row && !menu.row.is_dir"
+            <button type="button" class="lb-menu-item" x-show="menu.row"
                 @click="menuAction((row) => askRename(row))">Rename</button>
             <button type="button" class="lb-menu-item" x-show="menu.row"
                 @click="menuAction((row) => copyPath(row))">Copy path</button>
@@ -468,9 +468,9 @@
             <hr class="lb-menu-sep" x-show="menu.row && !menu.row.is_dir">
             {# trash is the default path; permanent delete is the advanced option #}
             <button type="button" class="lb-menu-item danger"
-                x-show="menu.row && !menu.row.is_dir && opts.values.use_trash !== false"
+                x-show="menu.row && opts.values.use_trash !== false"
                 @click="menuAction((row) => askTrash(row))">Move to trash</button>
-            <button type="button" class="lb-menu-item danger" x-show="menu.row && !menu.row.is_dir"
+            <button type="button" class="lb-menu-item danger" x-show="menu.row"
                 @click="menuAction((row) => askPermanentDelete(row))">Delete</button>
         </div>
     </template>

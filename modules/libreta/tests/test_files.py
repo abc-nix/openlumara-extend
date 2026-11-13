@@ -8,6 +8,7 @@ Run from anywhere, no OpenLumara boot needed:
 Every vault here is a throwaway folder under tempfile - never your real notes.
 """
 
+import base64
 import importlib.util
 import os
 import tempfile
@@ -262,9 +263,21 @@ class TestFileOps(VaultCase):
         with self.assertRaises(files.FileError):
             files.rename_path(str(self.root), "Work/note.md", "Work/script.py")
 
-    def test_rename_refuses_folder(self):
+    def test_rename_moves_a_folder_with_its_contents(self):
+        result = files.rename_path(str(self.root), "Work", "Archive")
+        self.assertTrue(result["dir"])
+        self.assertFalse((self.root / "Work").exists())
+        self.assertTrue((self.root / "Archive" / "note.md").is_file())
+        self.assertTrue((self.root / "Archive" / "script.py").is_file())
+
+    def test_rename_refuses_folder_into_itself(self):
         with self.assertRaises(files.FileError):
-            files.rename_path(str(self.root), "Work", "Work2")
+            files.rename_path(str(self.root), "Work", "Work/Inner")
+
+    def test_rename_folder_refuses_existing_target(self):
+        (self.root / "Other").mkdir()
+        with self.assertRaises(files.FileError):
+            files.rename_path(str(self.root), "Work", "Other")
 
     def test_rename_escape_refused(self):
         with self.assertRaises(files.FileError):
@@ -286,10 +299,22 @@ class TestFileOps(VaultCase):
         self.assertNotIn("\u200b", content)
         self.assertEqual(content, "a\n\nb\n")
 
-    def test_delete_refuses_folder(self):
-        with self.assertRaises(files.FileError):
-            files.delete_file(str(self.root), "Work")
-        self.assertTrue((self.root / "Work").is_dir())
+    def test_delete_trashes_a_folder_with_its_contents(self):
+        result = files.delete_file(str(self.root), "Work")
+        self.assertTrue(result["dir"])
+        self.assertFalse((self.root / "Work").exists())
+
+        trashed = self.root / result["trashed"]
+        self.assertTrue((trashed / "note.md").is_file())
+        self.assertTrue((trashed / "script.py").is_file())
+        # the tree hides the trash folder, so the name is gone from the listing
+        names = [entry["name"] for entry in files.list_dir(str(self.root))]
+        self.assertNotIn("Work", names)
+
+    def test_delete_folder_permanently_removes_the_subtree(self):
+        result = files.delete_file(str(self.root), "Work", use_trash=False)
+        self.assertTrue(result["dir"])
+        self.assertFalse((self.root / "Work").exists())
 
     def test_delete_missing_file(self):
         with self.assertRaises(files.FileError):
@@ -347,6 +372,254 @@ class TestFileOps(VaultCase):
         result = files.empty_trash(str(self.root))
         self.assertEqual(result["removed"], 1)
         self.assertEqual(files.list_trash(str(self.root)), [])
+
+
+class TestRawBytes(VaultCase):
+    """raw bytes for images in notes: base64 in JSON, same containment as read."""
+
+    def _image(self):
+        folder = self.root / "pics"
+        folder.mkdir(exist_ok=True)
+        payload = b"\x89PNG\r\n\x1a\n\x00\x01binary bytes"
+        (folder / "tiny.png").write_bytes(payload)
+        return payload
+
+    def test_round_trip(self):
+        payload = self._image()
+        data = files.read_bytes(str(self.root), "pics/tiny.png")
+
+        self.assertEqual(base64.b64decode(data["base64"]), payload)
+        self.assertEqual(data["size"], len(payload))
+        self.assertEqual(data["content_type"], "image/png")
+        self.assertEqual(data["path"], "pics/tiny.png")
+
+    def test_unknown_type_falls_back(self):
+        (self.root / "blob.zzz").write_bytes(b"abcd")
+        data = files.read_bytes(str(self.root), "blob.zzz")
+        self.assertEqual(data["content_type"], "application/octet-stream")
+
+    def test_absolute_path_refused(self):
+        with self.assertRaises(files.FileError):
+            files.read_bytes(str(self.root), "/etc/hostname")
+
+    def test_dotdot_escape_refused(self):
+        with self.assertRaises(files.FileError):
+            files.read_bytes(str(self.root), "../outside.png")
+
+    def test_symlink_outside_refused(self):
+        outside = Path(self._tmp.name) / "outside"
+        outside.mkdir()
+        (outside / "secret.png").write_bytes(b"secret")
+        link = self.root / "linked.png"
+        try:
+            link.symlink_to(outside / "secret.png")
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported here")
+
+        with self.assertRaises(files.FileError):
+            files.read_bytes(str(self.root), "linked.png")
+
+    def test_directory_refused(self):
+        with self.assertRaises(files.FileError):
+            files.read_bytes(str(self.root), "Work")
+
+    def test_missing_file_refused(self):
+        with self.assertRaises(files.FileError):
+            files.read_bytes(str(self.root), "Work/nope.png")
+
+    def test_over_cap_refused(self):
+        (self.root / "big.png").write_bytes(b"x" * 64)
+        old = files.RAW_MAX_BYTES
+        files.RAW_MAX_BYTES = 8
+        try:
+            with self.assertRaises(files.FileError):
+                files.read_bytes(str(self.root), "big.png")
+            # and the same bytes still come through when the cap allows them
+            files.RAW_MAX_BYTES = 64
+            self.assertEqual(files.read_bytes(str(self.root), "big.png")["size"], 64)
+        finally:
+            files.RAW_MAX_BYTES = old
+
+
+class TestWindowedRead(VaultCase):
+    """a file bigger than max_read_bytes is opened one byte window at a time."""
+
+    def test_plain_read_is_unchanged(self):
+        data = files.read_text(str(self.root), "Work/note.md")
+        self.assertEqual(data["content"], "# Title\n\nbody text\n")
+        self.assertFalse(data["windowed"])
+        self.assertFalse(data["read_only"])
+        self.assertEqual(data["total"], data["size"])
+        self.assertEqual(data["mode"], "notes")
+
+    def test_zero_to_n_is_the_prefix(self):
+        size = os.stat(self.root / "Work" / "note.md").st_size
+        data = files.read_text(str(self.root), "Work/note.md", offset=0, limit=4)
+
+        self.assertEqual(data["content"], "# Ti")
+        self.assertEqual(data["offset"], 0)
+        self.assertEqual(data["total"], size)
+        self.assertTrue(data["windowed"])
+
+    def test_offset_inside_the_file(self):
+        data = files.read_text(str(self.root), "Work/note.md", offset=9, limit=9)
+        self.assertEqual(data["content"], "body text")
+        self.assertEqual(data["offset"], 9)
+
+    def test_offset_past_eof_is_empty(self):
+        size = os.stat(self.root / "Work" / "note.md").st_size
+        data = files.read_text(str(self.root), "Work/note.md", offset=5000)
+
+        self.assertEqual(data["content"], "")
+        self.assertEqual(data["offset"], size)  # clamped to EOF
+        self.assertEqual(data["total"], size)
+
+    def test_window_works_where_a_full_read_is_refused(self):
+        with self.assertRaises(files.FileError):
+            files.read_text(str(self.root), "Work/note.md", max_bytes=4)
+        data = files.read_text(str(self.root), "Work/note.md", max_bytes=4, offset=0, limit=4)
+        self.assertEqual(data["content"], "# Ti")
+
+    def test_windowed_payload_is_read_only(self):
+        windowed = files.read_text(str(self.root), "Work/note.md", limit=4)
+        self.assertTrue(windowed["read_only"])
+        self.assertTrue(windowed["windowed"])
+
+    def test_cut_multibyte_character_is_replaced(self):
+        (self.root / "Work" / "utf8.md").write_bytes("h\u00e9llo".encode("utf-8"))
+        data = files.read_text(str(self.root), "Work/utf8.md", offset=1, limit=1)
+        self.assertEqual(data["content"], "\ufffd")
+
+
+class TestSearch(VaultCase):
+    """literal cross-file search: no regex, no index, one scan per request."""
+
+    def _write(self, rel, text):
+        target = self.root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+    def test_finds_across_files_with_line_and_column(self):
+        self._write("Work/search.md", "alpha beta\nBeta again\n")
+        self._write("Work/other.md", "nothing\nbeta here\n")
+        result = files.search_files(str(self.root), "beta")
+
+        found = {(r["path"], r["line"], r["col"]) for r in result["results"]}
+        self.assertEqual(found, {
+            ("Work/other.md", 2, 1),
+            ("Work/search.md", 1, 7),
+            ("Work/search.md", 2, 1),
+        })
+        self.assertEqual(result["truncated"], False)
+        self.assertGreaterEqual(result["scanned_files"], 4)
+
+    def test_case_folding(self):
+        self._write("Work/up.md", "BETA\n")
+        self.assertEqual(files.search_files(str(self.root), "beta")["results"][0]["path"], "Work/up.md")
+        strict = files.search_files(str(self.root), "beta", case_sensitive=True)
+        self.assertEqual(strict["results"], [])
+
+    def test_whole_word_excludes_partial_matches(self):
+        self._write("Work/words.md", "concatenate\ncat\n")
+
+        loose = files.search_files(str(self.root), "cat")
+        self.assertEqual({r["line"] for r in loose["results"]}, {1, 2})
+
+        strict = files.search_files(str(self.root), "cat", whole_word=True)
+        self.assertEqual({(r["line"], r["col"]) for r in strict["results"]}, {(2, 1)})
+
+    def test_query_is_never_a_regex(self):
+        self.assertEqual(files.find_in_line("a.*b", "a.*b"), 1)
+        self.assertEqual(files.find_in_line("axb", "a.*b"), 0)
+        self.assertEqual(files.find_in_line("(x", "(x"), 1)
+
+    def test_max_results_truncates(self):
+        self._write("Work/hits.md", "hit\nhit\nhit\nhit\nhit\n")
+        result = files.search_files(str(self.root), "hit", max_results=2)
+        self.assertEqual(len(result["results"]), 2)
+        self.assertTrue(result["truncated"])
+
+    def test_max_per_file(self):
+        self._write("Work/hits.md", "hit\nhit\nhit\nhit\nhit\n")
+        result = files.search_files(str(self.root), "hit", max_per_file=2)
+        self.assertEqual(len(result["results"]), 2)
+        self.assertFalse(result["truncated"])
+
+    def test_binary_file_is_skipped_not_fatal(self):
+        result = files.search_files(str(self.root), "print")
+        self.assertEqual([r["path"] for r in result["results"]], ["Work/script.py"])
+        self.assertGreaterEqual(result["skipped_files"], 1)
+
+    def test_oversized_file_is_skipped_not_fatal(self):
+        self._write("Work/big.md", "x" * 40 + "\nneedle\n")
+        self._write("Work/small.md", "needle\n")
+        old = files.SEARCH_MAX_FILE_BYTES
+        files.SEARCH_MAX_FILE_BYTES = 20
+        try:
+            result = files.search_files(str(self.root), "needle")
+        finally:
+            files.SEARCH_MAX_FILE_BYTES = old
+
+        paths = [r["path"] for r in result["results"]]
+        self.assertIn("Work/small.md", paths)
+        self.assertNotIn("Work/big.md", paths)
+        self.assertGreaterEqual(result["skipped_files"], 1)
+
+    def test_no_matches(self):
+        result = files.search_files(str(self.root), "no-such-needle")
+        self.assertEqual(result["results"], [])
+        self.assertFalse(result["truncated"])
+        self.assertGreaterEqual(result["scanned_files"], 1)
+
+    def test_symlink_outside_is_never_searched(self):
+        outside = Path(self._tmp.name) / "outside"
+        outside.mkdir()
+        (outside / "leak.txt").write_text("uniqueneedle\n", encoding="utf-8")
+        link = self.root / "leak.txt"
+        try:
+            link.symlink_to(outside / "leak.txt")
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported here")
+
+        result = files.search_files(str(self.root), "uniqueneedle")
+        self.assertEqual(result["results"], [])
+
+    def test_empty_query_is_refused(self):
+        with self.assertRaises(files.FileError):
+            files.search_files(str(self.root), "")
+
+
+class TestRestoreAll(VaultCase):
+    """restore-all: one occupied name must not abort the batch."""
+
+    def test_everything_restored(self):
+        files.delete_file(str(self.root), "Work/note.md")
+        files.delete_file(str(self.root), "Work/script.py")
+
+        result = files.restore_all_trash(str(self.root))
+        self.assertEqual(sorted(result["restored"]), ["Work/note.md", "Work/script.py"])
+        self.assertEqual(result["conflicts"], [])
+        self.assertEqual(files.list_trash(str(self.root)), [])
+        self.assertIn("body text", (self.root / "Work" / "note.md").read_text(encoding="utf-8"))
+
+    def test_conflict_keeps_the_rest(self):
+        files.delete_file(str(self.root), "Work/note.md")
+        files.delete_file(str(self.root), "Work/script.py")
+        (self.root / "Work" / "note.md").write_text("occupied\n", encoding="utf-8")
+
+        result = files.restore_all_trash(str(self.root))
+        self.assertEqual(result["restored"], ["Work/script.py"])
+        self.assertEqual(len(result["conflicts"]), 1)
+        self.assertEqual(result["conflicts"][0]["path"], "Work/note.md")
+        self.assertIn("already exists", result["conflicts"][0]["reason"])
+
+        # the occupied file is untouched and the collided entry is still trashed
+        self.assertEqual((self.root / "Work" / "note.md").read_text(encoding="utf-8"), "occupied\n")
+        self.assertEqual(len(files.list_trash(str(self.root))), 1)
+
+    def test_empty_trash(self):
+        result = files.restore_all_trash(str(self.root))
+        self.assertEqual(result, {"restored": [], "conflicts": []})
 
 
 class TestSnippets(unittest.TestCase):

@@ -2276,8 +2276,25 @@ const LIBRETA_PANEL = {
         }
     },
 
+    // A folder with unsaved open files under it cannot be renamed or deleted:
+    // the rename would strand those tabs on a path that no longer exists, and a
+    // delete would trash a file whose edits were never written. Simplest safe
+    // rule — ask the user to save or close them first (decided 2026-11-13).
+    folderLocked(row) {
+        if (!row || !row.is_dir) return false;
+        const workspace = this.wsName();
+        const prefix = String(row.path).replace(/\/+$/, "") + "/";
+        const dirty = Alpine.store("libretaView").tabs.some(
+            (tab) => tab.dirty && tab.workspace === workspace && String(tab.path).startsWith(prefix)
+        );
+        if (dirty) {
+            this.treeError = "there are unsaved files inside " + row.name + " — save or close them first";
+        }
+        return dirty;
+    },
+
     askRename(row) {
-        if (row.is_dir) return;
+        if (this.folderLocked(row)) return;
         this.afterAction = "";
         this.dialog = { kind: "rename", row: row, value: row.name };
     },
@@ -2311,7 +2328,7 @@ const LIBRETA_PANEL = {
     },
 
     trashRow(row) {
-        if (row.is_dir) return;
+        if (this.folderLocked(row)) return;
         this.afterAction = "";
         this.performDelete(row, false);
     },
@@ -2322,7 +2339,7 @@ const LIBRETA_PANEL = {
     },
 
     askPermanentDelete(row) {
-        if (row.is_dir) return;
+        if (this.folderLocked(row)) return;
         this.afterAction = "";
         this.dialog = { kind: "delete-permanent", row: row };
     },
