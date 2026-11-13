@@ -115,3 +115,11 @@ Routes: `workspaces` · `tree` · `read` · `save` · `preview` · `create` ·
    `data/libreta/hotkeys.json` behind a `state/hotkeys` route (same shape as
    `data/libreta/autosave.json`); everything reads through `lbHotkeyMap()`, so
    the swap stays inside that file.
+9. **The dirty flag never clears on undo** (reported 2026-11-13): any doc change
+   sets `tab.dirty = true` and nothing re-evaluates it, so undoing back to the
+   text that is on disk leaves the Save button lit. Fix shape: keep the saved
+   `Text` per tab (module-level Map keyed by tab, NOT in the Alpine store — a
+   CM `Text` inside the proxy is asking for trouble) and recompute the flag only
+   on history transactions (`tr.isUserEvent("undo")` / `"redo"`), comparing
+   `state.doc.eq(savedText)`. Doing it on every keystroke would be an O(n)
+   compare per key; on undo/redo alone it is rare and cheap.

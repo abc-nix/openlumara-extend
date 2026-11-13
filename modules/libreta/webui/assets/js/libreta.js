@@ -537,14 +537,15 @@ function lbCm6Extensions() {
         CM.bracketMatching(),
         // other occurrences of the current selection, in the find bar's tint
         CM.highlightSelectionMatches(),
+        // Save is NOT bound here: it is a window-level action in the hotkey
+        // registry, and binding it twice made a rebind look like an alias (the
+        // hardcoded Mod-s kept saving). The filtered defaults live in the
+        // `keys` compartment for the same reason — see applyEditorOptions().
         CM.keymap.of([
             ...CM.defaultKeymap,
             ...CM.historyKeymap,
-            ...lbFilterKeymap(CM.searchKeymap, { find: /^(Mod|Ctrl)-f$/ }),
-            ...lbFilterKeymap(CM.foldKeymap, { fold: /(Mod|Ctrl)-Shift-\[/, unfold: /(Mod|Ctrl)-Shift-\]/ }),
             ...CM.closeBracketsKeymap,
             CM.indentWithTab,
-            { key: "Mod-s", run: () => { const store = lbStore(); if (store) store.save(); return !!store; } },
         ]),
         // atomic.css is scoped under this class
         CM.EditorView.editorAttributes.of({ class: "atomic-cm-editor" }),
@@ -1220,9 +1221,15 @@ const LIBRETA_VIEW = {
         const brackets = code
             ? [CM.closeBrackets(), CM.keymap.of([...CM.closeBracketsKeymap])]
             : [];
-        // user rebindings ride at high precedence so they beat the defaults;
-        // lbFilterKeymap() already removed the CM default a moved action owned.
-        const keys = [CM.Prec.high(CM.keymap.of(lbEditorHotkeyBindings()))];
+        // User rebindings and the filtered CM defaults live in a compartment,
+        // NOT in the state created when a tab was opened: rebuilding the state
+        // keymap would not reach already-open tabs, which is why a rebind used
+        // to leave the old chord working until the tab was reopened.
+        const keys = [CM.Prec.high(CM.keymap.of([
+            ...lbEditorHotkeyBindings(),
+            ...lbFilterKeymap(CM.searchKeymap, { find: /^(Mod|Ctrl)-f$/ }),
+            ...lbFilterKeymap(CM.foldKeymap, { fold: /(Mod|Ctrl)-Shift-\[/, unfold: /(Mod|Ctrl)-Shift-\]/ }),
+        ]))];
 
         LB_VIEW.dispatch({
             effects: [
@@ -2397,7 +2404,6 @@ document.addEventListener("keydown", (event) => {
     if (hk && hk.open) return;
 
     const action = (window.lbHotkeyAction || (() => ""))(event);
-    if (!action) return;
 
     // paste as plain text: the paste event cannot see the modifiers, so the
     // chord is remembered here; the flag is one-shot and expires on its own.
@@ -2410,6 +2416,13 @@ document.addEventListener("keydown", (event) => {
     let view = null;
     try { view = Alpine.store("libretaView"); } catch (e) { return; }
     if (!view || !view.isOpen) return;
+
+    if (!action) {
+        // a chord a rebindable action has moved away from: swallow it, so the
+        // browser's own binding (Ctrl+S = Save page) never fires instead
+        if ((window.lbHotkeyIsMovedDefault || (() => false))(event)) event.preventDefault();
+        return;
+    }
 
     if (action === "save") {
         event.preventDefault();

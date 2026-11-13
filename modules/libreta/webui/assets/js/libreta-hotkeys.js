@@ -182,11 +182,18 @@
             draft: {},      // id -> chord while the modal is open
 
             list() {
-                return lbHotkeyList().map((row) => ({
-                    ...row,
-                    chord: Object.prototype.hasOwnProperty.call(this.draft, row.id)
-                        ? this.draft[row.id]
-                        : row.chord,
+                // Plain property reads on the draft: Alpine tracks those.
+                // hasOwnProperty() on its proxy is NOT tracked, which is why a
+                // fresh binding only appeared after closing and reopening the
+                // modal. The draft is seeded with every chord on show().
+                return HOTKEYS.map((entry) => ({
+                    id: entry.id,
+                    label: entry.label,
+                    group: entry.group,
+                    def: entry.def,
+                    where: entry.where,
+                    chord: this.draft[entry.id],
+                    custom: this.draft[entry.id] !== entry.def,
                 }));
             },
 
@@ -202,7 +209,11 @@
                 this.open = true;
                 this.recording = "";
                 this.error = "";
-                this.draft = {};
+                // seed the draft with the effective chords: from here on the
+                // modal only reads draft[id], so edits re-render immediately
+                const draft = {};
+                for (const entry of HOTKEYS) draft[entry.id] = lbHotkeyChord(entry.id);
+                this.draft = draft;
             },
 
             hide() {
@@ -247,12 +258,14 @@
             },
 
             reset(id) {
-                delete this.draft[id];
+                this.draft[id] = lbHotkeyDef(id);
                 this.error = "";
             },
 
             resetAll() {
-                this.draft = {};
+                const draft = {};
+                for (const entry of HOTKEYS) draft[entry.id] = entry.def;
+                this.draft = draft;
                 try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
                 lbHotkeyInvalidate();
                 this.error = "";
@@ -260,10 +273,11 @@
 
             save() {
                 const map = {};
-                for (const row of this.list()) {
+                for (const entry of HOTKEYS) {
                     // only what differs from the default is stored, so a later
                     // change of a default is picked up instead of frozen
-                    if (row.chord !== row.def) map[row.id] = row.chord;
+                    const chord = this.draft[entry.id];
+                    if (chord !== entry.def) map[entry.id] = chord;
                 }
                 lbHotkeySaveMap(map);
                 this.draft = {};
@@ -325,10 +339,25 @@
         chordCache = null;
     }
 
+    // A chord that USED to belong to an action but no longer does. Swallowing it
+    // keeps the browser's own shortcut from firing (Ctrl+S would open "Save
+    // page" the moment Save is rebound elsewhere).
+    function lbHotkeyIsMovedDefault(event) {
+        const chord = lbChordOf(event);
+        if (!chord) return false;
+        for (const entry of HOTKEYS) {
+            if (lbNormChord(entry.def) === chord && lbNormChord(lbHotkeyChord(entry.id)) !== chord) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // exposed for libreta.js (separate classic script, same global scope)
     window.LB_HOTKEY_ACTIONS = HOTKEYS;
     window.lbHotkeyAction = lbHotkeyAction;
     window.lbHotkeyInvalidate = lbHotkeyInvalidate;
+    window.lbHotkeyIsMovedDefault = lbHotkeyIsMovedDefault;
     window.lbHotkeyList = lbHotkeyList;
     window.lbHotkeyChord = lbHotkeyChord;
     window.lbHotkeyDef = lbHotkeyDef;
