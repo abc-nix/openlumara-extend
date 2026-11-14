@@ -55,6 +55,10 @@
                     </div>
                     <div class="cp-graph-empty" x-show="$store.chatPro.graphLoading">Loading the tree…</div>
                 </div>
+
+                {# hover miniature: filled and positioned by CHAT_PRO._miniShow,
+                   pointer-events off so it can never steal the hover #}
+                <div class="cp-graph-mini" id="cp-graph-mini" aria-hidden="true"></div>
             </div>
         </div>
     </div>

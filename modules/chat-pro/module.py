@@ -431,6 +431,81 @@ class ChatPro(core.module.Module):
 
         return {"removed": removed}
 
+    @staticmethod
+    def _message_text(message):
+        """the plain text of a message, blocks joined: what a card or the hover
+        miniature can say about it"""
+        content = message.get("content")
+        if isinstance(content, list):
+            return "\n\n".join(str(block.get("text")) for block in content
+                               if isinstance(block, dict) and block.get("type") == "text" and block.get("text"))
+        return str(content or "")
+
+    @classmethod
+    def _answer_message(cls, nodes, group):
+        """the message a turn stands for: the assistant's final answer when the
+        chain has one, otherwise the last message carrying text (a tool-only
+        step, a tool result). never the step list."""
+        def has_text(message):
+            return bool(cls._message_text(message).strip())
+
+        for node_id in reversed(group):
+            message = (nodes.get(node_id) or {}).get("message") or {}
+            if message.get("role") == "assistant" and not message.get("tool_calls") and has_text(message):
+                return message
+        for node_id in reversed(group):
+            message = (nodes.get(node_id) or {}).get("message") or {}
+            if has_text(message):
+                return message
+        return (nodes.get(group[0]) or {}).get("message") or {}
+
+    @webui.route("node")
+    async def _route_node(self, body=None, query=None):
+        """one turn's text, for the hover miniature
+
+        the graph payload deliberately carries only a short preview, and the
+        full text of an off-path message exists nowhere but the tree file, so it
+        is fetched per hover and cached client-side.
+        """
+        channel = self.channel
+        if channel is None:
+            return self.result("no active channel", success=False)
+
+        chat = channel.context.chat
+        if chat.current is None:
+            return self.result("no chat is currently loaded", success=False)
+
+        params = query if isinstance(query, dict) else {}
+        node_id = str(params.get("id") or "")
+        if not node_id:
+            return self.result("missing node id", success=False)
+
+        tree = self._tree(chat.get("id"))
+        if not tree.load():
+            return self.result("this chat has no branches", success=False)
+
+        tree.reconcile(await chat.messages.get())
+        turns, turn_of_node = tree.turns()
+
+        # a node in the middle of a chain still resolves to its turn
+        turn = next((item for item in turns if item["id"] == node_id), None)
+        if turn is None:
+            owner = turn_of_node.get(node_id)
+            turn = next((item for item in turns if item["id"] == owner), None)
+        if turn is None:
+            return self.result("unknown branch node", success=False)
+
+        message = self._answer_message(tree.nodes, turn["nodes"])
+        metadata = message.get("_metadata") or {}
+
+        return {
+            "id": turn["id"],
+            "role": message.get("role") or "?",
+            "content": self._message_text(message)[:8000],
+            "time": metadata.get("timestamp"),
+            "steps": max(0, len(turn["nodes"]) - 1),
+        }
+
     @webui.route("graph")
     async def _route_graph(self, body=None, query=None):
         """the whole tree as *light* nodes, for the canvas
@@ -472,35 +547,12 @@ class ChatPro(core.module.Module):
         def message_of(node_id):
             return (tree.nodes.get(node_id) or {}).get("message") or {}
 
-        def has_text(message):
-            content = message.get("content")
-            if isinstance(content, list):
-                return any(isinstance(block, dict) and block.get("type") == "text" and block.get("text")
-                           for block in content)
-            return bool(str(content or "").strip())
-
         cards = []
         for turn in turns:
             group = turn["nodes"]
             start = turn["id"]
             start_message = message_of(start)
-
-            # the card says what the turn *is*: the assistant's final answer when
-            # the chain has one, otherwise the last message carrying text (a
-            # tool-only step, a tool result). never the step list.
-            answer = None
-            for node_id in reversed(group):
-                message = message_of(node_id)
-                if message.get("role") == "assistant" and not message.get("tool_calls") and has_text(message):
-                    answer = message
-                    break
-            if answer is None:
-                for node_id in reversed(group):
-                    message = message_of(node_id)
-                    if has_text(message):
-                        answer = message
-                        break
-            answer = answer or start_message
+            answer = self._answer_message(tree.nodes, group)
 
             parent_node = (tree.nodes.get(start) or {}).get("parent")
             cards.append({

@@ -474,6 +474,7 @@ const CHAT_PRO = {
         this.graphNodes = [];
         this.graphActive = [];
         this.graphStats = { nodes: 0, branches: 0 };
+        this._miniCache = null;   // a turn's text may have changed since last open
         Alpine.store("ui").openModal("chatpro_graph");
         await Alpine.nextTick();
 
@@ -507,6 +508,7 @@ const CHAT_PRO = {
     },
 
     closeGraph() {
+        this._miniHide();
         this.graphOpen = false;
         const ui = Alpine.store("ui");
         if (ui.currentModal === "chatpro_graph") { ui.closeModal(); }
@@ -761,6 +763,7 @@ const CHAT_PRO = {
 
         viewport.addEventListener("pointerdown", (event) => {
             if (event.target.closest(".cp-gcard") || event.target.closest(".cp-graph-zoom")) { return; }
+            this._miniHide();
             drag = { x: event.clientX, y: event.clientY, px: this._graphX, py: this._graphY };
             viewport.classList.add("panning");
             try { viewport.setPointerCapture(event.pointerId); } catch (error) { /* not fatal */ }
@@ -782,6 +785,7 @@ const CHAT_PRO = {
 
         viewport.addEventListener("wheel", (event) => {
             event.preventDefault();
+            this._miniHide();
             const rect = viewport.getBoundingClientRect();
             this.zoomGraph(event.deltaY < 0 ? 1.12 : 0.89, {
                 x: event.clientX - rect.left,
@@ -789,10 +793,105 @@ const CHAT_PRO = {
             });
         }, { passive: false });
 
+        // hover miniature: the delay only exists to filter sweeps across the
+        // tree, so it is paid once per card. 600ms before the first fetch, and
+        // nearly none once the turn is cached - there is nothing to wait for.
+        const hoverDelay = (id) => (this._miniCache && this._miniCache.has(id) ? 120 : 600);
+        let hoverTimer = null;
+        let hoverId = null;
+
+        viewport.addEventListener("mouseover", (event) => {
+            const card = event.target.closest(".cp-gcard");
+            if (!card || card.dataset.id === hoverId) { return; }
+
+            hoverId = card.dataset.id;
+            clearTimeout(hoverTimer);
+            hoverTimer = setTimeout(() => { this._miniShow(card); }, hoverDelay(card.dataset.id));
+        });
+
+        viewport.addEventListener("mouseout", (event) => {
+            const card = event.target.closest(".cp-gcard");
+            if (!card) { return; }
+            const next = event.relatedTarget;
+            if (next && card.contains(next)) { return; }
+            if (next && next.closest && next.closest(".cp-gcard")) { return; }
+
+            hoverId = null;
+            clearTimeout(hoverTimer);
+            this._miniHide();
+        });
+
         viewport.addEventListener("click", (event) => {
             const card = event.target.closest(".cp-gcard");
             if (card) { this.graphPick(card.dataset.id); }
         });
+    },
+
+    // the miniature: the turn's text is fetched once per card, then rendered by
+    // the same markdown pipeline the chat uses, clamped by the box
+    async _miniShow(card) {
+        const id = card && card.dataset ? card.dataset.id : "";
+        const box = document.getElementById("cp-graph-mini");
+        if (!id || !box) { return; }
+
+        this._miniCache = this._miniCache || new Map();
+        let data = this._miniCache.get(id);
+
+        if (!data) {
+            box.innerHTML = `<div class="cp-mini-loading">loading…</div>`;
+            this._miniPlace(card, box);
+            try {
+                data = await simpleApiFetch(`/api/ext/chat-pro/node?id=${encodeURIComponent(id)}`);
+            } catch (error) {
+                data = null;
+            }
+            if (!data) {
+                this._miniHide();
+                return;
+            }
+            this._miniCache.set(id, data);
+        }
+
+        const text = String(data.content || "").trim();
+        const body = text
+            ? (typeof renderMarkdown === "function" ? renderMarkdown(text) : this._esc(text))
+            : "<p><em>no text in this turn</em></p>";
+
+        box.innerHTML =
+            `<div class="cp-mini-head">` +
+            `<span class="cp-mini-role">${this._esc(data.role === "user" ? "You" : (data.role === "tool" ? "Tool" : "Assistant"))}</span>` +
+            `<span class="cp-mini-time">${this._esc(this._graphTime(data.time))}</span>` +
+            `</div><div class="cp-mini-body">${body}</div>`;
+
+        this._miniPlace(card, box);
+    },
+
+    // next to the card, flipping to the other side and clamping to the window,
+    // so a card near an edge never pushes the miniature off screen
+    _miniPlace(card, box) {
+        const rect = card.getBoundingClientRect();
+        const width = 380;
+        const margin = 12;
+
+        box.style.width = `${width}px`;
+        box.classList.add("open");
+        const height = box.offsetHeight || 260;
+
+        let left = rect.right + margin;
+        if (left + width > window.innerWidth - margin) { left = rect.left - width - margin; }
+        left = Math.max(margin, left);
+
+        let top = rect.top;
+        if (top + height > window.innerHeight - margin) { top = window.innerHeight - height - margin; }
+        top = Math.max(margin, top);
+
+        box.style.left = `${left}px`;
+        box.style.top = `${top}px`;
+    },
+
+    _miniHide() {
+        const box = document.getElementById("cp-graph-mini");
+        if (box) { box.classList.remove("open"); }
     },
 
     async graphPick(nodeId) {

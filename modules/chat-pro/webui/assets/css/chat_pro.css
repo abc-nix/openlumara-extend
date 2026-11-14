@@ -923,3 +923,101 @@
     .cp-edge { stroke: var(--border-color); }
     .cp-gcard.on-path { background: var(--bg-secondary); }
 }
+
+/* hover miniature: the turn's text through the chat's markdown pipeline, shown
+   next to the card and clamped to the box (never the whole message) */
+.cp-graph-mini {
+    position: fixed;
+    z-index: 1002; /* above .modal */
+    display: none;
+    max-height: 360px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--text-primary) 16%, transparent);
+    border-radius: var(--radius-md, 10px);
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-medium);
+    color: var(--text-primary);
+    font-family: var(--font-primary);
+    pointer-events: none;
+}
+
+.cp-graph-mini.open { display: block; }
+
+.cp-mini-loading {
+    padding: 10px 12px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.cp-mini-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px;
+    border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
+    font-size: 0.6rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.cp-mini-role {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.cp-mini-time {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+}
+
+.cp-mini-body {
+    max-height: 300px;
+    overflow: hidden;
+    padding: 9px 12px 14px;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--text-primary);
+    -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+    mask-image: linear-gradient(to bottom, #000 82%, transparent);
+}
+
+.cp-mini-body p { margin: 0 0 8px; }
+.cp-mini-body h1,
+.cp-mini-body h2,
+.cp-mini-body h3 {
+    margin: 10px 0 6px;
+    font-size: 0.9rem;
+    line-height: 1.25;
+}
+.cp-mini-body ul,
+.cp-mini-body ol { margin: 0 0 8px; padding-left: 18px; }
+.cp-mini-body li { margin: 2px 0; }
+.cp-mini-body blockquote {
+    margin: 0 0 8px;
+    padding-left: 8px;
+    border-left: 2px solid var(--border-color);
+    color: var(--text-secondary);
+}
+.cp-mini-body pre {
+    max-height: 140px;
+    margin: 0 0 8px;
+    padding: 8px;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    font-size: 0.72rem;
+}
+.cp-mini-body code {
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--bg-tertiary);
+    font-size: 0.72rem;
+}
+.cp-mini-body pre code { padding: 0; background: none; }
+.cp-mini-body img { max-width: 100%; height: auto; }
+.cp-mini-body a { color: var(--accent); }
+
+@supports not (border-color: color-mix(in srgb, red 50%, transparent)) {
+    .cp-graph-mini { border-color: var(--border-color); }
+}
