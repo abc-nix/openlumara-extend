@@ -136,3 +136,63 @@
     color: var(--error);
     opacity: 1;
 }
+
+/* one tree row + its optional confirmation bar */
+.chat-pro-tree .cpt-item {
+    display: flex;
+    flex-direction: column;
+}
+
+/* in-panel delete confirmation. a real bar instead of window.confirm(), which
+   some browsers auto-accept (the CDP-driven one does), so the destructive click
+   is a separate, deliberate action. */
+.chat-pro-tree .cpt-confirm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 0 4px;
+    padding: 4px 6px;
+    border-radius: 5px;
+    background: var(--bg-secondary);
+    border-left: 2px solid var(--error);
+}
+
+.chat-pro-tree .cpt-confirm-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.chat-pro-tree .cpt-confirm button {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-pro-tree .cpt-confirm .cpt-danger {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.chat-pro-tree .cpt-confirm .cpt-danger:hover {
+    opacity: 0.8;
+}
+
+.chat-pro-tree .cpt-confirm .cpt-danger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.chat-pro-tree .cpt-confirm .cpt-cancel:hover {
+    color: var(--text-primary);
+    background: var(--bg-primary, var(--bg-secondary));
+}

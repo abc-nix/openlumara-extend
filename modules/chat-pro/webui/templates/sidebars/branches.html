@@ -24,27 +24,46 @@
     <template x-if="$store.chatPro.hasTree">
         <div class="cpt-list">
             <template x-for="node in $store.chatPro.nodes" :key="node.id">
-                <button type="button"
-                    class="cpt-node"
-                    :class="{ 'on-path': node.on_path }"
-                    :style="`padding-left: ${8 + node.depth * 14}px`"
-                    :title="node.preview"
-                    :disabled="$store.chatPro.busy || $store.stream.state != 'idle'"
-                    @click="$store.chatPro.goto(node.id)">
-                    <span class="cpt-role" x-text="node.role === 'user' ? 'you' : (node.role || '?')"></span>
-                    <span class="cpt-text" x-text="node.preview"></span>
-                    {# a span, not a real button element: nesting buttons is invalid
-                       html. .stop keeps the click from also switching to the node #}
-                    <span class="cpt-prune"
-                        role="button"
-                        tabindex="0"
-                        :aria-label="`Delete the variant: ${node.preview}`"
-                        title="Delete this variant"
-                        x-show="!node.on_path"
-                        @click.stop="$store.chatPro.prune(node)"
-                        @keydown.enter.stop="$store.chatPro.prune(node)"
-                        @keydown.space.stop.prevent="$store.chatPro.prune(node)">&times;</span>
-                </button>
+                <div class="cpt-item">
+                    <button type="button"
+                        class="cpt-node"
+                        :class="{ 'on-path': node.on_path }"
+                        :style="`padding-left: ${8 + node.depth * 14}px`"
+                        :title="node.preview"
+                        :disabled="$store.chatPro.busy || $store.stream.state != 'idle'"
+                        @click="$store.chatPro.goto(node.id)">
+                        <span class="cpt-role" x-text="node.role === 'user' ? 'you' : (node.role || '?')"></span>
+                        <span class="cpt-text" x-text="node.preview"></span>
+                        {# a span, not a real button element: nesting buttons is invalid
+                           html. .stop keeps the click from also switching to the node.
+                           it only *asks* - the delete happens from the bar below, because
+                           window.confirm() is auto-accepted in some browsers (a native
+                           dialog gave no protection at all in the CDP-driven one). #}
+                        <span class="cpt-prune"
+                            role="button"
+                            tabindex="0"
+                            :aria-label="`Delete the variant: ${node.preview}`"
+                            title="Delete this variant"
+                            x-show="!node.on_path"
+                            @click.stop="$store.chatPro.askPrune(node)"
+                            @keydown.enter.stop="$store.chatPro.askPrune(node)"
+                            @keydown.space.stop.prevent="$store.chatPro.askPrune(node)">&times;</span>
+                    </button>
+
+                    {# in-app confirmation: no native dialog, and the destructive action
+                       is a separate, deliberate click #}
+                    <div class="cpt-confirm" x-show="$store.chatPro.confirming === node.id">
+                        <span class="cpt-confirm-text">
+                            Delete this variant for good<span x-show="node.children &gt; 0">, plus the
+                            <span x-text="node.children"></span> branch<span x-text="node.children === 1 ? '' : 'es'"></span> under it</span>?
+                        </span>
+                        <button type="button" class="cpt-danger"
+                            :disabled="$store.chatPro.busy"
+                            @click="$store.chatPro.confirmPrune(node)">Delete</button>
+                        <button type="button" class="cpt-cancel"
+                            @click="$store.chatPro.cancelPrune()">Cancel</button>
+                    </div>
+                </div>
             </template>
         </div>
     </template>

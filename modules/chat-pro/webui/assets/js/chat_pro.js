@@ -31,6 +31,9 @@ const CHAT_PRO = {
     _branchEdit: null,
     _patched: false,
 
+    // node id awaiting the in-panel delete confirmation (see prune())
+    confirming: null,
+
     /* ----------------
      * branch state
      * ----------------- */
@@ -79,6 +82,12 @@ const CHAT_PRO = {
             this.indexIds = state.index_ids || {};
             this.nodes = state.nodes || [];
             this.active = state.active || [];
+
+            // a confirmation belongs to one node of one chat: drop it when that
+            // node is gone (pruned elsewhere, or a different chat was loaded)
+            if (this.confirming && !this.nodes.some((node) => node.id === this.confirming)) {
+                this.confirming = null;
+            }
         } catch (error) {
             // the module may be disabled mid-session: stay quiet, keep the row clean
             console.warn("chat-pro: state refresh failed:", error);
@@ -213,24 +222,25 @@ const CHAT_PRO = {
     /* ----------------
      * pruning (the branches panel)
      * ----------------- */
-    async prune(node) {
+    // a native confirm() is not trustworthy here: the CDP-driven browser this
+    // project is tested in auto-accepts dialogs, so a destructive click went
+    // through unguarded. ask -> confirm bar -> explicit Delete instead.
+    askPrune(node) {
         if (this.busy) { return; }
         if (Alpine.store("stream").state !== "idle") { return; }
+        this.confirming = node && node.id ? node.id : null;
+    },
 
-        // the tree file is the only copy of the messages off the active path, so
-        // this really is permanent - say what goes before anything is written
-        const below = node.children
-            ? `Everything under it goes too (${node.children} branch${node.children === 1 ? "" : "es"} below this one).`
-            : "It has nothing under it.";
+    cancelPrune() {
+        this.confirming = null;
+    },
 
-        if (!confirm(
-            `Delete the variant "${node.preview}"?\n\n` +
-            "It is removed from the branch tree for good and cannot be restored. " +
-            `${below}\n\n` +
-            "The chat itself stays on its current branch."
-        )) { return; }
+    async confirmPrune(node) {
+        if (this.busy || !node) { return; }
+        if (Alpine.store("stream").state !== "idle") { return; }
 
         this.busy = true;
+        this.confirming = null;
         try {
             await simpleApiPost("/api/ext/chat-pro/prune", { node: node.id });
             // the route changes the tree without broadcasting sync, so the panel
