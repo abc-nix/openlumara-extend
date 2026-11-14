@@ -45,7 +45,7 @@ class ChatPro(core.module.Module):
 
     settings = {
         "enable_webui_extension": {
-            "description": "Load this module's WebUI Extensions (fork/branch controls, the branches tab).",
+            "description": "Load this module's WebUI Extensions (fork/branch controls, the Chat Pro right panel).",
             "default": True
         },
         "enable_fork_button": {

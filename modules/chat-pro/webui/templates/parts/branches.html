@@ -9,8 +9,9 @@
    branches opens the inline Delete/Cancel bar. a fork row is a label, not an
    action - it says where the split happens and how many alternatives there are.
 
-   this file is rendered twice (sidebar tab and the right dock) from the same
-   markup, so both stay identical. #}
+   included by the right dock (chat/panel.html). it lives in templates/parts/
+   rather than templates/sidebars/ on purpose: anything .html in sidebars/
+   becomes a sidebar tab, and the dock is the only home for the map now. #}
 
 <div class="chat-pro-tree" x-effect="$store.chatPro.refresh(false)">
     <div class="cpt-header">
