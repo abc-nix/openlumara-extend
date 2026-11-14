@@ -12,22 +12,71 @@
 <div class="cp-cover" x-show="$store.chatPro.panelOpen" x-cloak
      @keydown.escape.window="$store.chatPro.closePanel()">
 
+    {# one band: the dock's name, its tabs, and the close button. the tabs are
+       icon-only, in the sidebar tab's own shape (36px tile, radius 8, accent on
+       the active one); each name is its tooltip and its aria-label. #}
     <div class="cp-head">
         <span class="cp-head-title">Chat Pro</span>
-        <span class="cp-head-sub" x-text="$store.chatPro.panelTab"></span>
+
+        <div class="cp-tabs" role="tablist" aria-label="Chat Pro sections">
+            <button type="button" class="cp-tab" role="tab"
+                    :class="{ active: $store.chatPro.panelTab === 'branches' }"
+                    :aria-selected="$store.chatPro.panelTab === 'branches'"
+                    title="Branches" aria-label="Branches"
+                    @click="$store.chatPro.setPanelTab('branches')">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="7" cy="5" r="2"></circle>
+                    <circle cx="7" cy="19" r="2"></circle>
+                    <circle cx="17" cy="19" r="2"></circle>
+                    <path d="M7 7v10"></path>
+                    <path d="M7 12.5h5.5a2 2 0 0 1 2 2v2.5"></path>
+                </svg>
+            </button>
+
+            <button type="button" class="cp-tab" role="tab"
+                    :class="{ active: $store.chatPro.panelTab === 'search' }"
+                    :aria-selected="$store.chatPro.panelTab === 'search'"
+                    title="Search" aria-label="Search"
+                    @click="$store.chatPro.setPanelTab('search')">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="10.5" cy="10.5" r="6.5"></circle>
+                    <path d="m20 20-4.2-4.2"></path>
+                </svg>
+            </button>
+
+            <button type="button" class="cp-tab" role="tab"
+                    :class="{ active: $store.chatPro.panelTab === 'links' }"
+                    :aria-selected="$store.chatPro.panelTab === 'links'"
+                    title="Links" aria-label="Links"
+                    @click="$store.chatPro.setPanelTab('links')">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+            </button>
+
+            <button type="button" class="cp-tab" role="tab"
+                    :class="{ active: $store.chatPro.panelTab === 'tasks' }"
+                    :aria-selected="$store.chatPro.panelTab === 'tasks'"
+                    title="Tasks" aria-label="Tasks"
+                    @click="$store.chatPro.setPanelTab('tasks')">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m3.5 6 1.6 1.6L7.8 4.8"></path>
+                    <path d="m3.5 12 1.6 1.6L7.8 10.8"></path>
+                    <path d="m3.5 18 1.6 1.6L7.8 16.8"></path>
+                    <path d="M11 6h9"></path>
+                    <path d="M11 12h9"></path>
+                    <path d="M11 18h9"></path>
+                </svg>
+            </button>
+        </div>
+
         <button type="button" class="cp-close" @click="$store.chatPro.closePanel()"
                 title="Hide the Chat Pro panel" aria-label="Close">&times;</button>
-    </div>
-
-    <div class="cp-tabs" role="tablist">
-        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'branches' }"
-                @click="$store.chatPro.setPanelTab('branches')">Branches</button>
-        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'search' }"
-                @click="$store.chatPro.setPanelTab('search')">Search</button>
-        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'links' }"
-                @click="$store.chatPro.setPanelTab('links')">Links</button>
-        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'tasks' }"
-                @click="$store.chatPro.setPanelTab('tasks')">Tasks</button>
     </div>
 
     {# ---------------- branches (real) ---------------- #}
