@@ -1,0 +1,30 @@
+{# chat-pro - fork button.
+
+   mirrors core channels/webui/templates/chat/message_buttons.html only to
+   claim the `before_buttons` slot, which renders at the start of the message
+   action row (leftmost, before copy/edit/regenerate/delete).
+
+   `turn` and `turnIndex` cannot be read from jinja here: they are Alpine values
+   of the enclosing `x-for` over $store.chat.turnHistory, and this slot markup
+   is inlined inside that scope - so the button reads them at runtime. the fork
+   itself is a backend job (it writes a new history file), see the
+   /api/ext/chat-pro/fork route in module.py. #}
+{% macro before_buttons() %}
+{% if module_config.get("enable_fork_button", true) %}
+<button type="button"
+    class="chat-pro-fork"
+    @click="$store.chatPro.fork(turnIndex)"
+    :disabled="$store.stream.state != 'idle' || $store.chatPro.forking"
+    :title="$store.chatPro.forking ? 'Forking..' : 'Fork conversation from here'"
+    aria-label="Fork conversation from here">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="7" cy="5.5" r="2.4"></circle>
+        <circle cx="7" cy="18.5" r="2.4"></circle>
+        <circle cx="17" cy="18.5" r="2.4"></circle>
+        <path d="M7 7.9v7.8"></path>
+        <path d="M7 11.8h5.1a2 2 0 0 1 2 2v2.3"></path>
+    </svg>
+</button>
+{% endif %}
+{% endmacro %}
