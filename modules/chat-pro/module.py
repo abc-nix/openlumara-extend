@@ -56,6 +56,10 @@ class ChatPro(core.module.Module):
             "description": "Show the branch control in the message action row (> to start a variant, < n/m > to navigate them).",
             "default": True
         },
+        "always_active": {
+            "description": "Keep every chat on the branch tree from its first message, so core's own Regenerate/Delete preserve answers even before a branch is made. Costs a tree file, ids in every message and one reconcile per change; off by default.",
+            "default": False
+        },
         "fork_title_prefix": {
             "description": "Prefix of a fork's title, so forks are easy to spot in the chat list.",
             "default": "Fork: "
@@ -96,6 +100,9 @@ class ChatPro(core.module.Module):
 
     def _tree(self, chat_id):
         return ChatTree(self.channel, chat_id)
+
+    def _always_active(self):
+        return bool(self.config.get("always_active", False))
 
     def _check_idle(self, ws_mgr):
         """every branch operation rewrites the open chat: never while streaming"""
@@ -197,16 +204,32 @@ class ChatPro(core.module.Module):
             return {"has_tree": False, "variants": {}, "nodes": [], "active": []}
 
         chat_id = chat.get("id")
+        messages = await chat.messages.get()
         tree = self._tree(chat_id)
-        if not tree.load():
-            return {"has_tree": False, "chat_id": chat_id, "variants": {}, "nodes": [], "active": []}
 
-        changed = tree.reconcile(await chat.messages.get())
-        if changed:
-            # ids were just stamped into the live history: persist them, or the
-            # next reconcile would have to guess
+        if tree.load():
+            if tree.reconcile(messages):
+                # ids were just stamped into the live history: persist them, or
+                # the next reconcile would have to guess
+                chat.messages.data.save()
+                tree.save()
+        elif self._always_active() and messages:
+            # always-active: this chat becomes a tree at its first message, so
+            # core's own regenerate/delete keep the dropped answers as variants
+            # even though the user never made a branch
+            tree.capture(messages)
             chat.messages.data.save()
             tree.save()
+            self.log("chat-pro", f"chat {chat_id} is always-active ({len(tree.nodes)} messages)")
+        else:
+            return {
+                "has_tree": False,
+                "chat_id": chat_id,
+                "variants": {},
+                "nodes": [],
+                "active": [],
+                "index_ids": {},
+            }
 
         state = tree.state()
         # live message index -> node id. the client cannot read chatpro_id off
