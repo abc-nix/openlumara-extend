@@ -356,16 +356,19 @@ class ChatTree:
         self.save()
         return len(doomed)
 
-    def state(self):
-        """everything the ui needs: per-message variants + the whole tree"""
+    def _children_map(self):
+        """parent id -> ordered child ids (the tree's edges)"""
         children = {}
         for nid, node in self.nodes.items():
             parent = node.get("parent")
-            if parent:
+            if parent and parent in self.nodes:
                 children.setdefault(parent, []).append(nid)
-        for parent, kids in children.items():
+        for kids in children.values():
             kids.sort(key=lambda nid: self.nodes[nid].get("seq", 0))
+        return children
 
+    def _variants(self, children):
+        """node id -> its position among siblings (only where there is a choice)"""
         variants = {}
         for parent, kids in children.items():
             if len(kids) < 2:
@@ -387,36 +390,91 @@ class ChatTree:
                     "total": len(roots),
                     "siblings": list(roots),
                 }
+        return variants
 
-        depth = {}
+    def _preferred_length(self, node_id):
+        """how many messages this node's branch holds (follows active_child)"""
+        total = 1
+        current = node_id
+        seen = {node_id}
+        while True:
+            nxt = (self.nodes.get(current) or {}).get("active_child")
+            if not nxt or nxt not in self.nodes or nxt in seen:
+                break
+            seen.add(nxt)
+            total += 1
+            current = nxt
+        return total
 
-        def depth_of(nid):
-            if nid in depth:
-                return depth[nid]
-            node = self.nodes.get(nid) or {}
-            parent = node.get("parent")
-            value = 0 if not parent or parent not in self.nodes else depth_of(parent) + 1
-            depth[nid] = value
-            return value
+    @staticmethod
+    def _subtree_size(node_id, children):
+        total = 1
+        stack = [node_id]
+        while stack:
+            kids = children.get(stack.pop(), [])
+            total += len(kids)
+            stack.extend(kids)
+        return total
 
+    def branch_map(self, children=None):
+        """rows for the branches panel.
+
+        only fork points and their alternatives are emitted: linear runs of
+        messages collapse into nothing, so a 113-message chat with two splits is
+        a handful of rows, and `depth` counts *branch levels*, not messages.
+        """
+        children = children if children is not None else self._children_map()
         active = set(self.active)
-        nodes = []
-        for nid, node in sorted(self.nodes.items(), key=lambda item: item[1].get("seq", 0)):
-            message = node.get("message") or {}
-            nodes.append({
+        rows = []
+
+        def add(kind, nid, depth, fork=None):
+            message = (self.nodes.get(nid) or {}).get("message") or {}
+            rows.append({
+                "kind": kind,
                 "id": nid,
-                "parent": node.get("parent"),
+                "fork": fork,
+                "depth": depth,
                 "role": message.get("role"),
                 "preview": preview(message),
-                "depth": depth_of(nid),
                 "on_path": nid in active,
-                "children": len(children.get(nid) or []),
+                "messages": self._preferred_length(nid),
+                "subtree": self._subtree_size(nid, children),
+                "variants": len(children.get(nid, [])),
             })
 
+        def walk(nid, depth):
+            kids = children.get(nid, [])
+            if len(kids) >= 2:
+                add("fork", nid, depth)
+                for kid in kids:
+                    add("branch", kid, depth + 1, fork=nid)
+                    walk(kid, depth + 1)
+                return
+            # a linear chain adds no indent: keep looking for the next split
+            for kid in kids:
+                walk(kid, depth)
+
+        roots = self._roots()
+        if len(roots) > 1:
+            # branching the very first message: the roots are the alternatives
+            for root in roots:
+                add("branch", root, 0)
+                walk(root, 0)
+        else:
+            for root in roots:
+                walk(root, 0)
+
+        return rows
+
+    def state(self):
+        """everything the ui needs: counters per message + the branch map"""
+        children = self._children_map()
+        branches = self.branch_map(children)
         return {
-            "nodes": nodes,
             "active": list(self.active),
-            "variants": variants,
+            "variants": self._variants(children),
+            "branches": branches,
+            "branch_points": sum(1 for row in branches if row["kind"] == "fork"),
         }
 
     def node_message(self, node_id):

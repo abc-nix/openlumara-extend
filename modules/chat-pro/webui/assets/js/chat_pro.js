@@ -23,7 +23,9 @@ const CHAT_PRO = {
     hasTree: false,
     variants: {},
     indexIds: {},
-    nodes: [],
+    branches: [],
+    branchCount: 0,
+    branchPoints: 0,
     active: [],
     chatId: null,
 
@@ -181,12 +183,14 @@ const CHAT_PRO = {
             this.hasTree = Boolean(state.has_tree);
             this.variants = state.variants || {};
             this.indexIds = state.index_ids || {};
-            this.nodes = state.nodes || [];
+            this.branches = state.branches || [];
+            this.branchCount = this.branches.filter((row) => row.kind === "branch").length;
+            this.branchPoints = state.branch_points || 0;
             this.active = state.active || [];
 
-            // a confirmation belongs to one node of one chat: drop it when that
-            // node is gone (pruned elsewhere, or a different chat was loaded)
-            if (this.confirming && !this.nodes.some((node) => node.id === this.confirming)) {
+            // a confirmation belongs to one branch of one chat: drop it when that
+            // branch is gone (pruned elsewhere, or a different chat was loaded)
+            if (this.confirming && !this.branches.some((row) => row.id === this.confirming)) {
                 this.confirming = null;
             }
 

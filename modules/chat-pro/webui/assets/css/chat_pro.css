@@ -105,9 +105,63 @@
 }
 
 .chat-pro-tree .cpt-node .cpt-text {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* fork row: a label, not an action - "here two+ answers split off" */
+.chat-pro-tree .cpt-fork {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 4px 6px 2px;
+    font-size: 10.5px;
+    color: var(--text-muted, #52525b);
+    user-select: none;
+}
+
+.chat-pro-tree .cpt-fork-mark {
+    flex: none;
+    color: var(--accent, #d4d4d8);
+    font-size: 11px;
+    line-height: 1;
+}
+
+.chat-pro-tree .cpt-fork-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.85;
+}
+
+.chat-pro-tree .cpt-fork-count {
+    flex: none;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #52525b);
+}
+
+/* trailing cluster of a branch row: size, "current", delete */
+.chat-pro-tree .cpt-node .cpt-msgs {
+    flex: none;
+    margin-left: auto;
+    font-size: 9.5px;
+    color: var(--text-muted, #52525b);
+    font-variant-numeric: tabular-nums;
+}
+
+.chat-pro-tree .cpt-node .cpt-now {
+    flex: none;
+    font-size: 8.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent, #d4d4d8);
 }
 
 /* the delete affordance of an off-path row: faint until the row is hovered so it

@@ -1,65 +1,86 @@
-{# chat-pro - the branch tree of the open chat.
+{# chat-pro - the branch map of the open chat.
 
-   every node is one message; indentation is its depth in the tree, the active
-   path is highlighted, and clicking a node switches the chat to that branch
-   (the same route the `< n/m >` control uses). a chat with no branches yet is
-   one line and says so - the tree only exists after the first `>`. #}
+   Only fork points and their alternatives are listed: linear runs of messages
+   collapse to nothing, so a long chat stays a handful of rows and indentation
+   counts *branch levels*, not messages (a 113-message chat with two splits is
+   four rows, not 113).
+
+   a branch row: click switches the chat to that branch; the faint x on off-path
+   branches opens the inline Delete/Cancel bar. a fork row is a label, not an
+   action - it says where the split happens and how many alternatives there are.
+
+   this file is rendered twice (sidebar tab and the right dock) from the same
+   markup, so both stay identical. #}
 
 <div class="chat-pro-tree" x-effect="$store.chatPro.refresh(false)">
     <div class="cpt-header">
         <span class="cpt-title">Branches</span>
-        <span class="cpt-sub"
-              x-text="$store.chatPro.hasTree
-                  ? $store.chatPro.nodes.length + ' messages'
-                  : 'single line'"></span>
+        <span class="cpt-sub" x-text="$store.chatPro.hasTree
+            ? ($store.chatPro.branchCount + ($store.chatPro.branchCount === 1 ? ' branch' : ' branches'))
+            : 'single line'"></span>
     </div>
 
-    <template x-if="!$store.chatPro.hasTree">
+    <template x-if="!$store.chatPro.hasTree || $store.chatPro.branchCount === 0">
         <div class="cpt-empty">
-            This chat has no branches yet. Use <strong>&gt;</strong> on a message to start a variant;
-            the tree shows up here.
+            <span x-show="!$store.chatPro.hasTree">
+                This chat has no branches yet. Use <strong>&gt;</strong> on a message to start a variant;
+                the map shows up here.
+            </span>
+            <span x-show="$store.chatPro.hasTree">
+                One line so far - branching a message will show up here.
+            </span>
         </div>
     </template>
 
-    <template x-if="$store.chatPro.hasTree">
+    <template x-if="$store.chatPro.hasTree && $store.chatPro.branchCount > 0">
         <div class="cpt-list">
-            <template x-for="node in $store.chatPro.nodes" :key="node.id">
+            <template x-for="row in $store.chatPro.branches" :key="row.kind + row.id">
                 <div class="cpt-item">
-                    <button type="button"
-                        class="cpt-node"
-                        :class="{ 'on-path': node.on_path }"
-                        :style="`padding-left: ${8 + node.depth * 14}px`"
-                        :title="node.preview"
-                        :disabled="$store.chatPro.busy || $store.stream.state != 'idle'"
-                        @click="$store.chatPro.goto(node.id)">
-                        <span class="cpt-role" x-text="node.role === 'user' ? 'you' : (node.role || '?')"></span>
-                        <span class="cpt-text" x-text="node.preview"></span>
-                        {# a span, not a real button element: nesting buttons is invalid
-                           html. .stop keeps the click from also switching to the node.
-                           it only *asks* - the delete happens from the bar below, because
-                           window.confirm() is auto-accepted in some browsers (a native
-                           dialog gave no protection at all in the CDP-driven one). #}
-                        <span class="cpt-prune"
-                            role="button"
-                            tabindex="0"
-                            :aria-label="`Delete the variant: ${node.preview}`"
-                            title="Delete this variant"
-                            x-show="!node.on_path"
-                            @click.stop="$store.chatPro.askPrune(node)"
-                            @keydown.enter.stop="$store.chatPro.askPrune(node)"
-                            @keydown.space.stop.prevent="$store.chatPro.askPrune(node)">&times;</span>
-                    </button>
 
-                    {# in-app confirmation: no native dialog, and the destructive action
-                       is a separate, deliberate click #}
-                    <div class="cpt-confirm" x-show="$store.chatPro.confirming === node.id">
+                    {# where the split happens #}
+                    <template x-if="row.kind === 'fork'">
+                        <div class="cpt-fork" :style="`padding-left: ${8 + row.depth * 14}px`" :title="row.preview">
+                            <span class="cpt-fork-mark">\u2442</span>
+                            <span class="cpt-fork-text" x-text="row.preview"></span>
+                            <span class="cpt-fork-count"
+                                  x-text="row.variants + (row.variants === 1 ? ' variant' : ' variants')"></span>
+                        </div>
+                    </template>
+
+                    {# one alternative #}
+                    <template x-if="row.kind === 'branch'">
+                        <button type="button"
+                            class="cpt-node"
+                            :class="{ 'on-path': row.on_path }"
+                            :style="`padding-left: ${10 + row.depth * 14}px`"
+                            :title="row.preview"
+                            :disabled="$store.chatPro.busy || $store.stream.state != 'idle'"
+                            @click="$store.chatPro.goto(row.id)">
+                            <span class="cpt-role" x-text="row.role === 'user' ? 'you' : (row.role || '?')"></span>
+                            <span class="cpt-text" x-text="row.preview"></span>
+                            <span class="cpt-msgs" x-text="row.messages + ' msg' + (row.messages === 1 ? '' : 's')"></span>
+                            <span class="cpt-now" x-show="row.on_path">current</span>
+                            <span class="cpt-prune"
+                                role="button"
+                                tabindex="0"
+                                :aria-label="`Delete the branch: ${row.preview}`"
+                                title="Delete this branch"
+                                x-show="!row.on_path"
+                                @click.stop="$store.chatPro.askPrune(row)"
+                                @keydown.enter.stop="$store.chatPro.askPrune(row)"
+                                @keydown.space.stop.prevent="$store.chatPro.askPrune(row)">&times;</span>
+                        </button>
+                    </template>
+
+                    {# in-app confirmation: no native dialog #}
+                    <div class="cpt-confirm" x-show="$store.chatPro.confirming === row.id">
                         <span class="cpt-confirm-text">
-                            Delete this variant for good<span x-show="node.children &gt; 0">, plus the
-                            <span x-text="node.children"></span> branch<span x-text="node.children === 1 ? '' : 'es'"></span> under it</span>?
+                            Delete this branch and its <span x-text="row.subtree"></span>
+                            message<span x-text="row.subtree === 1 ? '' : 's'"></span> for good?
                         </span>
                         <button type="button" class="cpt-danger"
                             :disabled="$store.chatPro.busy"
-                            @click="$store.chatPro.confirmPrune(node)">Delete</button>
+                            @click="$store.chatPro.confirmPrune(row)">Delete</button>
                         <button type="button" class="cpt-cancel"
                             @click="$store.chatPro.cancelPrune()">Cancel</button>
                     </div>
