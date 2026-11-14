@@ -211,6 +211,40 @@ const CHAT_PRO = {
     },
 
     /* ----------------
+     * pruning (the branches panel)
+     * ----------------- */
+    async prune(node) {
+        if (this.busy) { return; }
+        if (Alpine.store("stream").state !== "idle") { return; }
+
+        // the tree file is the only copy of the messages off the active path, so
+        // this really is permanent - say what goes before anything is written
+        const below = node.children
+            ? `Everything under it goes too (${node.children} branch${node.children === 1 ? "" : "es"} below this one).`
+            : "It has nothing under it.";
+
+        if (!confirm(
+            `Delete the variant "${node.preview}"?\n\n` +
+            "It is removed from the branch tree for good and cannot be restored. " +
+            `${below}\n\n` +
+            "The chat itself stays on its current branch."
+        )) { return; }
+
+        this.busy = true;
+        try {
+            await simpleApiPost("/api/ext/chat-pro/prune", { node: node.id });
+            // the route changes the tree without broadcasting sync, so the panel
+            // is stale until it re-reads the state itself
+            this._signature = null;
+            await this.refresh(true);
+        } catch (error) {
+            this._fail("Deleting the variant failed", error);
+        } finally {
+            this.busy = false;
+        }
+    },
+
+    /* ----------------
      * fork
      * ----------------- */
     async fork(turnIndex) {

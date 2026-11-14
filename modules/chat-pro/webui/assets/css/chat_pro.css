@@ -109,3 +109,30 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* the delete affordance of an off-path row: faint until the row is hovered so it
+   never competes with the preview. the auto margin pins it to the right edge
+   without taking width from .cpt-text (which keeps its own ellipsis). */
+.chat-pro-tree .cpt-node .cpt-prune {
+    flex: 0 0 auto;
+    margin-left: auto;
+    align-self: center;
+    padding: 0 3px;
+    font-size: 0.85rem;
+    line-height: 1;
+    color: var(--text-muted);
+    opacity: 0.35;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.chat-pro-tree .cpt-node:hover .cpt-prune {
+    opacity: 0.8;
+}
+
+.chat-pro-tree .cpt-node .cpt-prune:hover,
+.chat-pro-tree .cpt-node .cpt-prune:focus-visible {
+    color: var(--error);
+    opacity: 1;
+}

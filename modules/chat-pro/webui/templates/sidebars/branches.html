@@ -33,6 +33,17 @@
                     @click="$store.chatPro.goto(node.id)">
                     <span class="cpt-role" x-text="node.role === 'user' ? 'you' : (node.role || '?')"></span>
                     <span class="cpt-text" x-text="node.preview"></span>
+                    {# a span, not a real button element: nesting buttons is invalid
+                       html. .stop keeps the click from also switching to the node #}
+                    <span class="cpt-prune"
+                        role="button"
+                        tabindex="0"
+                        :aria-label="`Delete the variant: ${node.preview}`"
+                        title="Delete this variant"
+                        x-show="!node.on_path"
+                        @click.stop="$store.chatPro.prune(node)"
+                        @keydown.enter.stop="$store.chatPro.prune(node)"
+                        @keydown.space.stop.prevent="$store.chatPro.prune(node)">&times;</span>
                 </button>
             </template>
         </div>
