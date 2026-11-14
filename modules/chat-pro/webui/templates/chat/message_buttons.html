@@ -1,22 +1,24 @@
-{# chat-pro - fork button.
+{# chat-pro - the two controls of the message action row.
 
-   mirrors core channels/webui/templates/chat/message_buttons.html only to
-   claim the `before_buttons` slot, which renders at the start of the message
-   action row (leftmost, before copy/edit/regenerate/delete).
+   mirrors core channels/webui/templates/chat/message_buttons.html to claim two
+   slots:
+     before_buttons -> the fork icon (leftmost)
+     after_buttons  -> the branch control (rightmost): `>` alone while the
+                       message has no siblings, `< n/m >` once it does, and `>`
+                       at the last variant starts a new one.
 
    `turn` and `turnIndex` cannot be read from jinja here: they are Alpine values
-   of the enclosing `x-for` over $store.chat.turnHistory, and this slot markup
-   is inlined inside that scope - so the button reads them at runtime. the fork
-   itself is a backend job (it writes a new history file), see the
-   /api/ext/chat-pro/fork route in module.py. #}
+   of the enclosing `x-for` over $store.chat.turnHistory, and this slot markup is
+   inlined inside that scope - so the controls read them at runtime. the actual
+   work happens in the /api/ext/chat-pro/* routes (module.py). #}
 {% macro before_buttons() %}
 {% if module_config.get("enable_fork_button", true) %}
 <button type="button"
     class="chat-pro-fork"
     @click="$store.chatPro.fork(turnIndex)"
     :disabled="$store.stream.state != 'idle' || $store.chatPro.forking"
-    :title="$store.chatPro.forking ? 'Forking..' : 'Fork conversation from here'"
-    aria-label="Fork conversation from here">
+    :title="$store.chatPro.forking ? 'Forking..' : 'Fork conversation from here into a new chat'"
+    aria-label="Fork conversation from here into a new chat">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="7" cy="5.5" r="2.4"></circle>
@@ -26,5 +28,39 @@
         <path d="M7 11.8h5.1a2 2 0 0 1 2 2v2.3"></path>
     </svg>
 </button>
+{% endif %}
+{% endmacro %}
+
+{% macro after_buttons() %}
+{% if module_config.get("enable_branch_controls", true) %}
+<span class="chat-pro-branch" x-data="{ get info() { return $store.chatPro.info(turn) } }">
+    <template x-if="info.total > 1">
+        <button type="button"
+            class="cp-step cp-prev"
+            @click="$store.chatPro.prev(turn)"
+            :disabled="$store.chatPro.busy || $store.stream.state != 'idle' || info.position <= 1"
+            title="Previous variant">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 6 9 12 15 18"></polyline>
+            </svg>
+        </button>
+    </template>
+
+    <span class="cp-count" x-show="info.total > 1"
+          x-text="info.position + '/' + info.total"
+          title="Variants of this message"></span>
+
+    <button type="button"
+        class="cp-step cp-next"
+        @click="$store.chatPro.next(turn, turnIndex)"
+        :disabled="$store.chatPro.busy || $store.stream.state != 'idle'"
+        :title="info.total > 1 && info.position < info.total ? 'Next variant' : (turn.role === 'user' ? 'Rewrite this message as a new variant' : 'Regenerate as a new variant')">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 6 15 12 9 18"></polyline>
+        </svg>
+    </button>
+</span>
 {% endif %}
 {% endmacro %}

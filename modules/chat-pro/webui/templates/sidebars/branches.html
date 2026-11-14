@@ -1,0 +1,40 @@
+{# chat-pro - the branch tree of the open chat.
+
+   every node is one message; indentation is its depth in the tree, the active
+   path is highlighted, and clicking a node switches the chat to that branch
+   (the same route the `< n/m >` control uses). a chat with no branches yet is
+   one line and says so - the tree only exists after the first `>`. #}
+
+<div class="chat-pro-tree" x-effect="$store.chatPro.refresh(false)">
+    <div class="cpt-header">
+        <span class="cpt-title">Branches</span>
+        <span class="cpt-sub"
+              x-text="$store.chatPro.hasTree
+                  ? $store.chatPro.nodes.length + ' messages'
+                  : 'single line'"></span>
+    </div>
+
+    <template x-if="!$store.chatPro.hasTree">
+        <div class="cpt-empty">
+            This chat has no branches yet. Use <strong>&gt;</strong> on a message to start a variant;
+            the tree shows up here.
+        </div>
+    </template>
+
+    <template x-if="$store.chatPro.hasTree">
+        <div class="cpt-list">
+            <template x-for="node in $store.chatPro.nodes" :key="node.id">
+                <button type="button"
+                    class="cpt-node"
+                    :class="{ 'on-path': node.on_path }"
+                    :style="`padding-left: ${8 + node.depth * 14}px`"
+                    :title="node.preview"
+                    :disabled="$store.chatPro.busy || $store.stream.state != 'idle'"
+                    @click="$store.chatPro.goto(node.id)">
+                    <span class="cpt-role" x-text="node.role === 'user' ? 'you' : (node.role || '?')"></span>
+                    <span class="cpt-text" x-text="node.preview"></span>
+                </button>
+            </template>
+        </div>
+    </template>
+</div>

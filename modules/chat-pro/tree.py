@@ -183,13 +183,21 @@ class ChatTree:
             key=lambda nid: self.nodes[nid].get("seq", 0),
         )
 
+    def _roots(self):
+        """first messages of the chat: branching the very first message makes a
+        second root, and roots are siblings of each other"""
+        return sorted(
+            (nid for nid, node in self.nodes.items() if not node.get("parent")),
+            key=lambda nid: self.nodes[nid].get("seq", 0),
+        )
+
     def siblings(self, node_id):
         node = self.nodes.get(node_id)
         if node is None:
             return []
         parent = node.get("parent")
         if not parent or parent not in self.nodes:
-            return [node_id]
+            return self._roots()
         return [nid for nid in self._children(parent) if nid in self.nodes]
 
     def is_on_active(self, node_id):
@@ -208,6 +216,8 @@ class ChatTree:
         for message in messages:
             node_id = self._new_node(message, parent)
             self.active.append(node_id)
+            if parent is not None:
+                self.nodes[parent]["active_child"] = node_id
             parent = node_id
 
         if parent is not None:
@@ -225,6 +235,12 @@ class ChatTree:
 
         for message in messages:
             node_id = message_id(message)
+
+            # a node can only appear once on a path: a repeated id means someone
+            # re-sent a stored message (regenerate) - ignore the duplicate
+            if node_id and node_id in active:
+                continue
+
             node = self.nodes.get(node_id) if node_id else None
 
             if node is None:
@@ -359,6 +375,17 @@ class ChatTree:
                     "position": position,
                     "total": len(kids),
                     "siblings": list(kids),
+                }
+
+        # branching the first message of a chat leaves several roots: they are
+        # siblings too, so the counter and the panel must see them as one group
+        roots = self._roots()
+        if len(roots) > 1:
+            for position, kid in enumerate(roots, start=1):
+                variants[kid] = {
+                    "position": position,
+                    "total": len(roots),
+                    "siblings": list(roots),
                 }
 
         depth = {}

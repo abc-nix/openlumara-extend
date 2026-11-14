@@ -1,0 +1,111 @@
+/* chat-pro - message-row branch control + the branches sidebar panel.
+   the buttons inherit .message-buttons button (28x28, hover, disabled), so
+   only the wrapper and the counter need their own styles. */
+
+.chat-pro-branch {
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+.chat-pro-branch .cp-count {
+    font-size: 0.7rem;
+    line-height: 1;
+    color: var(--text-muted);
+    min-width: 20px;
+    text-align: center;
+    user-select: none;
+    margin-top: 7px; /* lines up with the buttons' own margin */
+    opacity: 0.8;
+}
+
+/* ----------------
+ * branches panel
+ * ----------------- */
+.chat-pro-tree {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    gap: 8px;
+    padding: 10px 8px 12px;
+}
+
+.chat-pro-tree .cpt-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 2px;
+}
+
+.chat-pro-tree .cpt-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.chat-pro-tree .cpt-sub {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.chat-pro-tree .cpt-empty {
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    padding: 4px 4px 0;
+}
+
+.chat-pro-tree .cpt-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.chat-pro-tree .cpt-node {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    padding: 3px 6px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-align: left;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.chat-pro-tree .cpt-node:hover {
+    background: var(--bg-secondary);
+    opacity: 1;
+    color: var(--text-primary);
+}
+
+.chat-pro-tree .cpt-node.on-path {
+    opacity: 1;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+}
+
+.chat-pro-tree .cpt-node .cpt-role {
+    flex-shrink: 0;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.chat-pro-tree .cpt-node .cpt-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
