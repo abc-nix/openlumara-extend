@@ -196,3 +196,62 @@
     color: var(--text-primary);
     background: var(--bg-primary, var(--bg-secondary));
 }
+
+/* fork confirmation banner, above the input bar. same shape as libreta's
+   .lb-banner: accent edge, text on the left, the two actions on the right.
+   a native confirm() is auto-answered in some environments, so this is the
+   only prompt the user actually sees. */
+.cp-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 8px;
+    padding: 9px 12px;
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.cp-banner-text {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-secondary);
+}
+
+.cp-banner-quote {
+    color: var(--text-primary);
+}
+
+.cp-btn {
+    flex: 0 0 auto;
+    padding: 4px 11px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.cp-btn-primary {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.cp-btn-primary:hover {
+    opacity: 0.8;
+}
+
+.cp-btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.cp-btn-ghost:hover {
+    border-color: var(--accent);
+}

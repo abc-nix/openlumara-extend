@@ -1,0 +1,28 @@
+{# chat-pro - mirrors core channels/webui/templates/chat/index.html only to
+   claim the `above_input_bar` slot, where the fork confirmation sits.
+
+   libreta does the same thing for its destructive actions, for the same reason:
+   native confirm()/prompt() are auto-answered in some environments (a controlled
+   browser answered confirm() with true), so a prompt drawn in the page is the
+   only one the user actually sees. Keep this the ONLY thing here; everything
+   else in the chat view comes from core. #}
+{% macro above_input_bar() %}
+<div class="cp-banner" x-show="$store.chatPro.forkConfirm" x-cloak>
+    <span class="cp-banner-text">
+        Fork this conversation from
+        <span class="cp-banner-quote" x-text="$store.chatPro.forkConfirm
+            ? '\u201c' + $store.chatPro.forkConfirm.label + '\u201d'
+            : ''"></span>?
+        A new chat gets a copy up to that message
+        <span x-text="$store.chatPro.forkConfirm && $store.chatPro.forkConfirm.role === 'user'
+            ? '(starting with it unanswered)'
+            : ''"></span>.
+        This chat stays exactly as it is.
+    </span>
+    <button type="button" class="cp-btn cp-btn-primary"
+        :disabled="$store.chatPro.forking"
+        @click="$store.chatPro.confirmFork()">Fork</button>
+    <button type="button" class="cp-btn cp-btn-ghost"
+        @click="$store.chatPro.cancelFork()">Cancel</button>
+</div>
+{% endmacro %}

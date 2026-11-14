@@ -34,6 +34,11 @@ const CHAT_PRO = {
     // node id awaiting the in-panel delete confirmation (see prune())
     confirming: null,
 
+    // pending fork, answered by the banner above the input bar (see chat/index.html).
+    // same reason libreta draws its own prompts: native confirm() is auto-answered
+    // in some environments, so it forked without ever asking.
+    forkConfirm: null,
+
     /* ----------------
      * branch state
      * ----------------- */
@@ -87,6 +92,13 @@ const CHAT_PRO = {
             // node is gone (pruned elsewhere, or a different chat was loaded)
             if (this.confirming && !this.nodes.some((node) => node.id === this.confirming)) {
                 this.confirming = null;
+            }
+
+            // a pending fork is tied to one chat and one turn count: if either
+            // moved, its message index would point somewhere else now
+            if (this.forkConfirm && (this.forkConfirm.chat !== chat.selectedChat ||
+                    this.forkConfirm.turns !== (chat.turnHistory || []).length)) {
+                this.forkConfirm = null;
             }
         } catch (error) {
             // the module may be disabled mid-session: stay quiet, keep the row clean
@@ -257,33 +269,48 @@ const CHAT_PRO = {
     /* ----------------
      * fork
      * ----------------- */
-    async fork(turnIndex) {
+    // clicking the fork icon only *asks*: the prompt is the banner above the
+    // input bar (chat/index.html), mirroring libreta's in-app confirmations
+    fork(turnIndex) {
         if (this.forking) { return; }
+        if (Alpine.store("stream").state !== "idle") { return; }
 
         const chat = Alpine.store("chat");
-        const stream = Alpine.store("stream");
         const turn = (chat.turnHistory || [])[turnIndex];
-
         if (!turn) { return; }
-        if (stream.state !== "idle") { return; }
 
         const index = turn.last_message_index ?? turn.first_message_index;
         if (index === null || index === undefined) { return; }
 
-        const kept = turn.role === "user"
-            ? "your message (the fork starts with it unanswered)"
-            : "this reply";
+        const last = turn.messages && turn.messages.length
+            ? turn.messages[turn.messages.length - 1]
+            : null;
 
-        if (!confirm(
-            `Fork from ${kept}?\n\n` +
-            "A new chat gets a copy of the conversation up to this point, " +
-            "with the same metadata and attachments. " +
-            "The chat you are in stays exactly as it is."
-        )) { return; }
+        this.forkConfirm = {
+            turnIndex: turnIndex,
+            index: index,
+            chat: chat.selectedChat,
+            turns: (chat.turnHistory || []).length,
+            role: turn.role,
+            label: this._previewOf(last)
+        };
+    },
 
+    cancelFork() {
+        this.forkConfirm = null;
+    },
+
+    async confirmFork() {
+        const pending = this.forkConfirm;
+        if (!pending || this.forking) { return; }
+        if (Alpine.store("stream").state !== "idle") { return; }
+
+        this.forkConfirm = null;
         this.forking = true;
+
+        const chat = Alpine.store("chat");
         try {
-            const result = await simpleApiPost("/api/ext/chat-pro/fork", { index });
+            const result = await simpleApiPost("/api/ext/chat-pro/fork", { index: pending.index });
             if (!result || !result.id) { return; }
 
             // the backend broadcasts chat_switched as well: if that already
@@ -297,6 +324,23 @@ const CHAT_PRO = {
         } finally {
             this.forking = false;
         }
+    },
+
+    _previewOf(message) {
+        if (!message) { return ""; }
+
+        let text = message.content;
+        if (Array.isArray(text)) {
+            text = text
+                .filter((block) => block && block.type === "text" && block.text)
+                .map((block) => block.text)
+                .join(" ");
+        }
+
+        text = String(text || "").replace(/\s+/g, " ").trim();
+        if (!text) { text = message.reasoning_content ? "[reasoning]" : "[message]"; }
+
+        return text.length > 72 ? `${text.slice(0, 71)}\u2026` : text;
     },
 
     /* ----------------
