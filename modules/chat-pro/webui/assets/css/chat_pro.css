@@ -46,6 +46,7 @@
 }
 
 .chat-pro-tree .cpt-sub {
+    margin-left: auto;
     font-size: 0.72rem;
     color: var(--text-muted);
     white-space: nowrap;
@@ -611,4 +612,314 @@
         min-width: 100%;
     }
     .cp-cover { width: 100%; }
+}
+
+/* ==========================================================================
+   branch graph (modals/chatpro_graph.html)
+   ========================================================================== */
+
+/* the map's window: the dock is 360px wide and a canvas is not, so the tree
+   gets a modal-sized surface instead of a column */
+.cp-graph-modal {
+    width: min(1180px, 94vw);
+    height: min(860px, 90vh);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.cp-graph-modal .header {
+    flex: none;
+}
+
+.cp-graph-stats {
+    margin-left: auto;
+    margin-right: 10px;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.cp-graph-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* legend: same uppercase micro-labels the dock uses */
+.cp-graph-legend {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.cp-leg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.cp-leg-swatch {
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+}
+
+.cp-leg-swatch.role-user { border-color: var(--accent); }
+.cp-leg-swatch.role-assistant { background: var(--bg-tertiary); }
+
+.cp-leg-line {
+    width: 18px;
+    height: 0;
+    border-top: 1px dashed var(--border-color);
+}
+
+.cp-leg-line.on-path { border-top-color: var(--accent); }
+
+.cp-graph-viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-primary);
+    cursor: grab;
+    touch-action: none;
+}
+
+.cp-graph-viewport.panning { cursor: grabbing; }
+
+.cp-graph-stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    user-select: none;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+
+.cp-graph-edges {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.cp-edge {
+    fill: none;
+    stroke: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 3;
+}
+
+.cp-edge.on-path {
+    stroke: var(--accent);
+    opacity: 0.7;
+}
+
+.cp-gcard {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary, #f3f3f8);
+    color: var(--text-primary);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* on the active path: accent edge plus a 2px inset bar, no outer shadow */
+.cp-gcard.on-path {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* off-path is *stated*, not dimmed: a dashed outline rhymes with the dashed
+   off-path edges, and fading the whole card would take the fill with it */
+.cp-gcard.off-path {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.cp-gcard.off-path:hover {
+    border-style: solid;
+    background: var(--bg-tertiary);
+}
+
+/* hover lives after the state rules on purpose: it has to win on the current
+   path too, where the plain :hover rule used to lose to .on-path */
+.cp-gcard:hover,
+.cp-gcard.on-path:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-secondary));
+}
+
+/* the turn the chat is currently scrolled to: an extra inner ring on top of the
+   path, so "here" reads differently from "on this branch" */
+.cp-gcard.is-viewing {
+    box-shadow: inset 2px 0 0 var(--accent),
+                inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.cp-gcard.is-viewing .cp-grole {
+    color: var(--accent);
+}
+
+.cp-grole {
+    padding-right: 40px;
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.cp-gcard.role-user.on-path .cp-grole { color: var(--accent); }
+
+/* the step count of a turn with tool calls: a footnote, not a header */
+.cp-gsteps {
+    margin-top: auto;
+    font-size: 0.54rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.cp-gtime {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    font-size: 0.54rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.cp-gcard.on-path .cp-gprev {
+    color: var(--text-primary);
+}
+
+.cp-gprev {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.72rem;
+    line-height: 1.25;
+    color: var(--text-secondary);
+}
+
+/* level of detail: under this scale the text is not readable anyway, so the
+   cards become shapes and a 113-node tree stays legible as structure */
+.cp-graph-viewport.lod-far .cp-gprev,
+.cp-graph-viewport.lod-far .cp-gtime,
+.cp-graph-viewport.lod-far .cp-gsteps {
+    display: none;
+}
+
+.cp-graph-viewport.lod-far .cp-gcard { padding: 4px; }
+
+.cp-graph-zoom {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cp-graph-zoom button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cp-graph-zoom button:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.cp-graph-zoom .cp-zoom-fit svg {
+    width: 14px;
+    height: 14px;
+}
+
+.cp-graph-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+/* the graph button in the Branches header, right of the count */
+.chat-pro-tree .cpt-graph {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 4px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.chat-pro-tree .cpt-graph svg {
+    width: 14px;
+    height: 14px;
+}
+
+.chat-pro-tree .cpt-graph:hover {
+    color: var(--accent);
+    background: var(--bg-secondary);
+}
+
+.chat-pro-tree .cpt-graph:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* no color-mix: fall back to the chrome tokens (less contrast on dark, but the
+   cards and edges keep their outline) */
+@supports not (border-color: color-mix(in srgb, red 50%, transparent)) {
+    .cp-gcard { border-color: var(--border-color); }
+    .cp-gcard.off-path { border-color: var(--border-color); }
+    .cp-edge { stroke: var(--border-color); }
+    .cp-gcard.on-path { background: var(--bg-secondary); }
 }

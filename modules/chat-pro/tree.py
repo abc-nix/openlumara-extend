@@ -418,6 +418,63 @@ class ChatTree:
             stack.extend(kids)
         return total
 
+    def turns(self):
+        """group nodes into turns: one user message, or one assistant chain
+
+        a turn is what the graph draws (and what chat_nav calls a block): the
+        user message, plus every non-user step that follows it *linearly* -
+        assistant text, tool calls, tool results - collapsed into one card. a
+        user message always starts a turn, and a fork ends one: each
+        alternative starts its own, because they are different continuations.
+
+        returns (turns, turn_of_node): turns is a list of {id, nodes} in seq
+        order (id = the first node, which is also the switch target), and
+        turn_of_node maps every node id to the turn that contains it.
+        """
+        children = self._children_map()
+        nodes = self.nodes
+
+        def role(node_id):
+            message = (nodes.get(node_id) or {}).get("message") or {}
+            return message.get("role")
+
+        def kids(node_id):
+            return children.get(node_id, [])
+
+        starts = set()
+        for node_id, node in nodes.items():
+            parent = node.get("parent")
+            if not parent or parent not in nodes:
+                starts.add(node_id)          # a root
+            elif role(node_id) == "user" or role(parent) == "user":
+                starts.add(node_id)          # a prompt, or the answer to one
+            elif len(kids(parent)) > 1:
+                starts.add(node_id)          # an alternative inside a chain
+
+        turns = []
+        turn_of_node = {}
+        for node_id in sorted(nodes, key=lambda n: nodes[n].get("seq", 0)):
+            if node_id not in starts:
+                continue
+
+            group = [node_id]
+            current = node_id
+            while True:
+                next_ids = kids(current)
+                if len(next_ids) != 1:
+                    break                    # a fork (or the tip)
+                nxt = next_ids[0]
+                if role(nxt) == "user" or nxt in starts:
+                    break                    # the next turn begins here
+                group.append(nxt)
+                current = nxt
+
+            for member in group:
+                turn_of_node[member] = node_id
+            turns.append({"id": node_id, "nodes": group})
+
+        return turns, turn_of_node
+
     def branch_map(self, children=None):
         """rows for the branches panel.
 

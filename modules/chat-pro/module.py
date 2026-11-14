@@ -36,7 +36,7 @@ import core
 
 import channels.webui.api as webui
 
-from .tree import ChatTree
+from .tree import ChatTree, preview
 
 
 class ChatPro(core.module.Module):
@@ -430,3 +430,109 @@ class ChatPro(core.module.Module):
         self.log("chat-pro", f"pruned branch {node_id} of chat {chat.get('id')} ({removed} messages)")
 
         return {"removed": removed}
+
+    @webui.route("graph")
+    async def _route_graph(self, body=None, query=None):
+        """the whole tree as *light* nodes, for the canvas
+
+        `state` collapses to fork points on purpose (a 113-message chat must stay
+        a handful of rows); a canvas needs every node, so this is a separate and
+        much heavier payload - fetched only while the graph modal is open, never
+        by the poll. previews are capped, and no content / reasoning / tool output
+        travels: single messages can be hundreds of KB.
+        """
+        channel = self.channel
+        if channel is None:
+            return self.result("no active channel", success=False)
+
+        chat = channel.context.chat
+        if chat.current is None:
+            return self.result("no chat is currently loaded", success=False)
+
+        chat_id = chat.get("id")
+        messages = await chat.messages.get()
+        tree = self._tree(chat_id)
+
+        if tree.load():
+            if tree.reconcile(messages):
+                chat.messages.data.save()
+                tree.save()
+        elif self._always_active() and messages:
+            tree.capture(messages)
+            chat.messages.data.save()
+            tree.save()
+        else:
+            return {"nodes": [], "roots": [], "active": [], "stats": {"nodes": 0, "branches": 0}}
+
+        # one card per *turn*, not per step: a user message, or a whole assistant
+        # chain (answer + tool calls + tool results). see ChatTree.turns().
+        turns, turn_of_node = tree.turns()
+        on_path = set(tree.active)
+
+        def message_of(node_id):
+            return (tree.nodes.get(node_id) or {}).get("message") or {}
+
+        def has_text(message):
+            content = message.get("content")
+            if isinstance(content, list):
+                return any(isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+                           for block in content)
+            return bool(str(content or "").strip())
+
+        cards = []
+        for turn in turns:
+            group = turn["nodes"]
+            start = turn["id"]
+            start_message = message_of(start)
+
+            # the card says what the turn *is*: the assistant's final answer when
+            # the chain has one, otherwise the last message carrying text (a
+            # tool-only step, a tool result). never the step list.
+            answer = None
+            for node_id in reversed(group):
+                message = message_of(node_id)
+                if message.get("role") == "assistant" and not message.get("tool_calls") and has_text(message):
+                    answer = message
+                    break
+            if answer is None:
+                for node_id in reversed(group):
+                    message = message_of(node_id)
+                    if has_text(message):
+                        answer = message
+                        break
+            answer = answer or start_message
+
+            parent_node = (tree.nodes.get(start) or {}).get("parent")
+            cards.append({
+                "id": start,
+                "parent": turn_of_node.get(parent_node) if parent_node else None,
+                "seq": (tree.nodes.get(start) or {}).get("seq", 0),
+                "role": start_message.get("role") or "?",
+                "preview": preview(answer, 220),
+                "time": (message_of(group[-1]).get("_metadata") or {}).get("timestamp"),
+                "steps": max(0, len(group) - 1),
+                "tool": any(message_of(node_id).get("role") == "tool" or message_of(node_id).get("tool_calls")
+                            for node_id in group),
+                "on_path": start in on_path,
+                "children": 0,
+            })
+
+        counts = {}
+        for card in cards:
+            if card["parent"]:
+                counts[card["parent"]] = counts.get(card["parent"], 0) + 1
+        for card in cards:
+            card["children"] = counts.get(card["id"], 0)
+
+        active_turns = []
+        for node_id in tree.active:
+            turn_id = turn_of_node.get(node_id)
+            if turn_id and turn_id not in active_turns:
+                active_turns.append(turn_id)
+
+        return {
+            "nodes": cards,
+            "roots": [card["id"] for card in cards if not card["parent"]],
+            "active": active_turns,
+            "stats": {"nodes": len(cards), "branches": sum(1 for card in cards if card["children"] > 1)},
+        }

@@ -19,6 +19,21 @@
         <span class="cpt-sub" x-text="$store.chatPro.hasTree
             ? ($store.chatPro.branchCount + ($store.chatPro.branchCount === 1 ? ' branch' : ' branches'))
             : 'single line'"></span>
+        {# the map stays compact; the whole tree opens in its own window #}
+        <button type="button" class="cpt-graph" title="Open the branch graph"
+                aria-label="Open the branch graph"
+                :disabled="!$store.chatPro.hasTree || $store.stream.state != 'idle'"
+                @click="$store.chatPro.openGraph()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="5" r="2"></circle>
+                <circle cx="5" cy="19" r="2"></circle>
+                <circle cx="19" cy="19" r="2"></circle>
+                <path d="M12 7v4"></path>
+                <path d="M12 11v3"></path>
+                <path d="M5 17v-3h14v3"></path>
+            </svg>
+        </button>
     </div>
 
     <template x-if="!$store.chatPro.hasTree || $store.chatPro.branchCount === 0">

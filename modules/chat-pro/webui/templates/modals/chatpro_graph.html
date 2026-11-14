@@ -1,0 +1,61 @@
+{# chat-pro - the branch graph, in its own window.
+
+   the dock's branch map is compact on purpose and only lists fork points; a
+   canvas needs every node and room, so it gets a modal instead of a 360px
+   column. opened by the graph button in the Branches header, fed by the
+   `/api/ext/chat-pro/graph` route (light nodes only - no message bodies).
+
+   the canvas is rendered by CHAT_PRO._graphDraw() (assets/js/chat_pro.js):
+   edges in an <svg>, cards as html so line-clamping works, both inside one
+   transformed .cp-graph-stage that pan/zoom move together.
+
+   clicking a card switches the chat to that branch, closes this window and
+   scrolls to the message (CHAT_PRO.graphPick).
+
+   Escape and X both call closeGraph(), so a pending graph never outlives the
+   dialog - same rule as the fork modal. #}
+<template x-if="$store.ui.currentModal === 'chatpro_graph' && $store.chatPro.graphOpen" x-cloak>
+    <div @keydown.escape.window="$store.chatPro.closeGraph()">
+        <div class="modal cp-graph-modal">
+
+            <div class="header">
+                <h2>Branch Management</h2>
+                <span class="cp-graph-stats" x-text="($store.chatPro.graphStats.branches || 0) +
+                    ($store.chatPro.graphStats.branches === 1 ? ' branch' : ' branches') + ' · ' +
+                    ($store.chatPro.graphStats.nodes || 0) +
+                    ($store.chatPro.graphStats.nodes === 1 ? ' node' : ' nodes')"></span>
+                <button type="button" class="close" @click="$store.chatPro.closeGraph()" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="cp-graph-body">
+                <div class="cp-graph-legend">
+                    <span class="cp-leg-item"><span class="cp-leg-swatch role-user"></span>You</span>
+                    <span class="cp-leg-item"><span class="cp-leg-swatch role-assistant"></span>Assistant</span>
+                    <span class="cp-leg-item"><span class="cp-leg-line on-path"></span>Current</span>
+                    <span class="cp-leg-item"><span class="cp-leg-line off-path"></span>Off-path</span>
+                </div>
+
+                <div class="cp-graph-viewport" id="cp-graph-viewport">
+                    <div class="cp-graph-stage" id="cp-graph-stage"></div>
+
+                    <div class="cp-graph-zoom">
+                        <button type="button" title="Zoom in" @click="$store.chatPro.zoomGraph(1.25)">+</button>
+                        <button type="button" title="Zoom out" @click="$store.chatPro.zoomGraph(0.8)">&minus;</button>
+                        <button type="button" class="cp-zoom-fit" title="Fit the whole tree" @click="$store.chatPro.fitGraph()">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M4 9V4h5"></path><path d="M20 9V4h-5"></path>
+                                <path d="M4 15v5h5"></path><path d="M20 15v5h-5"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="cp-graph-empty" x-show="!$store.chatPro.graphLoading && !$store.chatPro.graphStats.nodes">
+                        This chat has no branches yet.
+                    </div>
+                    <div class="cp-graph-empty" x-show="$store.chatPro.graphLoading">Loading the tree…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>

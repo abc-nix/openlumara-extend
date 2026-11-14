@@ -47,6 +47,15 @@ const CHAT_PRO = {
     panelTab: "branches",
     _headerObserver: null,
 
+    // the branch graph (modals/chatpro_graph.html): every node of the tree,
+    // fetched only while that window is open. `state` stays the collapsed map
+    // the poll refreshes; this is the heavy, on-demand payload.
+    graphOpen: false,
+    graphLoading: false,
+    graphNodes: [],
+    graphActive: [],
+    graphStats: { nodes: 0, branches: 0 },
+
     togglePanel() {
         this.setPanelOpen(!this.panelOpen);
     },
@@ -449,6 +458,431 @@ const CHAT_PRO = {
         if (!text) { text = message.reasoning_content ? "[reasoning]" : "[message]"; }
 
         return text.length > 72 ? `${text.slice(0, 71)}\u2026` : text;
+    },
+
+    /* ----------------
+     * graph canvas (modals/chatpro_graph.html)
+     * ----------------- */
+    // a tidy top-down tree: leaves sit in a row, a parent is centred over its
+    // children. cards are html (so the preview can line-clamp), edges are one
+    // svg, and both live in a single transform so pan/zoom stay in sync.
+    async openGraph() {
+        if (this.graphOpen || !Alpine.store("chat").selectedChat) { return; }
+
+        this.graphOpen = true;
+        this.graphLoading = true;
+        this.graphNodes = [];
+        this.graphActive = [];
+        this.graphStats = { nodes: 0, branches: 0 };
+        Alpine.store("ui").openModal("chatpro_graph");
+        await Alpine.nextTick();
+
+        try {
+            const data = await simpleApiFetch("/api/ext/chat-pro/graph");
+            this.graphNodes = (data && data.nodes) || [];
+            this.graphActive = (data && data.active) || [];
+            this.graphStats = (data && data.stats) || { nodes: 0, branches: 0 };
+        } catch (error) {
+            this._fail("Loading the branch graph failed", error);
+        } finally {
+            this.graphLoading = false;
+            await Alpine.nextTick();
+            if (!this.graphOpen) { return; }
+
+            this._graphLayout();
+            this._graphDraw();
+            this._graphBind();
+
+            // a small tree opens as a whole; a long one opens at the current node,
+            // because fitting 113 levels shrinks the text out of readability
+            const viewport = document.getElementById("cp-graph-viewport");
+            const g = this._graphData;
+            const current = this.graphActive[this.graphActive.length - 1];
+            const fit = (viewport && g)
+                ? Math.min(viewport.clientWidth / g.width, viewport.clientHeight / g.height, 1) * 0.94
+                : 1;
+
+            if (current && fit < 0.55) { this._graphFocus(current); } else { this.fitGraph(); }
+        }
+    },
+
+    closeGraph() {
+        this.graphOpen = false;
+        const ui = Alpine.store("ui");
+        if (ui.currentModal === "chatpro_graph") { ui.closeModal(); }
+    },
+
+    _graphLayout() {
+        const cardW = 160;
+        const cardH = 88;
+        const gapX = 34;
+        const rowH = 136;
+
+        const byId = new Map();
+        this.graphNodes.forEach((node) => byId.set(node.id, node));
+
+        const kids = new Map();
+        this.graphNodes.forEach((node) => {
+            if (node.parent && byId.has(node.parent)) {
+                if (!kids.has(node.parent)) { kids.set(node.parent, []); }
+                kids.get(node.parent).push(node);
+            }
+        });
+        kids.forEach((list) => list.sort((a, b) => a.seq - b.seq));
+
+        const roots = this.graphNodes
+            .filter((node) => !node.parent || !byId.has(node.parent))
+            .sort((a, b) => a.seq - b.seq);
+
+        const depth = new Map();
+        const walk = (node, level) => {
+            depth.set(node.id, level);
+            (kids.get(node.id) || []).forEach((kid) => walk(kid, level + 1));
+        };
+        roots.forEach((root) => walk(root, 0));
+
+        // a node's slot is as wide as its own subtree, so leaves never overlap
+        const span = new Map();
+        const measure = (node) => {
+            const list = kids.get(node.id) || [];
+            if (!list.length) { span.set(node.id, cardW); return cardW; }
+
+            let total = 0;
+            list.forEach((kid, index) => {
+                total += measure(kid);
+                if (index) { total += gapX; }
+            });
+            span.set(node.id, Math.max(cardW, total));
+            return span.get(node.id);
+        };
+        roots.forEach((root) => measure(root));
+
+        const x = new Map();
+        const place = (node, left) => {
+            const list = kids.get(node.id) || [];
+            if (!list.length) { x.set(node.id, left + (span.get(node.id) - cardW) / 2); return; }
+
+            let cursor = left;
+            list.forEach((kid) => {
+                place(kid, cursor);
+                cursor += span.get(kid.id) + gapX;
+            });
+
+            const first = x.get(list[0].id) + cardW / 2;
+            const last = x.get(list[list.length - 1].id) + cardW / 2;
+            x.set(node.id, (first + last) / 2 - cardW / 2);
+        };
+
+        let cursor = 0;
+        roots.forEach((root) => {
+            place(root, cursor);
+            cursor += span.get(root.id) + gapX * 2;
+        });
+
+        let maxDepth = 0;
+        depth.forEach((level) => { maxDepth = Math.max(maxDepth, level); });
+
+        let minX = 0;
+        let maxX = cardW;
+        x.forEach((value) => { minX = Math.min(minX, value); maxX = Math.max(maxX, value + cardW); });
+
+        this._graphData = {
+            byId,
+            kids,
+            depth,
+            x,
+            cardW,
+            cardH,
+            rowH,
+            width: maxX - Math.min(0, minX) + 80,
+            height: (maxDepth + 1) * rowH + 40,
+            offsetX: -Math.min(0, minX) + 40,
+        };
+    },
+
+    // which turn sits at the top of the chat viewport: the cards can't follow a
+    // scroll that happens behind the modal, so it is sampled on every draw (the
+    // modal opens over a chat that is already positioned)
+    _graphViewingTurn() {
+        const container = document.getElementById("messages");
+        if (!container) { return -1; }
+
+        const top = container.getBoundingClientRect().top;
+        let viewing = -1;
+        container.querySelectorAll("[data-turn-index]").forEach((element) => {
+            if (viewing >= 0) { return; }
+            if (element.getBoundingClientRect().bottom > top + 8) {
+                viewing = Number(element.dataset.turnIndex);
+            }
+        });
+        return viewing;
+    },
+
+    // live message index -> turn index: core's turn starts are ascending, so the
+    // last one at or before the message is the turn that contains it
+    _graphTurnIndexForLive(messageIndex) {
+        if (!(messageIndex >= 0)) { return -1; }
+
+        const turns = Alpine.store("chat").turnHistory || [];
+        let index = -1;
+        turns.forEach((turn, position) => {
+            if (turn.first_message_index !== undefined && turn.first_message_index <= messageIndex) {
+                index = position;
+            }
+        });
+        return index;
+    },
+
+    _graphDraw() {
+        const viewport = document.getElementById("cp-graph-viewport");
+        const stage = document.getElementById("cp-graph-stage");
+        const g = this._graphData;
+        if (!viewport || !stage || !g) { return; }
+
+        stage.style.width = `${g.width}px`;
+        stage.style.height = `${g.height}px`;
+
+        const edges = [`<svg class="cp-graph-edges" width="${g.width}" height="${g.height}" aria-hidden="true">`];
+        this.graphNodes.forEach((node) => {
+            if (!node.parent || !g.byId.has(node.parent)) { return; }
+            const px = g.x.get(node.parent) + g.offsetX + g.cardW / 2;
+            const py = g.depth.get(node.parent) * g.rowH + g.cardH;
+            const cx = g.x.get(node.id) + g.offsetX + g.cardW / 2;
+            const cy = g.depth.get(node.id) * g.rowH;
+            const bend = (cy - py) * 0.4;
+            const cls = node.on_path ? "on-path" : "off-path";
+            edges.push(`<path class="cp-edge ${cls}" d="M${px} ${py} C${px} ${py + bend} ${cx} ${cy - bend} ${cx} ${cy}"></path>`);
+        });
+        edges.push("</svg>");
+        stage.innerHTML = edges.join("");
+
+        // node id -> live message index, so a card can be matched to the turn the
+        // chat is scrolled to (off-path cards have no live index at all)
+        const liveIndexById = new Map();
+        Object.entries(this.indexIds || {}).forEach(([index, id]) => liveIndexById.set(id, Number(index)));
+        const viewingTurn = this._graphViewingTurn();
+
+        this.graphNodes.forEach((node) => {
+            const card = document.createElement("button");
+            card.type = "button";
+            card.className = `cp-gcard ${node.role === "user" ? "role-user" : "role-assistant"}` +
+                (node.tool ? " tool" : "") + (node.on_path ? " on-path" : " off-path");
+            card.dataset.id = node.id;
+
+            const liveIndex = liveIndexById.get(node.id);
+            if (viewingTurn >= 0 &&
+                    this._graphTurnIndexForLive(liveIndex === undefined ? -1 : liveIndex) === viewingTurn) {
+                card.classList.add("is-viewing");
+            }
+
+            card.style.left = `${g.x.get(node.id) + g.offsetX}px`;
+            card.style.top = `${g.depth.get(node.id) * g.rowH}px`;
+            card.style.width = `${g.cardW}px`;
+            card.style.height = `${g.cardH}px`;
+            // one card per turn: the answer text, and how many steps it took
+            // (tool calls, intermediate narration) when there was more than one
+            const stepCount = Number(node.steps) || 0;
+            const steps = stepCount > 0 ? `${stepCount} ${stepCount === 1 ? "step" : "steps"}` : "";
+
+            card.innerHTML =
+                `<span class="cp-grole">${node.role === "user" ? "You" : (node.role === "tool" ? "Tool" : "Assistant")}</span>` +
+                `<span class="cp-gtime">${this._graphTime(node.time)}</span>` +
+                `<span class="cp-gprev">${this._esc(node.preview || "")}</span>` +
+                (steps ? `<span class="cp-gsteps">${steps}</span>` : "");
+            stage.appendChild(card);
+        });
+
+        this._graphX = 0;
+        this._graphY = 0;
+        this._graphScale = 1;
+        this._graphApply();
+    },
+
+    _graphApply() {
+        const stage = document.getElementById("cp-graph-stage");
+        const viewport = document.getElementById("cp-graph-viewport");
+        if (!stage || !viewport) { return; }
+
+        stage.style.transform = `translate(${this._graphX}px, ${this._graphY}px) scale(${this._graphScale})`;
+        viewport.classList.toggle("lod-far", this._graphScale < 0.55);
+    },
+
+    // factor from the current scale; `at` (x/y inside the viewport) keeps the
+    // point under the cursor still, so wheel-zoom feels anchored
+    zoomGraph(factor, at) {
+        const viewport = document.getElementById("cp-graph-viewport");
+        if (!viewport || !this._graphData) { return; }
+
+        const rect = viewport.getBoundingClientRect();
+        const cx = at ? at.x : rect.width / 2;
+        const cy = at ? at.y : rect.height / 2;
+        const scale = Math.min(2, Math.max(0.08, this._graphScale * factor));
+        const k = scale / this._graphScale;
+
+        this._graphX = cx - (cx - this._graphX) * k;
+        this._graphY = cy - (cy - this._graphY) * k;
+        this._graphScale = scale;
+        this._graphApply();
+    },
+
+    fitGraph() {
+        const viewport = document.getElementById("cp-graph-viewport");
+        const g = this._graphData;
+        if (!viewport || !g) { return; }
+
+        const rect = viewport.getBoundingClientRect();
+        const scale = Math.min(rect.width / g.width, rect.height / g.height, 1) * 0.94;
+        this._graphScale = Math.max(0.08, scale);
+        this._graphX = (rect.width - g.width * this._graphScale) / 2;
+        this._graphY = (rect.height - g.height * this._graphScale) / 2;
+        this._graphApply();
+    },
+
+    // put one node in the middle at a readable zoom: the alternative to a
+    // minimap is simply landing where the user is
+    _graphFocus(nodeId) {
+        const viewport = document.getElementById("cp-graph-viewport");
+        const g = this._graphData;
+        if (!viewport || !g || !g.x.has(nodeId)) { this.fitGraph(); return; }
+
+        const rect = viewport.getBoundingClientRect();
+        this._graphScale = 0.9;
+        this._graphX = rect.width / 2 - (g.x.get(nodeId) + g.offsetX + g.cardW / 2) * this._graphScale;
+        this._graphY = rect.height / 2 - (g.depth.get(nodeId) * g.rowH + g.cardH / 2) * this._graphScale;
+        this._graphApply();
+    },
+
+    _graphBind() {
+        const viewport = document.getElementById("cp-graph-viewport");
+        if (!viewport || viewport.dataset.bound) { return; }
+        viewport.dataset.bound = "1";
+
+        let drag = null;
+
+        viewport.addEventListener("pointerdown", (event) => {
+            if (event.target.closest(".cp-gcard") || event.target.closest(".cp-graph-zoom")) { return; }
+            drag = { x: event.clientX, y: event.clientY, px: this._graphX, py: this._graphY };
+            viewport.classList.add("panning");
+            try { viewport.setPointerCapture(event.pointerId); } catch (error) { /* not fatal */ }
+        });
+
+        viewport.addEventListener("pointermove", (event) => {
+            if (!drag) { return; }
+            this._graphX = drag.px + (event.clientX - drag.x);
+            this._graphY = drag.py + (event.clientY - drag.y);
+            this._graphApply();
+        });
+
+        const endDrag = () => {
+            drag = null;
+            viewport.classList.remove("panning");
+        };
+        viewport.addEventListener("pointerup", endDrag);
+        viewport.addEventListener("pointercancel", endDrag);
+
+        viewport.addEventListener("wheel", (event) => {
+            event.preventDefault();
+            const rect = viewport.getBoundingClientRect();
+            this.zoomGraph(event.deltaY < 0 ? 1.12 : 0.89, {
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top
+            });
+        }, { passive: false });
+
+        viewport.addEventListener("click", (event) => {
+            const card = event.target.closest(".cp-gcard");
+            if (card) { this.graphPick(card.dataset.id); }
+        });
+    },
+
+    async graphPick(nodeId) {
+        if (!nodeId || this.busy) { return; }
+        if (Alpine.store("stream").state !== "idle") { return; }
+
+        // where to land, as a *turn* index: after the switch every on-path card
+        // is exactly one client turn (a user message or an assistant chain), so
+        // a card's index is its number of turn-ancestors. computed off the graph
+        // itself, not off turnHistory, which is about to be replaced.
+        // core's turnHistory alternates one entry per user message and one per
+        // assistant chain, which is exactly one card each - so a card's turn
+        // index is simply how many cards precede it on its path (its depth).
+        const ui = Alpine.store("ui");
+        const byId = (this._graphData && this._graphData.byId) || new Map();
+        let turnIndex = -1;
+        let cursor = byId.get(nodeId);
+        if (cursor) {
+            turnIndex = 0;
+            let guard = 0;
+            while (cursor && cursor.parent && guard++ < 4096) {
+                turnIndex += 1;
+                cursor = byId.get(cursor.parent);
+            }
+        }
+
+        // hand the target to core *before* the switch: its sync handler scrolls
+        // to it only after reloadChat() has rewritten the history and the dom.
+        // calling scrollToTurn here would run against the old chat, and the sync
+        // would then fall back to forceScrollToBottom() over the top of it.
+        if (turnIndex >= 0) { ui.scrollToTurnIndex = turnIndex; }
+
+        this.busy = true;
+        try {
+            await simpleApiPost("/api/ext/chat-pro/switch", { node: nodeId });
+            this.closeGraph();
+
+            // counters catch up on their own signature change
+            this._signature = null;
+            await this.refresh(true);
+
+            // ui.scrollToTurn centres the turn; for a 45-message assistant chain
+            // that means landing halfway through the answer. bring its top to the
+            // top of the viewport once the sync-driven scroll has finished.
+            await this._graphAlignTurn(turnIndex);
+        } catch (error) {
+            ui.scrollToTurnIndex = null;
+            this._fail("Switching branch failed", error);
+        } finally {
+            this.busy = false;
+        }
+    },
+
+    // the sync handler clears ui.scrollToTurnIndex when it has scrolled, which is
+    // the only reliable "the history is on screen now" signal we can wait on
+    async _graphAlignTurn(turnIndex) {
+        const container = document.getElementById("messages");
+        if (!container || turnIndex < 0) { return; }
+
+        for (let i = 0; i < 40; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            if (Alpine.store("ui").scrollToTurnIndex !== null) { continue; }
+
+            const element = container.querySelector(`[data-turn-index="${turnIndex}"]`);
+            if (!element) { return; }
+
+            const offset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+            if (Math.abs(offset) < 4) { return; }
+
+            container.scrollTo({ top: container.scrollTop + offset, behavior: "instant" });
+            return;
+        }
+    },
+
+    // a message preview can hold any text: never hand it to innerHTML raw
+    _esc(text) {
+        return String(text == null ? "" : text).replace(/[&<>"']/g, (ch) => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        }[ch]));
+    },
+
+    _graphTime(stamp) {
+        if (!stamp) { return ""; }
+        const date = new Date(stamp * 1000);
+        if (Number.isNaN(date.getTime())) { return ""; }
+
+        const hh = String(date.getHours()).padStart(2, "0");
+        const mm = String(date.getMinutes()).padStart(2, "0");
+        if (date.toDateString() === new Date().toDateString()) { return `${hh}:${mm}`; }
+        return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")} ${hh}:${mm}`;
     },
 
     /* ----------------
