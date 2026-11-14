@@ -294,10 +294,15 @@ const CHAT_PRO = {
             role: turn.role,
             label: this._previewOf(last)
         };
+
+        // the modal template lives in webui/templates/modals/chatpro_fork.html
+        Alpine.store("ui").openModal("chatpro_fork");
     },
 
     cancelFork() {
         this.forkConfirm = null;
+        const ui = Alpine.store("ui");
+        if (ui.currentModal === "chatpro_fork") { ui.closeModal(); }
     },
 
     async confirmFork() {
@@ -307,6 +312,9 @@ const CHAT_PRO = {
 
         this.forkConfirm = null;
         this.forking = true;
+
+        const ui = Alpine.store("ui");
+        if (ui.currentModal === "chatpro_fork") { ui.closeModal(); }
 
         const chat = Alpine.store("chat");
         try {

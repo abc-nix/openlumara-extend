@@ -1,0 +1,39 @@
+{# chat-pro - fork confirmation.
+
+   libreta's rule applies here too: native confirm() is auto-answered in some
+   environments (the CDP-driven test browser answered true), so the prompt has
+   to be drawn in the page. a modal rather than a banner, because forking
+   creates something - it deserves the interruption.
+
+   opened by $store.chatPro.fork(); closing (X, Escape, Cancel) goes through
+   cancelFork() so the pending fork never outlives its dialog. #}
+<template x-if="$store.ui.currentModal === 'chatpro_fork' && $store.chatPro.forkConfirm" x-cloak>
+    <div @keydown.escape.window="$store.chatPro.cancelFork()">
+        <div class="modal categories-modal">
+            <div class="header">
+                <h2>Fork conversation</h2>
+                <button type="button" class="close" @click="$store.chatPro.cancelFork()" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="categories-content">
+                <div class="cp-fork-body">
+                    <div class="cp-fork-lead">Everything up to this message goes into a new chat:</div>
+                    <blockquote class="cp-fork-quote" x-text="$store.chatPro.forkConfirm.label"></blockquote>
+                    <div class="cp-fork-note">
+                        <span x-show="$store.chatPro.forkConfirm.role === 'user'">The new chat starts with that
+                        message unanswered. </span>The new chat gets its own copy, metadata and
+                        attachments included, and this chat stays exactly as it is.
+                    </div>
+                </div>
+
+                <div class="cp-fork-actions">
+                    <button type="button" class="cp-btn cp-btn-primary"
+                        :disabled="$store.chatPro.forking"
+                        @click="$store.chatPro.confirmFork()">Fork</button>
+                    <button type="button" class="cp-btn cp-btn-ghost"
+                        @click="$store.chatPro.cancelFork()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
