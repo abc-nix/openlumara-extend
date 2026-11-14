@@ -6,9 +6,14 @@
  *                               walks the siblings of a message
  *
  * both are backend jobs (they write a chat / a tree file), so this store asks
- * the module's routes and then lets the core switch chats and re-render. the
- * branch tree itself (nodes, active path) is kept here for the panel and the
- * counters; `refresh()` is idempotent and cheap while nothing changes.
+ * the module's routes and then lets the core switch chats and re-render.
+ *
+ * one subtlety worth knowing: the ids of the branch nodes cannot be read off
+ * the client's turn objects. core's turn_hash() deliberately ignores _metadata,
+ * and mergeTurnHistory() reuses a turn whose hash matches - so an id added to a
+ * message later would never reach the turn object already in memory. the state
+ * route therefore maps *live message index* -> node id (`index_ids`), and that
+ * is what the counters look up.
  */
 
 const CHAT_PRO = {
@@ -17,19 +22,24 @@ const CHAT_PRO = {
 
     hasTree: false,
     variants: {},
+    indexIds: {},
     nodes: [],
     active: [],
     chatId: null,
 
     _signature: null,
     _branchEdit: null,
+    _patched: false,
 
     /* ----------------
      * branch state
      * ----------------- */
     info(turn) {
-        const first = (turn && turn.messages && turn.messages[0]) || null;
-        const id = first && first._metadata ? first._metadata.chatpro_id : null;
+        const index = turn ? turn.first_message_index : null;
+        const id = (index === null || index === undefined)
+            ? null
+            : (this.indexIds[index] ?? this.indexIds[String(index)] ?? null);
+
         const variant = id ? this.variants[id] : null;
 
         if (!variant) {
@@ -44,13 +54,18 @@ const CHAT_PRO = {
         };
     },
 
+    signature(chat) {
+        const turns = chat.turnHistory || [];
+        const last = turns[turns.length - 1];
+        const tail = last ? (last.hash || (last.live ? "live" : "")) : "";
+        return `${chat.selectedChat}|${turns.length}|${tail}|${Alpine.store("stream").state}`;
+    },
+
     async refresh(force = false) {
         const chat = Alpine.store("chat");
-        const id = chat.selectedChat;
-        if (!id) { return; }
+        if (!chat.selectedChat) { return; }
 
-        // refetch only when the open chat or its number of turns moved
-        const signature = `${id}:${(chat.turnHistory || []).length}`;
+        const signature = this.signature(chat);
         if (!force && signature === this._signature) { return; }
         this._signature = signature;
 
@@ -58,9 +73,10 @@ const CHAT_PRO = {
             const state = await simpleApiFetch("/api/ext/chat-pro/state");
             if (!state) { return; }
 
-            this.chatId = state.chat_id || id;
+            this.chatId = state.chat_id || chat.selectedChat;
             this.hasTree = Boolean(state.has_tree);
             this.variants = state.variants || {};
+            this.indexIds = state.index_ids || {};
             this.nodes = state.nodes || [];
             this.active = state.active || [];
         } catch (error) {
@@ -110,9 +126,9 @@ const CHAT_PRO = {
         this.busy = true;
         try {
             await simpleApiPost("/api/ext/chat-pro/switch", { node: nodeId });
-            // the backend broadcasts sync as well: the chat rebuilds from that
+            // the backend broadcasts sync: the chat reloads from it, and the poll
+            // refreshes the counters once the new history is in place
             this._signature = null;
-            await this.refresh(true);
         } catch (error) {
             this._fail("Switching branch failed", error);
         } finally {
@@ -240,8 +256,40 @@ const CHAT_PRO = {
     },
 
     /* ----------------
-     * shared bits
+     * bootstrapping
      * ----------------- */
+    patch() {
+        if (this._patched) { return true; }
+        if (typeof window === "undefined" || !window.Alpine) { return false; }
+
+        const alpine = window.Alpine;
+        const chat = alpine.store("chat");
+
+        // the chat store is registered by init.js inside its own alpine:init
+        // listener, which runs *after* this module's - so this may be called
+        // again later (alpine:initialized and the poll both retry)
+        if (!chat || typeof chat.saveEdit !== "function") { return false; }
+
+        const originalSave = chat.saveEdit.bind(chat);
+        chat.saveEdit = async function (index) {
+            const store = alpine.store("chatPro");
+            if (!store._branchEdit) { return originalSave(index); }
+
+            const pending = store._branchEdit;
+            store._branchEdit = null;
+            return store._saveBranchEdit(chat, pending);
+        };
+
+        const originalCancel = chat.cancelEdit.bind(chat);
+        chat.cancelEdit = function () {
+            alpine.store("chatPro")._branchEdit = null;
+            return originalCancel();
+        };
+
+        this._patched = true;
+        return true;
+    },
+
     _fail(prefix, error) {
         console.error(`chat-pro: ${prefix}`, error);
         const text = String(error).replace(/[&<>"']/g, (ch) => ({
@@ -258,32 +306,17 @@ const CHAT_PRO = {
 
 document.addEventListener("alpine:init", () => {
     Alpine.store("chatPro", CHAT_PRO);
-
-    const chat = Alpine.store("chat");
-    if (chat && typeof chat.saveEdit === "function") {
-        // an edit started by `> ` on a user message is a *new variant*: saving it
-        // goes to the branch route instead of message_edit, so the original
-        // prompt (and everything under it) stays intact as another variant
-        const originalSave = chat.saveEdit.bind(chat);
-        chat.saveEdit = async function (index) {
-            const store = Alpine.store("chatPro");
-            if (!store._branchEdit) { return originalSave(index); }
-
-            const pending = store._branchEdit;
-            store._branchEdit = null;
-            return store._saveBranchEdit(chat, pending);
-        };
-
-        const originalCancel = chat.cancelEdit.bind(chat);
-        chat.cancelEdit = function () {
-            Alpine.store("chatPro")._branchEdit = null;
-            return originalCancel();
-        };
-    }
-
-    // counters are refreshed when the open chat or its turn count moves; the
-    // poll only refetches when the signature changed, so it is nearly free
-    setInterval(() => {
-        try { CHAT_PRO.refresh(false); } catch (error) { /* ignore */ }
-    }, 1500);
+    setTimeout(() => CHAT_PRO.patch(), 0);
 });
+
+document.addEventListener("alpine:initialized", () => CHAT_PRO.patch());
+
+// counters/siblings are refreshed when the open chat, its turn count, the tail
+// turn's content, or the stream state move; a signature guard keeps the poll
+// from hitting the backend while nothing changes
+setInterval(() => {
+    try {
+        if (!CHAT_PRO._patched) { CHAT_PRO.patch(); }
+        CHAT_PRO.refresh(false);
+    } catch (error) { /* ignore */ }
+}, 1500);

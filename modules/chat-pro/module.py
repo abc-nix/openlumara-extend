@@ -206,9 +206,14 @@ class ChatPro(core.module.Module):
             # ids were just stamped into the live history: persist them, or the
             # next reconcile would have to guess
             chat.messages.data.save()
-        tree.save()
+            tree.save()
 
         state = tree.state()
+        # live message index -> node id. the client cannot read chatpro_id off
+        # its own turn objects: turn_hash() ignores _metadata, so mergeTurnHistory
+        # keeps the stale turn and the id would never show up. indices always
+        # match the list the client just loaded.
+        state["index_ids"] = {str(index): node_id for index, node_id in enumerate(tree.active)}
         state.update({"has_tree": True, "chat_id": chat_id})
         return state
 
@@ -245,6 +250,30 @@ class ChatPro(core.module.Module):
         if index < 0 or index >= len(messages):
             return self.result(f"message index {index} is out of range", success=False)
 
+        # validate before touching anything: a rejected request must not leave a
+        # freshly captured tree behind
+        role = messages[index].get("role")
+        if mode == "regenerate" and role != "assistant":
+            return self.result("regenerate variants only apply to an assistant turn", success=False)
+        if mode == "edit" and role != "user":
+            return self.result("edited variants only apply to a user message", success=False)
+        if mode not in ("regenerate", "edit"):
+            return self.result("unknown branch mode", success=False)
+
+        user_index = None
+        user_message = None
+        if mode == "regenerate":
+            # the assistant turn starts at `index`; its prompt is the user message
+            # before it. that user message is re-sent *with its id*, so it stays a
+            # shared node and only the answer becomes a sibling.
+            user_index = await chat.messages.get_last_message_with_role("user", cutoff_index=index)
+            if user_index < 0:
+                return self.result("no user message to regenerate from", success=False)
+
+            user_message = dict(await chat.messages.get(user_index))
+            if not user_message.get("content") and not (user_message.get("_metadata") or {}).get("filenames"):
+                return self.result("that message has no content to re-send", success=False)
+
         # first branch activates the chat: the live history becomes the tree
         tree = self._tree(chat_id)
         if tree.load():
@@ -256,20 +285,6 @@ class ChatPro(core.module.Module):
         chat.messages.data.save()
 
         if mode == "regenerate":
-            if messages[index].get("role") != "assistant":
-                return self.result("regenerate variants only apply to an assistant turn", success=False)
-
-            # the assistant turn starts at `index`; its prompt is the user message
-            # before it. that user message is re-sent *with its id*, so it stays a
-            # shared node and only the answer becomes a sibling.
-            user_index = await chat.messages.get_last_message_with_role("user", cutoff_index=index)
-            if user_index < 0:
-                return self.result("no user message to regenerate from", success=False)
-
-            user_message = dict(await chat.messages.get(user_index))
-            if not user_message.get("content") and not user_message.get("_metadata", {}).get("filenames"):
-                return self.result("that message has no content to re-send", success=False)
-
             await chat.messages.delete_from(user_index)
             await ws_mgr.broadcast({"type": "sync"})
             await ws_mgr.start_stream(channel, chat_id, user_message)
@@ -277,9 +292,6 @@ class ChatPro(core.module.Module):
             return {"mode": "regenerate", "index": index, "messages": len(tree.nodes)}
 
         if mode == "edit":
-            if messages[index].get("role") != "user":
-                return self.result("edited variants only apply to a user message", success=False)
-
             message = await self._build_variant_message(
                 channel,
                 payload.get("content"),
