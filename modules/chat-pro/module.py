@@ -199,9 +199,20 @@ class ChatPro(core.module.Module):
     async def _route_state(self, body=None, query=None):
         """branch state of the open chat: variants per message + the whole tree"""
         channel = self.channel
+        if channel is None:
+            return self.result("no active channel", success=False)
+
         chat = channel.context.chat
         if chat.current is None:
-            return {"has_tree": False, "variants": {}, "nodes": [], "active": []}
+            return {
+                "has_tree": False,
+                "chat_id": None,
+                "branches": [],
+                "branch_points": 0,
+                "variants": {},
+                "index_ids": {},
+                "active": [],
+            }
 
         chat_id = chat.get("id")
         messages = await chat.messages.get()
@@ -304,8 +315,11 @@ class ChatPro(core.module.Module):
         else:
             tree.capture(messages)
             self.log("chat-pro", f"chat {chat_id} became a tree ({len(tree.nodes)} messages)")
-        tree.save()
+        # persist the history first: the ids were just stamped into it, and a tree
+        # written before its history would keep nodes no message carries (an
+        # interrupted write would then show phantom roots on the next reconcile)
         chat.messages.data.save()
+        tree.save()
 
         if mode == "regenerate":
             await chat.messages.delete_from(user_index)

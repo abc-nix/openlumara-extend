@@ -41,8 +41,8 @@ const CHAT_PRO = {
     // in some environments, so it forked without ever asking.
     forkConfirm: null,
 
-    // right panel (chat-pro/chat/panel.html). shell only for now; the tab is
-    // remembered per browser so reopening lands where the user left it.
+    // right panel (chat-pro/chat/panel.html). the tab is remembered per browser,
+    // so reopening lands where the user left it.
     panelOpen: false,
     panelTab: "branches",
     _headerObserver: null,
@@ -369,8 +369,8 @@ const CHAT_PRO = {
     /* ----------------
      * fork
      * ----------------- */
-    // clicking the fork icon only *asks*: the prompt is the banner above the
-    // input bar (chat/index.html), mirroring libreta's in-app confirmations
+    // clicking the fork icon only *asks*: the prompt is the modal in
+    // chat-pro/modals/chatpro_fork.html, same rule as libreta's in-app confirms
     fork(turnIndex) {
         if (this.forking) { return; }
         if (Alpine.store("stream").state !== "idle") { return; }

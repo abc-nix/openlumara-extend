@@ -150,7 +150,6 @@
 /* trailing cluster of a branch row: size, "current", delete */
 .chat-pro-tree .cpt-node .cpt-msgs {
     flex: none;
-    margin-left: auto;
     font-size: 9.5px;
     color: var(--text-muted, #52525b);
     font-variant-numeric: tabular-nums;
@@ -165,11 +164,10 @@
 }
 
 /* the delete affordance of an off-path row: faint until the row is hovered so it
-   never competes with the preview. the auto margin pins it to the right edge
-   without taking width from .cpt-text (which keeps its own ellipsis). */
+   never competes with the preview. .cpt-text's flex: 1 is what pushes this
+   trailing cluster to the right edge, so it needs no margin of its own. */
 .chat-pro-tree .cpt-node .cpt-prune {
     flex: 0 0 auto;
-    margin-left: auto;
     align-self: center;
     padding: 0 3px;
     font-size: 0.85rem;
@@ -472,10 +470,8 @@
     flex-direction: column;
 }
 
-/* the included tree already lays itself out (its list scrolls internally) */
-.cp-view .chat-pro-tree {
-    padding: 10px 8px 12px;
-}
+/* the included tree already lays itself out (its list scrolls internally), so
+   .cp-view adds nothing here: the base .chat-pro-tree rule owns the padding */
 
 .cp-placeholder {
     overflow-y: auto;

@@ -223,7 +223,8 @@ class ChatTree:
         if parent is not None:
             self.nodes[parent]["active_child"] = None
 
-        self.save()
+        # the caller persists: ids were just stamped into the live history, and a
+        # tree written before that history would hold nodes no message carries
         return len(self.active)
 
     def reconcile(self, messages):
@@ -353,7 +354,8 @@ class ChatTree:
         if parent and parent in self.nodes and self.nodes[parent].get("active_child") in doomed:
             self.nodes[parent]["active_child"] = None
 
-        self.save()
+        # the caller persists, so one operation is one write: the model never
+        # writes on its own, and nothing is written until prune() has not raised
         return len(doomed)
 
     def _children_map(self):
