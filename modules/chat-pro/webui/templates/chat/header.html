@@ -1,0 +1,20 @@
+{# chat-pro - the header entry point.
+
+   mirrors core channels/webui/templates/chat/header.html only to claim the
+   `right` slot. that slot renders at the *start* of the header's right cluster,
+   so the button asks css for `order: 99` to land immediately after "clear chat"
+   (the last core button) without touching core markup.
+
+   the icon is webui/templates/svg/chatpro.svg: a framed panel with the side
+   column filled, so the same glyph doubles as the open/closed state. #}
+{% macro right() %}
+{% if module_config.get("enable_webui_extension", true) %}
+<button type="button" class="btn cp-header-btn"
+    :class="{ 'is-open': $store.chatPro.panelOpen }"
+    :aria-pressed="$store.chatPro.panelOpen"
+    :title="$store.chatPro.panelOpen ? 'Hide the Chat Pro panel' : 'Chat Pro - branches, search, links, tasks'"
+    @click="$store.chatPro.togglePanel()">
+    {% include 'chat-pro/svg/chatpro.svg' %}
+</button>
+{% endif %}
+{% endmacro %}

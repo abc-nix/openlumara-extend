@@ -34,10 +34,106 @@ const CHAT_PRO = {
     // node id awaiting the in-panel delete confirmation (see prune())
     confirming: null,
 
-    // pending fork, answered by the banner above the input bar (see chat/index.html).
+    // pending fork, answered by the modal in chat-pro/modals/chatpro_fork.html.
     // same reason libreta draws its own prompts: native confirm() is auto-answered
     // in some environments, so it forked without ever asking.
     forkConfirm: null,
+
+    // right panel (chat-pro/chat/panel.html). shell only for now; the tab is
+    // remembered per browser so reopening lands where the user left it.
+    panelOpen: false,
+    panelTab: "branches",
+    _headerObserver: null,
+
+    togglePanel() {
+        this.setPanelOpen(!this.panelOpen);
+    },
+
+    setPanelOpen(open) {
+        if (open) {
+            // one right dock at a time. delegate doesn't know chat-pro exists, so
+            // it cannot step aside by itself; ask its public store to close first
+            // (feature-detected: it simply isn't there when the module is off)
+            try {
+                const delegate = Alpine.store("delegateView");
+                if (delegate && delegate.isOpen && typeof delegate.close === "function") {
+                    delegate.close();
+                }
+            } catch (error) { /* delegate not loaded */ }
+        }
+
+        this.panelOpen = Boolean(open);
+        try { localStorage.setItem("chatProPanelOpen", this.panelOpen ? "1" : "0"); } catch (error) { /* private mode */ }
+        this._applyPanelLayout(this.panelOpen);
+    },
+
+    // the other direction: if delegate opens while this panel is up, yield to it
+    watchDelegate() {
+        if (this._delegateWatcher || !window.Alpine) { return; }
+        let delegate = null;
+        try { delegate = Alpine.store("delegateView"); } catch (error) { /* not loaded */ }
+        if (!delegate) { return; }
+
+        this._delegateWatcher = true;
+        Alpine.effect(() => {
+            if (delegate.isOpen && Alpine.store("chatPro").panelOpen) {
+                Alpine.store("chatPro").setPanelOpen(false);
+            }
+        });
+    },
+
+    // the panel hangs under the header and the chat reserves its width. the header
+    // height is measured rather than hard-coded (themes size their buttons
+    // differently), and re-measured on resize.
+    _applyPanelLayout(open) {
+        const win = document.getElementById("chat-window");
+        if (!win) { return; }
+
+        // measure against the live rects: offsetHeight rounds and the header can
+        // still be growing when the page is initialising (model switcher, fonts),
+        // so re-measure once after the next frame and again after alpine:initialized
+        const measure = () => {
+            const header = win.querySelector("header");
+            if (!header) { return; }
+            const bottom = header.getBoundingClientRect().bottom - win.getBoundingClientRect().top;
+            win.style.setProperty("--cp-top", `${Math.max(0, Math.round(bottom))}px`);
+        };
+
+        measure();
+        requestAnimationFrame(measure);
+
+        win.classList.toggle("cp-panel-open", Boolean(open));
+
+        // the header can keep growing after this point (model switcher, theme
+        // fonts, streaming badge): follow it instead of measuring once
+        if (!this._headerObserver && window.ResizeObserver) {
+            const header = win.querySelector("header");
+            if (header) {
+                this._headerObserver = new ResizeObserver(() => measure());
+                this._headerObserver.observe(header);
+            }
+        }
+    },
+
+    closePanel() {
+        this.setPanelOpen(false);
+    },
+
+    setPanelTab(tab) {
+        const known = ["branches", "search", "links", "tasks"];
+        this.panelTab = known.includes(tab) ? tab : "branches";
+        try { localStorage.setItem("chatProPanelTab", this.panelTab); } catch (error) { /* private mode */ }
+    },
+
+    restorePanel() {
+        try {
+            this.panelOpen = localStorage.getItem("chatProPanelOpen") === "1";
+            const tab = localStorage.getItem("chatProPanelTab");
+            if (["branches", "search", "links", "tasks"].includes(tab)) { this.panelTab = tab; }
+        } catch (error) { /* private mode */ }
+
+        this._applyPanelLayout(this.panelOpen);
+    },
 
     /* ----------------
      * branch state
@@ -402,10 +498,22 @@ const CHAT_PRO = {
 
 document.addEventListener("alpine:init", () => {
     Alpine.store("chatPro", CHAT_PRO);
+    CHAT_PRO.restorePanel();
     setTimeout(() => CHAT_PRO.patch(), 0);
 });
 
-document.addEventListener("alpine:initialized", () => CHAT_PRO.patch());
+document.addEventListener("alpine:initialized", () => {
+    CHAT_PRO.patch();
+    // the header is fully rendered by now: settle the panel's top offset
+    CHAT_PRO._applyPanelLayout(CHAT_PRO.panelOpen);
+    // one right dock at a time (delegate's store is public; absent when off)
+    CHAT_PRO.watchDelegate();
+});
+
+// the panel hangs from the header, so its top offset follows the header's height
+window.addEventListener("resize", () => {
+    if (CHAT_PRO.panelOpen) { CHAT_PRO._applyPanelLayout(true); }
+});
 
 // counters/siblings are refreshed when the open chat, its turn count, the tail
 // turn's content, or the stream state move; a signature guard keeps the poll

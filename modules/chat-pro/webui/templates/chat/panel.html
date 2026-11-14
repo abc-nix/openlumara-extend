@@ -1,0 +1,75 @@
+{# chat-pro - the docked right panel.
+
+   Shell only for now: the Branches tab renders the real tree (same template the
+   sidebar tab uses), the other tabs are placeholders that show the shape they
+   will take. Styled as a sibling of the left sidebar, not a floating drawer:
+   solid --bg-secondary, one border-left, no shadow, no rounded corner, full
+   height.
+
+   mount: claimed via `below_header` in chat-pro/chat/index.html.
+   state: $store.chatPro.panelOpen / panelTab (persisted in localStorage). #}
+
+<div class="cp-cover" x-show="$store.chatPro.panelOpen" x-cloak
+     @keydown.escape.window="$store.chatPro.closePanel()">
+
+    <div class="cp-head">
+        <span class="cp-head-title">Chat Pro</span>
+        <span class="cp-head-sub" x-text="$store.chatPro.panelTab"></span>
+        <button type="button" class="cp-close" @click="$store.chatPro.closePanel()"
+                title="Hide the Chat Pro panel" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="cp-tabs" role="tablist">
+        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'branches' }"
+                @click="$store.chatPro.setPanelTab('branches')">Branches</button>
+        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'search' }"
+                @click="$store.chatPro.setPanelTab('search')">Search</button>
+        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'links' }"
+                @click="$store.chatPro.setPanelTab('links')">Links</button>
+        <button type="button" class="cp-tab" :class="{ active: $store.chatPro.panelTab === 'tasks' }"
+                @click="$store.chatPro.setPanelTab('tasks')">Tasks</button>
+    </div>
+
+    {# ---------------- branches (real) ---------------- #}
+    <div class="cp-view" x-show="$store.chatPro.panelTab === 'branches'">
+        {% include 'chat-pro/sidebars/branches.html' %}
+    </div>
+
+    {# ---------------- search (placeholder) ---------------- #}
+    <div class="cp-view cp-placeholder" x-show="$store.chatPro.panelTab === 'search'">
+        <div class="cp-search">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m20 20-4.2-4.2"></path>
+            </svg>
+            <input type="text" placeholder="Search every message, every branch" disabled>
+        </div>
+        <div class="cp-hint">
+            Will search the whole tree - including branches you are not on - and jump to the
+            hit, switching the branch first when needed.
+        </div>
+        <div class="cp-skeleton"><span></span><span></span><span></span></div>
+        <div class="cp-soon">coming next</div>
+    </div>
+
+    {# ---------------- links & files (placeholder) ---------------- #}
+    <div class="cp-view cp-placeholder" x-show="$store.chatPro.panelTab === 'links'">
+        <div class="cp-section-label">Everything this chat points at</div>
+        <div class="cp-row"><span class="cp-chip">link</span><span class="cp-row-text">https://example.com/some-page</span></div>
+        <div class="cp-row"><span class="cp-chip">file</span><span class="cp-row-text">~/Documents/Notes/plan.md</span></div>
+        <div class="cp-row"><span class="cp-chip">file</span><span class="cp-row-text">modules/chat-pro/module.py</span></div>
+        <div class="cp-hint">Links will open in a tab; file references will open in libreta (or the editor)
+            when the path really exists.</div>
+        <div class="cp-soon">coming next</div>
+    </div>
+
+    {# ---------------- tasks (placeholder) ---------------- #}
+    <div class="cp-view cp-placeholder" x-show="$store.chatPro.panelTab === 'tasks'">
+        <div class="cp-section-label">Delegated tasks</div>
+        <div class="cp-row"><span class="cp-status-dot"></span><span class="cp-row-text">A delegated run - title, status, model</span></div>
+        <div class="cp-row"><span class="cp-status-dot done"></span><span class="cp-row-text">A finished task</span></div>
+        <div class="cp-hint">Will list delegate's tasks through its public routes and jump to a task's
+            transcript. The delegate panel stays as it is.</div>
+        <div class="cp-soon">coming next</div>
+    </div>
+</div>

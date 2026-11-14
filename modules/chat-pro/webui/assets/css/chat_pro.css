@@ -268,3 +268,290 @@
 .cp-btn-ghost:hover {
     border-color: var(--accent);
 }
+
+/* ==========================================================================
+   header button + docked right panel
+   ========================================================================== */
+
+/* the module button renders at the start of the header's right cluster (that's
+   where extension slots go); order puts it right after "clear chat", the last
+   core button, without touching core markup. */
+.cp-header-btn {
+    order: 99;
+}
+
+.cp-header-btn.is-open {
+    color: var(--accent, #d4d4d8);
+    border-color: var(--accent, #d4d4d8);
+}
+
+.cp-header-btn.is-open .cp-panel-slab {
+    fill: var(--accent, #d4d4d8);
+}
+
+/* width of the dock, in one place (a future resize handle only has to change it) */
+#chat-window {
+    --cp-dock-w: 360px;
+}
+
+/* the chat reserves the panel's width the way it does for the left sidebar, but
+   only below the header: the top bar stays full width, so the button that opened
+   the panel is still there to close it. --cp-top is the header's measured height,
+   set by the store (it varies with the theme's button metrics).
+
+   core gives #messages width/min-width: 100%, so a margin alone would slide it
+   *under* the panel; the width has to be reduced explicitly as well. */
+#chat-window.cp-panel-open #messages {
+    margin-right: var(--cp-dock-w);
+    width: calc(100% - var(--cp-dock-w));
+    min-width: 0;
+    transition: margin-right 0.16s ease, width 0.16s ease;
+}
+
+#chat-window.cp-panel-open #input {
+    margin-right: var(--cp-dock-w);
+    transition: margin-right 0.16s ease;
+}
+
+/* a sibling of the left sidebar, not a floating drawer: solid background, one
+   1px edge, no shadow, no radius; it runs from under the header to the bottom. */
+.cp-cover {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: var(--cp-top, 48px);
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: min(var(--cp-dock-w, 360px), 100%);
+    background: var(--bg-secondary, #0c0c0f);
+    border-left: 1px solid var(--border-color, #1e1e24);
+    box-shadow: none;
+    z-index: 40;
+}
+
+.cp-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px 9px 12px;
+    border-bottom: 1px solid var(--border-color, #1e1e24);
+}
+
+.cp-head-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #fafafa);
+}
+
+.cp-head-sub {
+    flex: 1;
+    min-width: 0;
+    font-size: 10.5px;
+    text-transform: capitalize;
+    color: var(--text-muted, #52525b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cp-close {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--text-muted, #52525b);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cp-close:hover {
+    background: var(--bg-tertiary, #111115);
+    color: var(--text-primary, #fafafa);
+}
+
+/* tabs: a quiet underline row, like the sidebar's own section switching */
+.cp-tabs {
+    flex: none;
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px 0;
+    border-bottom: 1px solid var(--border-color, #1e1e24);
+}
+
+.cp-tab {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 4px 7px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--text-muted, #52525b);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.cp-tab:hover {
+    color: var(--text-primary, #fafafa);
+}
+
+.cp-tab.active {
+    color: var(--text-primary, #fafafa);
+    border-bottom-color: var(--accent, #d4d4d8);
+}
+
+/* one view at a time; the branches one fills it, the placeholders scroll */
+.cp-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* the included tree already lays itself out (its list scrolls internally) */
+.cp-view .chat-pro-tree {
+    padding: 10px 8px 12px;
+}
+
+.cp-placeholder {
+    overflow-y: auto;
+    padding: 12px;
+    gap: 10px;
+}
+
+.cp-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: none;
+}
+
+.cp-search svg {
+    position: absolute;
+    left: 9px;
+    width: 13px;
+    height: 13px;
+    color: var(--text-muted, #52525b);
+    pointer-events: none;
+}
+
+.cp-search input {
+    width: 100%;
+    padding: 8px 10px 8px 28px;
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--text-primary, #fafafa);
+    font-size: 12px;
+    opacity: 0.6;
+}
+
+.cp-section-label {
+    flex: none;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted, #52525b);
+}
+
+.cp-hint {
+    flex: none;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-muted, #52525b);
+}
+
+.cp-row {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-tertiary, #111115);
+    font-size: 12px;
+    color: var(--text-secondary, #a1a1aa);
+}
+
+.cp-row-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cp-chip {
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid var(--border-color, #1e1e24);
+    border-radius: 999px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #52525b);
+}
+
+.cp-status-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent, #d4d4d8);
+}
+
+.cp-status-dot.done {
+    background: var(--text-muted, #52525b);
+}
+
+.cp-skeleton {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.cp-skeleton span {
+    display: block;
+    height: 9px;
+    border-radius: 4px;
+    background: var(--bg-tertiary, #111115);
+}
+
+.cp-skeleton span:nth-child(1) { width: 88%; }
+.cp-skeleton span:nth-child(2) { width: 72%; }
+.cp-skeleton span:nth-child(3) { width: 54%; }
+
+.cp-soon {
+    flex: none;
+    align-self: flex-start;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color, #1e1e24);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent, #d4d4d8);
+}
+
+@media (max-width: 768px) {
+    /* no room to squeeze beside the chat on a phone: overlay full width, still
+       starting under the header so the toggle stays reachable */
+    #chat-window.cp-panel-open #messages,
+    #chat-window.cp-panel-open #input {
+        margin-right: 0;
+        width: 100%;
+        min-width: 100%;
+    }
+    .cp-cover { width: 100%; }
+}

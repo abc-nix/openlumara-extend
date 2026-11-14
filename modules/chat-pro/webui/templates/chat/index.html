@@ -1,0 +1,8 @@
+{# chat-pro - mirrors core channels/webui/templates/chat/index.html only to
+   claim `below_header`, where the docked right panel is mounted (the same trick
+   delegate uses). everything else in the chat view comes from core. #}
+{% macro below_header() %}
+{% if module_config.get("enable_webui_extension", true) %}
+{% include 'chat-pro/chat/panel.html' %}
+{% endif %}
+{% endmacro %}
