@@ -56,7 +56,7 @@
                     {# where the split happens #}
                     <template x-if="row.kind === 'fork'">
                         <div class="cpt-fork" :style="`padding-left: ${8 + row.depth * 14}px`" :title="row.preview">
-                            <span class="cpt-fork-mark">\u2442</span>
+                            <span class="cpt-fork-mark" aria-hidden="true">⑂</span>
                             <span class="cpt-fork-text" x-text="row.preview"></span>
                             <span class="cpt-fork-count"
                                   x-text="row.variants + (row.variants === 1 ? ' variant' : ' variants')"></span>
