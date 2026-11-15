@@ -434,17 +434,31 @@ class ChatTree:
         a branch row exists to tell the alternatives apart, and the alternative often
         starts with tool calls - whose own preview is the literal "[tool call]" on every
         row, which says nothing. follow the branch's preferred chain to the first reply
-        and quote that; when the branch has no text at all (a branch that is pure tool
-        work), fall back to what the node itself says.
+        and quote that. a branch with no reply at all falls back to the first reasoning
+        it produced (still prefixed "[reasoning] ", so it never pretends to be an
+        answer), and only a branch that is pure tool work keeps the placeholder.
+
+        the walk is bounded by the chain, not by a constant: 450 tool steps with no text
+        is unusual but real, and a fixed limit silently quoted "[tool call]" there.
         """
         seen = set()
         current = node_id
-        while current and current not in seen and len(seen) < 400:
+        first_reasoning = None
+
+        while current and current not in seen:
             seen.add(current)
             message = (self.nodes.get(current) or {}).get("message") or {}
+
             if is_reply(message):
                 return preview(message, limit)
+            if first_reasoning is None and message.get("reasoning_content") \
+                    and not (message.get("_metadata") or {}).get("internal"):
+                first_reasoning = message
+
             current = (self.nodes.get(current) or {}).get("active_child")
+
+        if first_reasoning is not None:
+            return preview(first_reasoning, limit)
 
         node = self.nodes.get(node_id) or {}
         return preview(node.get("message") or {}, limit)
