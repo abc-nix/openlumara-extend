@@ -80,6 +80,16 @@ class ChatPro(core.module.Module):
             "default": "xdg-open {path}",
             "type": "text"
         },
+        "graph_date_style": {
+            "description": "How the branch graph writes a card's date.",
+            "default": "auto",
+            "type": "select",
+            "options": {
+                "auto": "Today as HH:MM, older as MM/DD HH:MM.",
+                "day_month": "Always DD/MM HH:MM.",
+                "month_day": "Always MM/DD HH:MM."
+            }
+        },
         "tab_order": {
             "description": "Order of the dock tabs, comma separated: branches, search, links, tasks. Unknown names are ignored and any missing tab is appended at the end, so this only reorders - it never hides a tab. Applied on save (the page reloads).",
             "default": "branches,search,links,tasks",

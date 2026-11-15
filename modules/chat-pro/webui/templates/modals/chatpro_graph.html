@@ -16,7 +16,8 @@
    dialog - same rule as the fork modal. #}
 <template x-if="$store.ui.currentModal === 'chatpro_graph' && $store.chatPro.graphOpen" x-cloak>
     <div @keydown.escape.window="$store.chatPro.closeGraph()">
-        <div class="modal cp-graph-modal">
+        <div class="modal cp-graph-modal"
+             data-graph-date="{{ (module_config.get('graph_date_style', 'auto') if module_config else 'auto') | e }}">
 
             <div class="header">
                 <h2>Branch Management</h2>

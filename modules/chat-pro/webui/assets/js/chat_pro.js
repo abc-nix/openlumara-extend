@@ -1343,8 +1343,19 @@ const CHAT_PRO = {
 
         const hh = String(date.getHours()).padStart(2, "0");
         const mm = String(date.getMinutes()).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+
+        // graph_date_style reaches js as a data attribute on the window, like the
+        // other module settings; auto keeps today's hh:mm and dates older cards
+        const modal = document.querySelector(".cp-graph-modal");
+        const style = (modal && modal.dataset.graphDate) || "auto";
+
+        if (style === "day_month") { return `${day}/${month} ${hh}:${mm}`; }
+        if (style === "month_day") { return `${month}/${day} ${hh}:${mm}`; }
+
         if (date.toDateString() === new Date().toDateString()) { return `${hh}:${mm}`; }
-        return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")} ${hh}:${mm}`;
+        return `${month}/${day} ${hh}:${mm}`;
     },
 
     /* ----------------
