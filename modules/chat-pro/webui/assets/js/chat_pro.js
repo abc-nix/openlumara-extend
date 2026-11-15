@@ -63,6 +63,7 @@ const CHAT_PRO = {
     refKind: "all",        // "all" | "url" | "file"
     refShowContent: true,  // references the message text mentions
     refShowTools: false,   // references tool output - off by default, it is noise
+    refShowReasoning: false, // references mentioned while thinking
 
     togglePanel() {
         this.setPanelOpen(!this.panelOpen);
@@ -306,8 +307,9 @@ const CHAT_PRO = {
                     });
                 }
                 if (message.reasoning_content) {
-                    // thinking is a stream of its own, never the answer's text
-                    parts.push({ value: String(message.reasoning_content), source: "tools", index });
+                    // thinking has its own toggle: never the answer's text, and
+                    // kept apart from tool output as well
+                    parts.push({ value: String(message.reasoning_content), source: "reasoning", index });
                 }
             });
         });
@@ -339,7 +341,7 @@ const CHAT_PRO = {
             const key = kind + ":" + clean;
             const row = found.get(key) || {
                 kind, value: clean, count: 0,
-                sources: { content: false, tools: false },
+                sources: { content: false, tools: false, reasoning: false },
                 hits: []
             };
             row.count += 1;
@@ -432,17 +434,21 @@ const CHAT_PRO = {
         try {
             const content = localStorage.getItem("chatProRefContent");
             const tools = localStorage.getItem("chatProRefTools");
+            const reasoning = localStorage.getItem("chatProRefReasoning");
             if (content !== null) this.refShowContent = content === "1";
             if (tools !== null) this.refShowTools = tools === "1";
+            if (reasoning !== null) this.refShowReasoning = reasoning === "1";
         } catch (error) { /* private mode */ }
     },
 
     toggleRefSource(which) {
         if (which === "tools") this.refShowTools = !this.refShowTools;
+        else if (which === "reasoning") this.refShowReasoning = !this.refShowReasoning;
         else this.refShowContent = !this.refShowContent;
         try {
             localStorage.setItem("chatProRefContent", this.refShowContent ? "1" : "0");
             localStorage.setItem("chatProRefTools", this.refShowTools ? "1" : "0");
+            localStorage.setItem("chatProRefReasoning", this.refShowReasoning ? "1" : "0");
         } catch (error) { /* private mode */ }
     },
 
@@ -450,8 +456,10 @@ const CHAT_PRO = {
         const query = (this.refsQuery || "").trim().toLowerCase();
         return this.refs.filter((row) => {
             if (this.refKind !== "all" && row.kind !== this.refKind) return false;
-            const sources = row.sources || { content: true, tools: false };
-            const shown = (sources.content && this.refShowContent) || (sources.tools && this.refShowTools);
+            const sources = row.sources || { content: true, tools: false, reasoning: false };
+            const shown = (sources.content && this.refShowContent)
+                || (sources.tools && this.refShowTools)
+                || (sources.reasoning && this.refShowReasoning);
             if (!shown) return false;
             return !query || row.value.toLowerCase().includes(query);
         });

@@ -141,6 +141,12 @@
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                 </svg>
             </button>
+            <button type="button" class="cp-srcbtn" :class="{ off: !$store.chatPro.refShowReasoning }"
+                    :aria-pressed="$store.chatPro.refShowReasoning"
+                    title="References mentioned while thinking" aria-label="References mentioned while thinking"
+                    @click="$store.chatPro.toggleRefSource('reasoning')">
+                {% include 'svg/thought_bubble.svg' %}
+            </button>
             <button type="button" class="cp-srcbtn" :class="{ off: !$store.chatPro.refShowTools }"
                     :aria-pressed="$store.chatPro.refShowTools"
                     title="References in tool output" aria-label="References in tool output"
@@ -190,6 +196,8 @@
                     <span class="cp-ref-chip" :class="row.kind" x-text="row.kind === 'url' ? 'link' : 'file'"></span>
                     <span class="cp-ref-tool" x-show="row.sources && row.sources.tools && !row.sources.content"
                           title="Only mentioned in tool output">tool</span>
+                    <span class="cp-ref-tool" x-show="row.sources && row.sources.reasoning && !row.sources.content && !row.sources.tools"
+                          title="Only mentioned while thinking">think</span>
                     <span class="cp-ref-text" x-text="row.value"></span>
                     <span class="cp-ref-count" x-show="row.count > 1" x-text="row.count + '×'"></span>
                 </button>
