@@ -1307,3 +1307,21 @@
     outline-offset: 2px;
     border-radius: var(--radius-sm, 6px);
 }
+
+/* the handoff summary produced by context compression: informational, not a
+   branch state, so it gets the info colour instead of the accent. placed after
+   .on-path so it wins on the current path too. */
+.cp-gcard.compressed {
+    border-color: color-mix(in srgb, var(--info, #38bdf8) 55%, transparent);
+    background: color-mix(in srgb, var(--info, #38bdf8) 6%, var(--bg-secondary));
+    box-shadow: inset 2px 0 0 var(--info, #38bdf8);
+}
+
+.cp-gcard.compressed .cp-grole {
+    color: var(--info, #38bdf8);
+}
+
+.cp-gcard.compressed .cp-gsteps {
+    color: var(--info, #38bdf8);
+    opacity: 0.8;
+}

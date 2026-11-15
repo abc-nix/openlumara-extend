@@ -1030,7 +1030,8 @@ const CHAT_PRO = {
             const card = document.createElement("button");
             card.type = "button";
             card.className = `cp-gcard ${node.role === "user" ? "role-user" : "role-assistant"}` +
-                (node.tool ? " tool" : "") + (node.on_path ? " on-path" : " off-path");
+                (node.tool ? " tool" : "") + (node.compressed ? " compressed" : "") +
+                (node.on_path ? " on-path" : " off-path");
             card.dataset.id = node.id;
 
             const liveIndex = liveIndexById.get(node.id);
@@ -1046,10 +1047,10 @@ const CHAT_PRO = {
             // one card per turn: the answer text, and how many steps it took
             // (tool calls, intermediate narration) when there was more than one
             const stepCount = Number(node.steps) || 0;
-            const steps = stepCount > 0 ? `${stepCount} ${stepCount === 1 ? "step" : "steps"}` : "";
+            const steps = node.compressed ? "context compressed" : (stepCount > 0 ? `${stepCount} ${stepCount === 1 ? "step" : "steps"}` : "");
 
             card.innerHTML =
-                `<span class="cp-grole">${node.role === "user" ? "You" : (node.role === "tool" ? "Tool" : "Assistant")}</span>` +
+                `<span class="cp-grole">${node.compressed ? "Summary" : (node.role === "user" ? "You" : (node.role === "tool" ? "Tool" : "Assistant"))}</span>` +
                 `<span class="cp-gtime">${this._graphTime(node.time)}</span>` +
                 `<span class="cp-gprev">${this._esc(node.preview || "")}</span>` +
                 (steps ? `<span class="cp-gsteps">${steps}</span>` : "");

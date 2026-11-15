@@ -583,6 +583,12 @@ class ChatPro(core.module.Module):
             start_message = message_of(start)
             answer = self._answer_message(tree.nodes, group)
 
+            # a turn carrying the compression signal is the handoff summary
+            compressed = any(
+                ((message_of(node_id).get("_metadata") or {}).get("signal") == "SUMMARIZATION_CUTOFF")
+                for node_id in group
+            )
+
             parent_node = (tree.nodes.get(start) or {}).get("parent")
             cards.append({
                 "id": start,
@@ -592,6 +598,7 @@ class ChatPro(core.module.Module):
                 "preview": preview(answer, 220),
                 "time": (message_of(group[-1]).get("_metadata") or {}).get("timestamp"),
                 "steps": max(0, len(group) - 1),
+                "compressed": compressed,
                 "tool": any(message_of(node_id).get("role") == "tool" or message_of(node_id).get("tool_calls")
                             for node_id in group),
                 "on_path": start in on_path,

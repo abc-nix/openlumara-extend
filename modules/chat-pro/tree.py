@@ -441,10 +441,18 @@ class ChatTree:
         def kids(node_id):
             return children.get(node_id, [])
 
+        def is_cutoff(node_id):
+            # context compression appends a signal message before the summary;
+            # without this the summary would be folded into the answer before it
+            message = (nodes.get(node_id) or {}).get("message") or {}
+            return (message.get("_metadata") or {}).get("signal") == "SUMMARIZATION_CUTOFF"
+
         starts = set()
         for node_id, node in nodes.items():
             parent = node.get("parent")
-            if not parent or parent not in nodes:
+            if is_cutoff(node_id):
+                starts.add(node_id)          # the summary starts a turn of its own
+            elif not parent or parent not in nodes:
                 starts.add(node_id)          # a root
             elif role(node_id) == "user" or role(parent) == "user":
                 starts.add(node_id)          # a prompt, or the answer to one
