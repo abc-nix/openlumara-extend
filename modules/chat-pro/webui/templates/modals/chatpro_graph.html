@@ -39,6 +39,57 @@
                 <div class="cp-graph-viewport" id="cp-graph-viewport">
                     <div class="cp-graph-stage" id="cp-graph-stage"></div>
 
+                    {# landmark rail: fork points and compression summaries in canvas
+                       order, so a deep tree can be navigated without hunting. clicking a
+                       row moves the camera (graphFocusAt); switching branches stays on
+                       the cards, so a stray click can never rewrite the open path #}
+                    <div class="cp-graph-rail" id="cp-graph-rail" x-cloak
+                         x-show="$store.chatPro.graphRail.branches.length || $store.chatPro.graphRail.compressions.length">
+
+                        <div class="cp-rail-group" x-show="$store.chatPro.graphRail.branches.length">
+                            <button type="button" class="cp-rail-head"
+                                    :aria-expanded="$store.chatPro.graphRailOpen.branches"
+                                    @click="$store.chatPro.toggleRail('branches')">
+                                <span class="cp-rail-mark" aria-hidden="true">⑂</span>
+                                <span class="cp-rail-title">Branches</span>
+                                <span class="cp-rail-count" x-text="$store.chatPro.graphRail.branches.length"></span>
+                                <span class="cp-rail-caret" x-text="$store.chatPro.graphRailOpen.branches ? '▾' : '▸'"></span>
+                            </button>
+                            <div class="cp-rail-list" x-show="$store.chatPro.graphRailOpen.branches">
+                                <template x-for="item in $store.chatPro.graphRail.branches" :key="item.id">
+                                    <button type="button" class="cp-rail-row" :class="{ 'on-path': item.onPath }"
+                                            :title="item.full || item.text"
+                                            @click.stop="$store.chatPro.graphFocusAt(item.id)">
+                                        <span class="cp-rail-label" x-text="item.text"></span>
+                                        <span class="cp-rail-detail"
+                                              x-text="item.variants + (item.variants === 1 ? ' variant' : ' variants') + ' · depth ' + item.depth"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="cp-rail-group" x-show="$store.chatPro.graphRail.compressions.length">
+                            <button type="button" class="cp-rail-head"
+                                    :aria-expanded="$store.chatPro.graphRailOpen.compressions"
+                                    @click="$store.chatPro.toggleRail('compressions')">
+                                <span class="cp-rail-mark cp-rail-info" aria-hidden="true"></span>
+                                <span class="cp-rail-title">Compression</span>
+                                <span class="cp-rail-count" x-text="$store.chatPro.graphRail.compressions.length"></span>
+                                <span class="cp-rail-caret" x-text="$store.chatPro.graphRailOpen.compressions ? '▾' : '▸'"></span>
+                            </button>
+                            <div class="cp-rail-list" x-show="$store.chatPro.graphRailOpen.compressions">
+                                <template x-for="item in $store.chatPro.graphRail.compressions" :key="item.id">
+                                    <button type="button" class="cp-rail-row compressed" :class="{ 'on-path': item.onPath }"
+                                            title="Context compression: the handoff summary"
+                                            @click.stop="$store.chatPro.graphFocusAt(item.id)">
+                                        <span class="cp-rail-label" x-text="'Summary · ' + item.time"></span>
+                                        <span class="cp-rail-detail" x-text="'depth ' + item.depth"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="cp-graph-zoom">
                         <button type="button" title="Zoom in" @click="$store.chatPro.zoomGraph(1.25)">+</button>
                         <button type="button" title="Zoom out" @click="$store.chatPro.zoomGraph(0.8)">&minus;</button>

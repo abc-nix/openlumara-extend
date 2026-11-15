@@ -859,6 +859,133 @@
 
 .cp-graph-viewport.lod-far .cp-gcard { padding: 4px; }
 
+/* ---------------- the graph's landmark rail (fork points + summaries) ----------------
+   floats over the canvas on the left, so it costs the layout no width: fitGraph and
+   the focus maths keep working off the viewport alone. it ends above the zoom stack. */
+.cp-graph-rail {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    max-height: calc(100% - 128px);
+    width: 208px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    overflow: auto;
+    border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+    box-shadow: 0 6px 18px #0000001f;
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    line-height: 1.3;
+    z-index: 3;
+    cursor: default;
+}
+
+.cp-rail-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.cp-rail-head:hover {
+    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+    color: var(--text-primary);
+}
+
+.cp-rail-title { flex: 1; text-align: left; }
+.cp-rail-count { font-variant-numeric: tabular-nums; }
+.cp-rail-caret { width: 10px; text-align: center; }
+.cp-rail-mark { color: var(--accent); font-size: 0.8rem; }
+
+.cp-rail-mark.cp-rail-info {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    background: var(--info, #38bdf8);
+}
+
+.cp-rail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-bottom: 4px;
+}
+
+.cp-rail-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cp-rail-row:hover { background: color-mix(in srgb, var(--text-primary) 9%, transparent); }
+
+/* a branch row is marked when the fork point sits on the open path; a compression row
+   keeps its info colour always - it is a type, not a state, and compressions are on the
+   path nearly every time, so an on-path override would hide the one thing marking them */
+.cp-rail-row.on-path { box-shadow: inset 2px 0 0 var(--accent); }
+.cp-rail-row.compressed,
+.cp-rail-row.compressed.on-path { box-shadow: inset 2px 0 0 var(--info, #38bdf8); }
+
+.cp-rail-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cp-rail-detail {
+    color: var(--text-secondary);
+    font-size: 0.66rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* a fork point is marked on the canvas too, so it is spottable without the rail */
+.cp-gfork {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    color: var(--accent);
+    font-size: 0.72rem;
+    line-height: 1;
+    opacity: 0.85;
+}
+
+/* landed on a landmark: the rail moved the camera, this says where it went */
+.cp-gcard.is-focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+@media (max-width: 760px) {
+    .cp-graph-rail { display: none; }
+}
+
 .cp-graph-zoom {
     position: absolute;
     left: 12px;

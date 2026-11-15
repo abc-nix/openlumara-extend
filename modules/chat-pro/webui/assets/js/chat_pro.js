@@ -57,6 +57,13 @@ const CHAT_PRO = {
     graphActive: [],
     graphStats: { nodes: 0, branches: 0 },
 
+    // the graph's landmark rail: fork points and compression summaries, in canvas
+    // order, so a long tree can be navigated without hunting for the one card.
+    // built by _graphRailItems() from the payload (children / compressed), section
+    // state remembered per browser.
+    graphRail: { branches: [], compressions: [] },
+    graphRailOpen: { branches: true, compressions: true },
+
     // references tab: urls and file paths found in this chat's history
     refs: [],
     refsQuery: "",
@@ -837,6 +844,7 @@ const CHAT_PRO = {
         this.graphActive = [];
         this.graphStats = { nodes: 0, branches: 0 };
         this._miniCache = null;   // a turn's text may have changed since last open
+        this._restoreRailPrefs();
         Alpine.store("ui").openModal("chatpro_graph");
         await Alpine.nextTick();
 
@@ -1006,6 +1014,10 @@ const CHAT_PRO = {
         stage.style.width = `${g.width}px`;
         stage.style.height = `${g.height}px`;
 
+        // the landmark rail is derived from the same payload: fork points say so
+        // through `children`, compressions through `compressed`
+        this.graphRail = this._graphRailItems(g);
+
         const edges = [`<svg class="cp-graph-edges" width="${g.width}" height="${g.height}" aria-hidden="true">`];
         this.graphNodes.forEach((node) => {
             if (!node.parent || !g.byId.has(node.parent)) { return; }
@@ -1054,6 +1066,17 @@ const CHAT_PRO = {
                 `<span class="cp-gtime">${this._graphTime(node.time)}</span>` +
                 `<span class="cp-gprev">${this._esc(node.preview || "")}</span>` +
                 (steps ? `<span class="cp-gsteps">${steps}</span>` : "");
+
+            // a fork point says so on the canvas too, so it can be spotted without
+            // the rail (and at far zoom, where the text is gone)
+            if (node.children > 1) {
+                const fork = document.createElement("span");
+                fork.className = "cp-gfork";
+                fork.textContent = "\u2442" + (node.children > 2 ? node.children : "");
+                fork.title = `${node.children} branches from here`;
+                card.appendChild(fork);
+            }
+
             stage.appendChild(card);
         });
 
@@ -1070,6 +1093,68 @@ const CHAT_PRO = {
 
         stage.style.transform = `translate(${this._graphX}px, ${this._graphY}px) scale(${this._graphScale})`;
         viewport.classList.toggle("lod-far", this._graphScale < 0.55);
+    },
+
+    // fork points and compression summaries, ordered like the canvas reads (top to
+    // bottom: depth, then creation order), so the rail is a table of contents for a
+    // tree too deep to fit on screen.
+    _graphRailItems(g) {
+        const branches = [];
+        const compressions = [];
+
+        (this.graphNodes || []).forEach((node) => {
+            const isBranch = !node.compressed && node.children > 1;
+            if (!node.compressed && !isBranch) { return; }
+
+            const preview = node.preview || "";
+            const item = {
+                id: node.id,
+                // one line fits in a 208px rail: shorten, keep the full text for the tooltip
+                text: preview.length > 88 ? `${preview.slice(0, 87)}\u2026` : preview,
+                full: preview,
+                time: this._graphTime(node.time),
+                depth: (g && g.depth.get(node.id)) || 0,
+                variants: node.children || 0,
+                onPath: Boolean(node.on_path),
+                role: node.role,
+            };
+
+            (node.compressed ? compressions : branches).push(item);
+        });
+
+        const byCanvasOrder = (a, b) => (a.depth - b.depth) || a.text.localeCompare(b.text);
+        return { branches: branches.sort(byCanvasOrder), compressions: compressions.sort(byCanvasOrder) };
+    },
+
+    _restoreRailPrefs() {
+        try {
+            this.graphRailOpen = {
+                branches: localStorage.getItem("chatProRailBranches") !== "0",
+                compressions: localStorage.getItem("chatProRailCompressions") !== "0",
+            };
+        } catch (error) { /* private mode: keep the defaults */ }
+    },
+
+    toggleRail(section) {
+        const open = !this.graphRailOpen[section];
+        this.graphRailOpen[section] = open;
+        try {
+            localStorage.setItem(section === "branches" ? "chatProRailBranches" : "chatProRailCompressions", open ? "1" : "0");
+        } catch (error) { /* private mode */ }
+    },
+
+    // the rail moves the *camera*, the card moves the chat: panning to a landmark must
+    // not switch the open branch, or one stray click would rewrite the path.
+    graphFocusAt(nodeId) {
+        if (!nodeId) { return; }
+        const rail = document.querySelector(".cp-graph-rail");
+        const inset = rail && rail.offsetWidth ? rail.offsetWidth + 16 : 0;
+        this._graphFocus(nodeId, inset);
+
+        const card = document.querySelector(`#cp-graph-stage .cp-gcard[data-id="${nodeId}"]`);
+        if (!card) { return; }
+        card.classList.add("is-focus");
+        setTimeout(() => card.classList.remove("is-focus"), 1400);
     },
 
     // factor from the current scale; `at` (x/y inside the viewport) keeps the
@@ -1105,14 +1190,17 @@ const CHAT_PRO = {
 
     // put one node in the middle at a readable zoom: the alternative to a
     // minimap is simply landing where the user is
-    _graphFocus(nodeId) {
+    _graphFocus(nodeId, insetLeft = 0) {
         const viewport = document.getElementById("cp-graph-viewport");
         const g = this._graphData;
         if (!viewport || !g || !g.x.has(nodeId)) { this.fitGraph(); return; }
 
         const rect = viewport.getBoundingClientRect();
         this._graphScale = 0.9;
-        this._graphX = rect.width / 2 - (g.x.get(nodeId) + g.offsetX + g.cardW / 2) * this._graphScale;
+        // `insetLeft` keeps the card centred in the area the rail leaves free, so
+        // focusing a landmark from the rail does not park it behind the rail
+        const centreX = (rect.width + insetLeft) / 2;
+        this._graphX = centreX - (g.x.get(nodeId) + g.offsetX + g.cardW / 2) * this._graphScale;
         this._graphY = rect.height / 2 - (g.depth.get(nodeId) * g.rowH + g.cardH / 2) * this._graphScale;
         this._graphApply();
     },
@@ -1125,7 +1213,8 @@ const CHAT_PRO = {
         let drag = null;
 
         viewport.addEventListener("pointerdown", (event) => {
-            if (event.target.closest(".cp-gcard") || event.target.closest(".cp-graph-zoom")) { return; }
+            if (event.target.closest(".cp-gcard") || event.target.closest(".cp-graph-zoom")
+                    || event.target.closest(".cp-graph-rail")) { return; }
             this._miniHide();
             drag = { x: event.clientX, y: event.clientY, px: this._graphX, py: this._graphY };
             viewport.classList.add("panning");
