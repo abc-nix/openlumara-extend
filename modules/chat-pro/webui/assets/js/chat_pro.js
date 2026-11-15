@@ -1261,34 +1261,29 @@ const CHAT_PRO = {
         if (!nodeId || this.busy) { return; }
         if (Alpine.store("stream").state !== "idle") { return; }
 
-        // where to land, as a *turn* index: after the switch every on-path card
-        // is exactly one client turn (a user message or an assistant chain), so
-        // a card's index is its number of turn-ancestors. computed off the graph
-        // itself, not off turnHistory, which is about to be replaced.
-        // core's turnHistory alternates one entry per user message and one per
-        // assistant chain, which is exactly one card each - so a card's turn
-        // index is simply how many cards precede it on its path (its depth).
         const ui = Alpine.store("ui");
         const byId = (this._graphData && this._graphData.byId) || new Map();
-        let turnIndex = -1;
-        let cursor = byId.get(nodeId);
-        if (cursor) {
-            turnIndex = 0;
-            let guard = 0;
-            while (cursor && cursor.parent && guard++ < 4096) {
-                turnIndex += 1;
-                cursor = byId.get(cursor.parent);
-            }
-        }
+        const card = byId.get(nodeId);
 
-        // hand the target to core *before* the switch: its sync handler scrolls
-        // to it only after reloadChat() has rewritten the history and the dom.
-        // calling scrollToTurn here would run against the old chat, and the sync
-        // would then fall back to forceScrollToBottom() over the top of it.
-        if (turnIndex >= 0) { ui.scrollToTurnIndex = turnIndex; }
+        // a card on the open path is already the timeline the chat is showing: no
+        // switch, no reload, nothing to wait for - just navigate. (a switch there
+        // rewrote the same path and raced the sync for no reason.)
+        const onPath = Boolean(card && card.on_path);
 
         this.busy = true;
         try {
+            if (onPath) {
+                this.closeGraph();
+                await this._graphGotoTurn(this._turnIndexFor(nodeId));
+                return;
+            }
+
+            // off path: -1 is truthy on purpose. core's sync handler scrolls to
+            // ui.scrollToTurnIndex after it replaces the history, and falls back to
+            // forceScrollToBottom() when that value is falsy - so this intent stops
+            // it from dragging the view to the bottom. scrollToTurn on a missing
+            // element breaks immediately and clears the intent by itself.
+            ui.scrollToTurnIndex = -1;
             await simpleApiPost("/api/ext/chat-pro/switch", { node: nodeId });
             this.closeGraph();
 
@@ -1296,10 +1291,18 @@ const CHAT_PRO = {
             this._signature = null;
             await this.refresh(true);
 
-            // ui.scrollToTurn centres the turn; for a 45-message assistant chain
-            // that means landing halfway through the answer. bring its top to the
-            // top of the viewport once the sync-driven scroll has finished.
-            await this._graphAlignTurn(turnIndex);
+            // the switch rewrote the *server's* history: the client's copy arrives
+            // with the sync broadcast and the dom with reloadChat(). wait for that
+            // before measuring anything - the old dom belongs to the old path.
+            await this._graphWaitForPath(nodeId);
+
+            const turnIndex = this._turnIndexFor(nodeId);
+            if (turnIndex >= 0) {
+                // leave the correct target behind, so a sync that lands late scrolls
+                // to the card instead of the bottom of the chat
+                ui.scrollToTurnIndex = turnIndex;
+                await this._graphGotoTurn(turnIndex);
+            }
         } catch (error) {
             ui.scrollToTurnIndex = null;
             this._fail("Switching branch failed", error);
@@ -1308,24 +1311,83 @@ const CHAT_PRO = {
         }
     },
 
-    // the sync handler clears ui.scrollToTurnIndex when it has scrolled, which is
-    // the only reliable "the history is on screen now" signal we can wait on
+    // the client turn a card belongs to, resolved through the ids the tree stamped
+    // on every message (_metadata.chatpro_id) - never by counting cards.
+    //
+    // counting was the bug: core's group_history drops messages flagged
+    // _metadata.internal (screenshots, injected data), while the graph still draws
+    // a card for one *and* one for its child - 2 extra cards per screenshot, none of
+    // them a turn. on a chat with 21 screenshots the tail card's depth ran 42 past
+    // the last real turn, so the selector found no element, scrollToTurn broke on
+    // its first pass and the view stayed at the top of the chat (the first message).
+    _turnIndexFor(nodeId) {
+        const turns = Alpine.store("chat").turnHistory || [];
+        const byId = (this._graphData && this._graphData.byId) || new Map();
+
+        let id = nodeId;
+        for (let guard = 0; id && guard < 4096; guard += 1) {
+            const index = turns.findIndex((turn) => (turn.messages || []).some(
+                (message) => (((message && message._metadata) || {}).chatpro_id) === id
+            ));
+            if (index >= 0) { return index; }
+
+            // a card whose message the chat never renders (internal) lands on the
+            // nearest ancestor card that it does render
+            const card = byId.get(id);
+            id = card && card.parent ? card.parent : null;
+        }
+        return -1;
+    },
+
+    // the switch is written server-side; the client's turnHistory arrives with the
+    // sync broadcast. wait until the node is actually in it before touching the dom.
+    // a card the chat never renders never shows up: after the grace period reload
+    // once, so whatever we resolve next is measured against the new path.
+    async _graphWaitForPath(nodeId) {
+        const chat = Alpine.store("chat");
+        const present = () => (chat.turnHistory || []).some((turn) => (turn.messages || []).some(
+            (message) => (((message && message._metadata) || {}).chatpro_id) === nodeId
+        ));
+
+        for (let i = 0; i < 30; i += 1) {
+            if (present()) { return true; }
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await chat.reloadChat();
+        return present();
+    },
+
+    async _graphGotoTurn(turnIndex) {
+        if (turnIndex < 0) { return; }
+        await Alpine.store("ui").scrollToTurn(turnIndex);
+        await this._graphAlignTurn(turnIndex);
+    },
+
+    // scrollToTurn centres the turn (and lazy-mounts whatever it passes); bring its
+    // top to the top of the viewport afterwards, because centring a 45-message chain
+    // shows the middle of the answer instead of where the card begins.
+    //
+    // this re-measures because a turn that mounts on the way in has a placeholder's
+    // height before it renders, which shifts everything below it; the loop ends as
+    // soon as it is within 4px or the scrollbar cannot move at all - the last turn of
+    // a chat can never reach the top, its own height is shorter than the viewport
+    // (e.g. a 865px tail turn stops 324px down, fully visible).
     async _graphAlignTurn(turnIndex) {
         const container = document.getElementById("messages");
         if (!container || turnIndex < 0) { return; }
 
-        for (let i = 0; i < 40; i++) {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            if (Alpine.store("ui").scrollToTurnIndex !== null) { continue; }
-
+        let previousTop = -1;
+        for (let pass = 0; pass < 12; pass += 1) {
             const element = container.querySelector(`[data-turn-index="${turnIndex}"]`);
             if (!element) { return; }
 
             const offset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
             if (Math.abs(offset) < 4) { return; }
+            if (container.scrollTop === previousTop) { return; }
 
+            previousTop = container.scrollTop;
             container.scrollTo({ top: container.scrollTop + offset, behavior: "instant" });
-            return;
+            await new Promise((resolve) => setTimeout(resolve, 100));
         }
     },
 
