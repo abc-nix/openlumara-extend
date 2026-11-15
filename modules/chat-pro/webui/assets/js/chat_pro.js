@@ -282,9 +282,11 @@ const CHAT_PRO = {
             const base = turn.first_message_index || 0;
             (turn.messages || []).forEach((message, offset) => {
                 const index = base + offset;
-                // tool results are their own stream: a path listed by `ls` is not
-                // the same kind of reference as one the answer points at
-                const source = message.role === "tool" ? "tools" : "content";
+                // the answer is what the user and the final assistant message
+                // say. everything else - tool output, tool_calls arguments,
+                // intermediate narration and reasoning - is process
+                const isFinal = message.role === "assistant" && !(message.tool_calls || []).length;
+                const source = (message.role === "user" || isFinal) ? "content" : "tools";
                 const push = (value) => {
                     if (value) parts.push({ value: String(value), source, index });
                 };
@@ -302,6 +304,10 @@ const CHAT_PRO = {
                         const args = call && call.function ? call.function.arguments : null;
                         if (args) push(typeof args === "string" ? args : JSON.stringify(args));
                     });
+                }
+                if (message.reasoning_content) {
+                    // thinking is a stream of its own, never the answer's text
+                    parts.push({ value: String(message.reasoning_content), source: "tools", index });
                 }
             });
         });
@@ -358,6 +364,7 @@ const CHAT_PRO = {
             // a slice of an address is not a file: .../wiki/Character.ai is a page.
             // an absolute path must start at a real root, and // is a protocol.
             (text.match(/(?:~\/|\/|\.\/)?[\w.-]+(?:\/[\w.-]+)+\.[A-Za-z0-9]{1,6}\b/g) || []).forEach((raw) => {
+                if (raw.startsWith(".../") || raw.startsWith("\u2026/")) return;
                 if (raw.includes("://") || raw.startsWith("//")) return;
                 if (raw.startsWith("/") && !roots.some((root) => raw.startsWith(root))) return;
                 if (urlValues.some((url) => url.includes(raw))) return;
