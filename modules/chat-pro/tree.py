@@ -116,6 +116,28 @@ def preview(message, limit=80):
     return text
 
 
+def answer_message(nodes, group):
+    """the message a turn stands for: the assistant's final answer when the chain has
+    one, otherwise the last message carrying text.
+
+    the ui collapses a chain's steps (tool calls, narration) into a single
+    "Process (N steps)" line and renders the answer under it, so the answer - not the
+    narration that leads to it - is what a turn actually says. the graph card preview
+    and a branch row both quote this message, which keeps them consistent with the chat.
+    """
+    for node_id in reversed(group):
+        message = (nodes.get(node_id) or {}).get("message") or {}
+        if message.get("role") == "assistant" and not message.get("tool_calls") and message_text(message):
+            return message
+
+    for node_id in reversed(group):
+        message = (nodes.get(node_id) or {}).get("message") or {}
+        if message_text(message):
+            return message
+
+    return (nodes.get(group[0]) or {}).get("message") or {}
+
+
 class ChatTree:
     """the branch tree of one chat; load() tells you whether it exists"""
 
@@ -428,19 +450,25 @@ class ChatTree:
             current = nxt
         return total
 
-    def _branch_preview(self, node_id, limit=80):
-        """the first thing this branch actually *says*
+    def _branch_preview(self, node_id, group=None, limit=80):
+        """what this branch says, quoted the way the chat shows it
 
         a branch row exists to tell the alternatives apart, and the alternative often
         starts with tool calls - whose own preview is the literal "[tool call]" on every
-        row, which says nothing. follow the branch's preferred chain to the first reply
-        and quote that. a branch with no reply at all falls back to the first reasoning
-        it produced (still prefixed "[reasoning] ", so it never pretends to be an
-        answer), and only a branch that is pure tool work keeps the placeholder.
+        row, which says nothing. the chat itself collapses the steps of a chain into
+        "Process (N steps)" and renders the answer under it, so the *answer* is what the
+        turn is: quote the turn's answer (answer_message, the same one the graph card
+        previews), not the narration or the tool call that leads to it.
 
-        the walk is bounded by the chain, not by a constant: 450 tool steps with no text
-        is unusual but real, and a fixed limit silently quoted "[tool call]" there.
+        a turn with no text at all - pure tool work - falls back to the first reasoning
+        the branch produced (still prefixed "[reasoning] ", so it never pretends to be an
+        answer), and only then to the node's own placeholder.
         """
+        if group:
+            answer = answer_message(self.nodes, group)
+            if is_reply(answer):
+                return preview(answer, limit)
+
         seen = set()
         current = node_id
         first_reasoning = None
@@ -549,6 +577,18 @@ class ChatTree:
         active = set(self.active)
         rows = []
 
+        # a branch row quotes its turn's answer, which needs the grouping; computed
+        # once, and only when a branch row actually asks for it (a linear chat has none)
+        grouping = None
+
+        def group_for(nid):
+            nonlocal grouping
+            if grouping is None:
+                turns, turn_of_node = self.turns()
+                grouping = ({turn["id"]: turn["nodes"] for turn in turns}, turn_of_node)
+            groups, turn_of = grouping
+            return groups.get(turn_of.get(nid))
+
         def add(kind, nid, depth, fork=None):
             message = (self.nodes.get(nid) or {}).get("message") or {}
             rows.append({
@@ -557,8 +597,8 @@ class ChatTree:
                 "fork": fork,
                 "depth": depth,
                 "role": message.get("role"),
-                # an alternative quotes its first reply, not its first tool call
-                "preview": self._branch_preview(nid) if kind == "branch" else preview(message),
+                # an alternative quotes its turn's answer, like the graph card does
+                "preview": self._branch_preview(nid, group_for(nid)) if kind == "branch" else preview(message),
                 "on_path": nid in active,
                 "messages": self._preferred_length(nid),
                 "subtree": self._subtree_size(nid, children),

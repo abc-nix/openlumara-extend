@@ -36,7 +36,7 @@ import core
 
 import channels.webui.api as webui
 
-from .tree import ChatTree, preview
+from .tree import ChatTree, answer_message, preview
 
 
 class ChatPro(core.module.Module):
@@ -484,19 +484,12 @@ class ChatPro(core.module.Module):
     def _answer_message(cls, nodes, group):
         """the message a turn stands for: the assistant's final answer when the
         chain has one, otherwise the last message carrying text (a tool-only
-        step, a tool result). never the step list."""
-        def has_text(message):
-            return bool(cls._message_text(message).strip())
+        step, a tool result). never the step list.
 
-        for node_id in reversed(group):
-            message = (nodes.get(node_id) or {}).get("message") or {}
-            if message.get("role") == "assistant" and not message.get("tool_calls") and has_text(message):
-                return message
-        for node_id in reversed(group):
-            message = (nodes.get(node_id) or {}).get("message") or {}
-            if has_text(message):
-                return message
-        return (nodes.get(group[0]) or {}).get("message") or {}
+        one implementation, in tree.py: the branch panel quotes the same message the
+        graph card previews, so a row and its card can never disagree.
+        """
+        return answer_message(nodes, group)
 
     @webui.route("node")
     async def _route_node(self, body=None, query=None):
