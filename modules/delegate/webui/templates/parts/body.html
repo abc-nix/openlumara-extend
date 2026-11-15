@@ -1,0 +1,7 @@
+{# delegate - the whole panel body for an embedded host (chat-pro's Tasks
+   tab): head + list + task + font control, no dock chrome, no positioning.
+   the host wraps it in <div class="dl-cover dl-embedded">. #}
+<div class="dl-head">{% include 'delegate/parts/head.html' %}</div>
+{% include 'delegate/parts/list.html' %}
+{% include 'delegate/parts/task.html' %}
+{% include 'delegate/parts/foot.html' %}

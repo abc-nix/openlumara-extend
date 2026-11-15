@@ -654,3 +654,28 @@ body[data-delegate="full"] .dl-cover {
     color: var(--text-secondary, #a1a1aa);
     padding: 2px 0;
 }
+
+/* ==========================================================================
+   embedded host (chat-pro's Tasks tab)
+
+   the same panel body, rendered inside another dock: no own geometry, no
+   width reservation, no shadow - the host provides the surface and the tab
+   label, so the list-mode title is dropped.
+   ========================================================================== */
+
+.dl-cover.dl-embedded {
+    position: static;
+    inset: auto;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-left: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg-primary);
+    z-index: auto;
+}
+
+.dl-embedded .dl-title-list {
+    display: none;
+}

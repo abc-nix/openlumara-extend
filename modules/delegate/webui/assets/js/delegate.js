@@ -84,6 +84,8 @@ const DELEGATE_VIEW = {
     _interval: 0,
     _scaleLoaded: false,
     _scaleTimer: null,
+    embedded: false,        // hosted inside another dock: no own geometry, no polling unless shown
+    _hostActive: false,     // the host's tab is the one on screen
 
     /* ---- open / close ---- */
     restore() {
@@ -96,10 +98,11 @@ const DELEGATE_VIEW = {
             this.isOpen = false;
             this.viewMode = "docked";
         }
+        if (this.embedded) this.isOpen = false;
         this.syncScaleFromDom();
         this.applyOpen(this.isOpen);
         this.ensureTimer();
-        if (this.isOpen) this.loadTasks();
+        if (this.isOpen || this._hostActive) this.loadTasks();
     },
 
     /* ---- font size: a panel-side control over the module's font_scale setting ---- */
@@ -147,7 +150,37 @@ const DELEGATE_VIEW = {
         else this.open();
     },
 
+    // the header button: when a host dock exists, it opens that tab instead of
+    // this module's own panel. feature-detected, so delegate alone is unchanged
+    toggleOrHost() {
+        const pro = window.Alpine ? Alpine.store("chatPro") : null;
+        if (pro && typeof pro.hostDelegate === "function" && pro.hostDelegate()) {
+            pro.openPanelTab("tasks");
+            return;
+        }
+        this.toggle();
+    },
+
+    // called by the host: "the panel is rendered inside you, don't build a dock"
+    setEmbedded(on) {
+        this.embedded = Boolean(on);
+        if (this.embedded) {
+            this.isOpen = false;
+            this.applyOpen(false);
+            try { localStorage.removeItem("delegate.open"); } catch (error) { /* private mode */ }
+        }
+        this.ensureTimer();
+    },
+
+    // called by the host when its tab becomes visible / hidden
+    hostActive(on) {
+        this._hostActive = Boolean(on);
+        this.ensureTimer();
+        if (on) this.loadTasks();
+    },
+
     open() {
+        if (this.embedded) return;
         this.isOpen = true;
         this.applyOpen(true);
         try { localStorage.setItem("delegate.open", "1"); } catch (error) { /* private mode */ }
@@ -160,6 +193,7 @@ const DELEGATE_VIEW = {
     },
 
     close() {
+        if (this.embedded) return;
         this.isOpen = false;
         this.applyOpen(false);
         try { localStorage.setItem("delegate.open", "0"); } catch (error) { /* private mode */ }
@@ -167,6 +201,10 @@ const DELEGATE_VIEW = {
     },
 
     applyOpen(open) {
+        // a host (chat-pro's Tasks tab) provides the surface: body dataset and
+        // dock width belong to this module's own panel only
+        if (this.embedded) return;
+
         // the panel is server-rendered into the chat; without it (extension
         // disabled, or no chat yet) never reserve any width
         if (open && !document.querySelector(".dl-cover")) return;
@@ -202,7 +240,7 @@ const DELEGATE_VIEW = {
 
     /* ---- polling ---- */
     ensureTimer() {
-        const wanted = this.isOpen ? DL_POLL_OPEN : DL_POLL_CLOSED;
+        const wanted = (this.isOpen || this._hostActive) ? DL_POLL_OPEN : DL_POLL_CLOSED;
         if (this._timer && this._interval === wanted) return;
         if (this._timer) clearInterval(this._timer);
         this._interval = wanted;

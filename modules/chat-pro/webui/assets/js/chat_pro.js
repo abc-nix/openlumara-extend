@@ -76,6 +76,7 @@ const CHAT_PRO = {
         this.panelOpen = Boolean(open);
         try { localStorage.setItem("chatProPanelOpen", this.panelOpen ? "1" : "0"); } catch (error) { /* private mode */ }
         this._applyPanelLayout(this.panelOpen);
+        this._syncDelegateHost();
     },
 
     // the other direction: if delegate opens while this panel is up, yield to it
@@ -130,10 +131,43 @@ const CHAT_PRO = {
         this.setPanelOpen(false);
     },
 
+    /* ----------------
+     * delegate hosting
+     * ----------------- */
+    // delegate's header button checks this before opening its own dock; the
+    // setting is rendered onto .cp-cover, since module settings do not reach js
+    hostDelegate() {
+        const cover = document.querySelector(".cp-cover");
+        return !cover || cover.dataset.hostDelegate !== "0";
+    },
+
+    openPanelTab(name) {
+        this.setPanelOpen(true);
+        this.setPanelTab(name);
+    },
+
+    // delegate keeps its own geometry and polling unless this dock exists
+    _markDelegateEmbedded() {
+        let delegate = null;
+        try { delegate = Alpine.store("delegateView"); } catch (error) { /* not loaded */ }
+        if (delegate && typeof delegate.setEmbedded === "function") {
+            delegate.setEmbedded(this.hostDelegate());
+        }
+    },
+
+    // its panel is "visible" only while the Tasks tab is the one on screen
+    _syncDelegateHost() {
+        let delegate = null;
+        try { delegate = Alpine.store("delegateView"); } catch (error) { /* not loaded */ }
+        if (!delegate || typeof delegate.hostActive !== "function") { return; }
+        delegate.hostActive(this.hostDelegate() && this.panelOpen && this.panelTab === "tasks");
+    },
+
     setPanelTab(tab) {
         const known = ["branches", "search", "links", "tasks"];
         this.panelTab = known.includes(tab) ? tab : "branches";
         try { localStorage.setItem("chatProPanelTab", this.panelTab); } catch (error) { /* private mode */ }
+        this._syncDelegateHost();
     },
 
     restorePanel() {
@@ -144,6 +178,7 @@ const CHAT_PRO = {
         } catch (error) { /* private mode */ }
 
         this._applyPanelLayout(this.panelOpen);
+        this._syncDelegateHost();
     },
 
     /* ----------------
@@ -1045,6 +1080,9 @@ document.addEventListener("alpine:initialized", () => {
     CHAT_PRO._applyPanelLayout(CHAT_PRO.panelOpen);
     // one right dock at a time (delegate's store is public; absent when off)
     CHAT_PRO.watchDelegate();
+    // and: if delegate is here, this dock is its host
+    CHAT_PRO._markDelegateEmbedded();
+    CHAT_PRO._syncDelegateHost();
 });
 
 // the panel hangs from the header, so its top offset follows the header's height

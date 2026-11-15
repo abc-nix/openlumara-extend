@@ -10,8 +10,8 @@
 {% macro right() %}
 {% if module_config.get("enable_webui_extension", true) %}
 <button type="button" class="btn dl-header-btn"
-    @click="$store.delegateView.toggle()"
-    :class="{ 'is-open': $store.delegateView.isOpen, 'is-running': $store.delegateView.running.length > 0 }"
+    @click="$store.delegateView.toggleOrHost()"
+    :class="{ 'is-open': $store.delegateView.isOpen || $store.delegateView._hostActive, 'is-running': $store.delegateView.running.length > 0 }"
     :title="$store.delegateView.isOpen
         ? 'Close the delegate panel'
         : 'Delegated tasks — open the delegate panel'"

@@ -1,0 +1,74 @@
+{# delegate - the task index: search, date groups, rows. #}
+    {# ---- view: the task list, searched + grouped by date ---- #}
+    <div class="dl-list" x-show="$store.delegateView.mode === 'list'">
+        <div class="dl-search">
+            <span class="dl-search-icon">{% include 'svg/search.svg' %}</span>
+            <input type="text" placeholder="Search tasks.." autocomplete="off"
+                   aria-label="Search delegated tasks"
+                   x-model="$store.delegateView.searchQuery">
+        </div>
+
+        <div class="dl-note" x-show="$store.delegateView.statusText" x-text="$store.delegateView.statusText"></div>
+
+        <div class="dl-tasks">
+            <template x-for="group in $store.delegateView.taskGroups()" :key="group.key">
+                <div class="dl-day-group">
+                    <button type="button" class="dl-day-header"
+                            :class="{ expanded: !$store.delegateView.isGroupCollapsed(group) }"
+                            :aria-expanded="!$store.delegateView.isGroupCollapsed(group)"
+                            @click="$store.delegateView.toggleGroup(group)">
+                        <svg class="dl-day-chevron" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+                            <path fill="currentColor" d="M4 1l5 5-5 5z"/>
+                        </svg>
+                        <span class="dl-day-label" x-text="group.label"></span>
+                        <span class="dl-day-count" x-show="!$store.delegateView.searchQuery.trim()"
+                              x-text="group.count"></span>
+                    </button>
+
+                    <template x-if="!$store.delegateView.isGroupCollapsed(group)">
+                        <div class="dl-day-tasks">
+                            <template x-for="task in group.tasks" :key="task.id">
+                                <div class="dl-task-row">
+                                    <div class="dl-task" role="button" tabindex="0"
+                                         :class="{ selected: task.id === $store.delegateView.activeId }"
+                                         :title="task.id + ' · ' + (task.model || '')"
+                                         @click="$store.delegateView.selectTask(task.id)"
+                                         @keydown.enter.prevent="$store.delegateView.selectTask(task.id)">
+                                        <span class="dl-task-title" x-text="task.title || task.id"></span>
+                                        <span class="dl-task-meta">
+                                            <span :class="'dl-status dl-status-' + task.status" x-text="task.status"></span>
+                                            <span x-text="task.id"></span>
+                                        </span>
+                                    </div>
+                                    <span class="dl-task-actions">
+                                        <button type="button" class="dl-icon-btn" title="Rename task"
+                                                aria-label="Rename task"
+                                                @click.stop="$store.delegateView.renameTask(task)">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                                            </svg>
+                                        </button>
+                                        <button type="button" class="dl-icon-btn" title="Delete task"
+                                                aria-label="Delete task"
+                                                @click.stop="$store.delegateView.deleteTask(task)">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+                                            </svg>
+                                        </button>
+                                    </span>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <div class="dl-empty" x-show="$store.delegateView.taskGroups().length === 0" x-cloak>
+                <span x-text="$store.delegateView.searchQuery.trim()
+                    ? 'No tasks match that search.'
+                    : 'No delegated tasks yet.'"></span>
+            </div>
+        </div>
+    </div>

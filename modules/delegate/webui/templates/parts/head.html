@@ -1,0 +1,23 @@
+{# delegate - the shared head: back, titles, stop. host-neutral on purpose:
+   the dock adds its own view toggle and close beside it, an embedded host
+   adds nothing. #}
+        <button type="button" class="dl-back" x-show="$store.delegateView.mode === 'task'"
+                @click="$store.delegateView.backToList()"
+                title="Back to the task list" aria-label="Back to the task list">&lsaquo;</button>
+
+        <span class="dl-head-title dl-title-list" x-show="$store.delegateView.mode === 'list'">Delegated tasks</span>
+        <span class="dl-head-title dl-head-task" x-show="$store.delegateView.mode === 'task'"
+              :title="$store.delegateView.activeTitle"
+              x-text="$store.delegateView.activeTitle || 'task'"></span>
+
+        {# stop: a red hexagon (the theme's error colour), only while this task is
+           running. Kept left of the dock/full toggle so a stop is always in the
+           same place; the square inside is the stop sign's white centre. #}
+        <button type="button" class="dl-stop" x-show="$store.delegateView.activeRunning()" x-cloak
+                title="Stop this delegated task" aria-label="Stop this delegated task"
+                @click="$store.delegateView.stopTask()">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <path d="M6.2 2h11.6L22 12l-4.2 10H6.2L2 12z"/>
+                <rect x="8.4" y="8.4" width="7.2" height="7.2" rx="1.2" fill="#fff"/>
+            </svg>
+        </button>

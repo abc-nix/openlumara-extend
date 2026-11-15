@@ -56,6 +56,10 @@ class ChatPro(core.module.Module):
             "description": "Show the branch control in the message action row (> to start a variant, < n/m > to navigate them).",
             "default": True
         },
+        "host_delegate": {
+            "description": "Render delegate's task panel inside this dock's Tasks tab, and send delegate's header button to that tab. Turn it off to let delegate keep its own panel (requires delegate to be enabled).",
+            "default": True
+        },
         "tab_order": {
             "description": "Order of the dock tabs, comma separated: branches, search, links, tasks. Unknown names are ignored and any missing tab is appended at the end, so this only reorders - it never hides a tab. Applied on save (the page reloads).",
             "default": "branches,search,links,tasks",

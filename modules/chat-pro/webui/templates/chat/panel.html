@@ -61,6 +61,7 @@
 {%- endfor -%}
 
 <div class="cp-cover" x-show="$store.chatPro.panelOpen" x-cloak
+     data-host-delegate="{{ 1 if module_config.get('host_delegate', true) else 0 }}"
      @keydown.escape.window="$store.chatPro.closePanel()">
 
     {# one band: the dock's name, its tabs, and the close button. the tabs are
@@ -105,13 +106,12 @@
         <div class="cp-soon">coming next</div>
     </div>
 
-    {# ---------------- tasks (placeholder) ---------------- #}
-    <div class="cp-view cp-placeholder" x-show="$store.chatPro.panelTab === 'tasks'">
-        <div class="cp-section-label">Delegated tasks</div>
-        <div class="cp-row"><span class="cp-status-dot"></span><span class="cp-row-text">A delegated run - title, status, model</span></div>
-        <div class="cp-row"><span class="cp-status-dot done"></span><span class="cp-row-text">A finished task</span></div>
-        <div class="cp-hint">Will list delegate's tasks through its public routes and jump to a task's
-            transcript. The delegate panel stays as it is.</div>
-        <div class="cp-soon">coming next</div>
+        {# ---------------- tasks: delegate's panel, when that module is on -------- #}
+    {# the panel body lives in delegate/parts/body.html (head, list, transcript,
+       font control); it sits inside the same .dl-cover class its own dock uses so
+       its styles apply, with .dl-embedded overriding the dock geometry.
+       `ignore missing` keeps this tab empty - not fatal - when delegate is off. #}
+    <div class="cp-view cp-delegate-host" x-show="$store.chatPro.panelTab === 'tasks'">
+        <div class="dl-cover dl-embedded">{% include 'delegate/parts/body.html' ignore missing %}</div>
     </div>
 </div>

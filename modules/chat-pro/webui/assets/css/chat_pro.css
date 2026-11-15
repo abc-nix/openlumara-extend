@@ -1036,3 +1036,25 @@
     font-size: 0.78rem;
     color: var(--text-muted);
 }
+
+/* delegate hosted in the dock's Tasks tab: the body keeps its own styles (it is
+   still a .dl-cover), the host only supplies the height and explains itself when
+   delegate is not installed. */
+.cp-delegate-host {
+    min-height: 0;
+}
+
+.cp-delegate-host > .dl-cover {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+}
+
+.cp-delegate-host .dl-cover:empty::after {
+    content: "Delegate is not enabled.";
+    display: grid;
+    place-items: center;
+    height: 100%;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
