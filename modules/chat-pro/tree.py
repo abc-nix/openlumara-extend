@@ -509,17 +509,24 @@ class ChatTree:
                 "variants": len(children.get(nid, [])),
             })
 
-        def walk(nid, depth):
-            kids = children.get(nid, [])
-            if len(kids) >= 2:
-                add("fork", nid, depth)
-                for kid in kids:
-                    add("branch", kid, depth + 1, fork=nid)
-                    walk(kid, depth + 1)
-                return
-            # a linear chain adds no indent: keep looking for the next split
-            for kid in kids:
-                walk(kid, depth)
+        # iterative on purpose: a long chat is one linear chain of thousands of
+        # nodes, and a recursive walk dies at Python's ~1000 frame limit
+        def walk(start_id, start_depth):
+            stack = [(start_id, start_depth)]
+            while stack:
+                nid, depth = stack.pop()
+                kids = children.get(nid, [])
+                if len(kids) >= 2:
+                    add("fork", nid, depth)
+                    for kid in kids:
+                        add("branch", kid, depth + 1, fork=nid)
+                    # reversed so the first sibling is visited first (DFS order)
+                    for kid in reversed(kids):
+                        stack.append((kid, depth + 1))
+                    continue
+                # a linear chain adds no indent: keep looking for the next split
+                for kid in reversed(kids):
+                    stack.append((kid, depth))
 
         roots = self._roots()
         if len(roots) > 1:
