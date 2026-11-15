@@ -888,6 +888,107 @@ class Libreta(core.module.Module):
         recent = recent[: int(self.config.get("recent_max") or 30)]
         return self._save(recent=recent, pinned=pinned)
 
+    def _resolve_target(self, raw, workspace=""):
+        """path -> (root, relative) if a real file, else None.
+
+        references in a chat are often relative and quoted from inside a
+        subfolder (`user_guide/x.md` while the root is the project), so after the
+        direct lookup this also tries one level down - ws/<sub>/<rel> - before
+        giving up.
+        """
+        roots, _ = self._workspace_info()
+        if not roots:
+            return None
+
+        target = os.path.realpath(os.path.expanduser(raw))
+
+        if workspace:
+            try:
+                root = self._root(workspace)
+            except files.FileError:
+                return None
+            if target.startswith(root + os.sep) and os.path.isfile(target):
+                return root, os.path.relpath(target, root)
+            roots = [root]
+        else:
+            for root in roots:
+                if (target.startswith(root + os.sep) or target == root) and os.path.isfile(target):
+                    return root, os.path.relpath(target, root)
+
+        if os.path.isabs(raw):
+            return None
+
+        for root in roots:
+            if os.path.isfile(os.path.join(root, raw)):
+                return root, raw
+
+        # a path quoted relative to one of the workspace's own folders
+        for root in roots:
+            try:
+                entries = sorted(os.scandir(root), key=lambda entry: entry.name)
+            except OSError:
+                continue
+            for entry in entries:
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                if os.path.isfile(os.path.join(entry.path, raw)):
+                    return root, os.path.relpath(os.path.join(entry.path, raw), root)
+
+        return None
+
+    @webui.route("find")
+    async def _route_find(self, body=None, query=None):
+        """resolve a path without opening it: a caller checks existence first,
+        so it can offer to open only what actually exists."""
+        raw = str((query or {}).get("path", "") or "").strip()
+        workspace = str((query or {}).get("workspace", "") or "").strip()
+        if not raw:
+            return self.result("no path given", success=False)
+
+        found = self._resolve_target(raw, workspace)
+        if found is None:
+            return {"found": False, "path": raw}
+
+        root, rel = found
+        return {
+            "found": True,
+            "workspace": os.path.basename(root) or root,
+            "path": files.safe_rel(rel),
+            "root": root,
+        }
+
+    @webui.route("open", method="POST")
+    async def _route_open(self, body=None, query=None):
+        """resolve a path to a workspace and record it as recently opened.
+
+        nothing here touches the UI: another module (chat-pro's references) asks
+        with {path}, gets {workspace, path} back and then opens its own view with
+        Alpine.store("libretaView").open(workspace, path).
+        """
+        raw = str((body or {}).get("path", "") or "").strip()
+        workspace = str((body or {}).get("workspace", "") or "").strip()
+        if not raw:
+            return self.result("no path given", success=False)
+
+        found = self._resolve_target(raw, workspace)
+        if found is None:
+            return self.result(f"no workspace contains {raw}", success=False)
+
+        root, rel = found
+        try:
+            entry = self._entry(os.path.basename(root) or root, rel)
+        except files.FileError as e:
+            return self.result(str(e), success=False)
+
+        recent, pinned = self._lists()
+        recent = [r for r in recent
+                  if not (r.get("workspace") == entry["workspace"] and r.get("path") == entry["path"])]
+        recent.insert(0, entry)
+        recent = recent[: int(self.config.get("recent_max") or 30)]
+        self._save(recent=recent, pinned=pinned)
+
+        return {"workspace": entry["workspace"], "path": entry["path"], "root": root}
+
     @webui.route("state/pin", method="POST")
     async def _route_state_pin(self, body=None, query=None):
         workspace = str((body or {}).get("workspace", "") or "")

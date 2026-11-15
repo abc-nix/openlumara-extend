@@ -456,7 +456,97 @@ const CHAT_PRO = {
             window.open(row.value, "_blank", "noopener");
             return;
         }
-        this.copyRef(row.value);
+        this.openFileRef(row.value);
+    },
+
+    // what a file reference does is a setting; it reaches js through data
+    // attributes on .cp-cover, because module settings are jinja-only
+    _fileOpenConfig() {
+        const cover = document.querySelector(".cp-cover");
+        const data = cover ? cover.dataset : {};
+        return {
+            action: data.fileOpen || "copy",
+            module: data.fileOpenModule || "libreta",
+            command: data.fileOpenCommand || "xdg-open {path}"
+        };
+    },
+
+    async openFileRef(value) {
+        const config = this._fileOpenConfig();
+        if (config.action === "copy") return this.copyRef(value);
+
+        // only offer to open what exists: a chat quotes paths relative to
+        // wherever the file lived, and most of them do not resolve here.
+        const resolved = await this._resolveFile(value, config.module);
+        if (resolved === false) {
+            await this.copyRef(value);   // its own notice would overwrite ours
+            this._notice(`File not found - copied ${value}`, 4000);
+            return;
+        }
+
+        if (config.action === "command") return this._runFileCommand(config.command, value, resolved);
+        return this._openFileWithModule(config.module, value, resolved);
+    },
+
+    // three answers on purpose: an object when it resolves, false when the
+    // module says it does not exist, null when there is no find route to ask
+    async _resolveFile(path, moduleName) {
+        try {
+            const found = await simpleApiFetch(`/api/ext/${moduleName}/find?path=${encodeURIComponent(path)}`);
+            return found && found.found ? found : false;
+        } catch (error) {
+            return null;
+        }
+    },
+
+    _shellQuote(value) {
+        const bs = String.fromCharCode(92);
+        const safe = String(value).split('"').join(bs + '"')
+            .split("$").join(bs + "$").split("`").join(bs + "`");
+        return '"' + safe + '"';
+    },
+
+    async _runFileCommand(template, path, resolved) {
+        // a command wants a real path, so prefer the resolved absolute one
+        const target = resolved && resolved.root ? `${resolved.root}/${resolved.path}` : path;
+        const command = String(template || "").replaceAll("{path}", this._shellQuote(target)).trim();
+        if (!command) return this.copyRef(target);
+
+        try {
+            const result = await simpleApiPost("/api/ext/shell/run", { command });
+            const failed = result && (result.success === false || result.status === "error");
+            this._notice(failed ? `Command failed: ${command}` : `Ran ${command}`);
+        } catch (error) {
+            // simpleApiPost throws the server's message: show why, not just that
+            this._notice(`Command failed: ${command} - ${String(error).slice(0, 90)}`);
+        }
+    },
+
+    async _openFileWithModule(name, path, resolved) {
+        try {
+            const payload = resolved ? { path: resolved.path, workspace: resolved.workspace } : { path };
+            const result = await simpleApiPost(`/api/ext/${name}/open`, payload);
+            const workspace = (result && result.workspace) || (resolved && resolved.workspace);
+            const rel = (result && result.path) || (resolved && resolved.path);
+
+            let view = null;
+            try { view = Alpine.store(`${name}View`); } catch (error) { /* module has no store */ }
+
+            if (view && typeof view.open === "function" && workspace) {
+                await view.open(workspace, rel);
+                this._notice(`Opened ${rel}`);
+                return;
+            }
+            this._notice(workspace ? `Resolved to ${workspace}/${rel}` : `Could not open ${path}`);
+        } catch (error) {
+            this._notice(`Could not open ${path} in ${name}: ${String(error).slice(0, 90)}`);
+        }
+    },
+
+    _notice(text, ms = 4000) {
+        const ui = Alpine.store("ui");
+        ui.notice = text;
+        setTimeout(() => { if (ui.notice === text) ui.notice = null; }, ms);
     },
 
     // a path is not clickable on its own yet (no editor route wired): copying it

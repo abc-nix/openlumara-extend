@@ -60,6 +60,26 @@ class ChatPro(core.module.Module):
             "description": "Render delegate's task panel inside this dock's Tasks tab, and send delegate's header button to that tab. Turn it off to let delegate keep its own panel (requires delegate to be enabled).",
             "default": True
         },
+        "file_open_action": {
+            "description": "What a file reference does when clicked: copy the path, open it with a module, or run a shell command. URLs always open in a tab.",
+            "default": "copy",
+            "type": "select",
+            "options": {
+                "copy": "Copy the path to the clipboard.",
+                "module": "Ask a module to open it (see file_open_module).",
+                "command": "Run a shell command (see file_open_command)."
+            }
+        },
+        "file_open_module": {
+            "description": "Module used by 'open with module'. It needs POST /api/ext/<module>/open and a store named <module>View with open(workspace, path) - libreta provides both.",
+            "default": "libreta",
+            "type": "text"
+        },
+        "file_open_command": {
+            "description": "Command used by 'open with command'. {path} is replaced with the shell-quoted path.",
+            "default": "xdg-open {path}",
+            "type": "text"
+        },
         "tab_order": {
             "description": "Order of the dock tabs, comma separated: branches, search, links, tasks. Unknown names are ignored and any missing tab is appended at the end, so this only reorders - it never hides a tab. Applied on save (the page reloads).",
             "default": "branches,search,links,tasks",

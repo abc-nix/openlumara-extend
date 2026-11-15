@@ -63,6 +63,9 @@
 
 <div class="cp-cover" x-show="$store.chatPro.panelOpen" x-cloak
      data-host-delegate="{{ 1 if module_config.get('host_delegate', true) else 0 }}"
+     data-file-open="{{ module_config.get('file_open_action', 'copy') | e }}"
+     data-file-open-module="{{ module_config.get('file_open_module', 'libreta') | e }}"
+     data-file-open-command="{{ module_config.get('file_open_command', 'xdg-open {path}') | e }}"
      @keydown.escape.window="$store.chatPro.closePanel()">
 
     {# one band: the dock's name, its tabs, and the close button. the tabs are
