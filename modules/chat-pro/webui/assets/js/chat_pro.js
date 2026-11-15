@@ -57,6 +57,13 @@ const CHAT_PRO = {
     graphActive: [],
     graphStats: { nodes: 0, branches: 0 },
 
+    // references tab: urls and file paths found in this chat's history
+    refs: [],
+    refsQuery: "",
+    refKind: "all",        // "all" | "url" | "file"
+    refShowContent: true,  // references the message text mentions
+    refShowTools: false,   // references tool output - off by default, it is noise
+
     togglePanel() {
         this.setPanelOpen(!this.panelOpen);
     },
@@ -177,6 +184,7 @@ const CHAT_PRO = {
         const known = ["branches", "search", "links", "tasks"];
         this.panelTab = known.includes(tab) ? tab : "branches";
         try { localStorage.setItem("chatProPanelTab", this.panelTab); } catch (error) { /* private mode */ }
+        if (this.panelTab === "links") this.scanRefs();
         this._syncDelegateHost();
     },
 
@@ -259,6 +267,154 @@ const CHAT_PRO = {
             // the module may be disabled mid-session: stay quiet, keep the row clean
             console.warn("chat-pro: state refresh failed:", error);
         }
+    },
+
+    /* ----------------
+     * references (urls + file paths)
+     * ----------------- */
+    // scanned from the history the client already holds - no route, works on
+    // whatever branch is open. the refresh button re-runs it.
+    scanRefs() {
+        const chat = Alpine.store("chat");
+        const contentParts = [];
+        const toolParts = [];
+
+        (chat.turnHistory || []).forEach((turn) => {
+            (turn.messages || []).forEach((message) => {
+                // tool results are their own stream: a path listed by `ls` is
+                // not the same kind of reference as one the answer points at
+                const bucket = message.role === "tool" ? toolParts : contentParts;
+                const content = message.content;
+                if (typeof content === "string") {
+                    bucket.push(content);
+                } else if (Array.isArray(content)) {
+                    content.forEach((block) => {
+                        if (block && block.type === "text" && block.text) bucket.push(String(block.text));
+                    });
+                }
+                if (Array.isArray(message.tool_calls)) {
+                    message.tool_calls.forEach((call) => {
+                        const args = call && call.function ? call.function.arguments : null;
+                        if (args) toolParts.push(typeof args === "string" ? args : JSON.stringify(args));
+                    });
+                }
+            });
+        });
+
+        const text = contentParts.concat(toolParts).join(" ");
+        const found = new Map();
+
+        // text from tool output and json-ish payloads carries escaped line breaks
+        // ("...\n"), and a url or path never ends with a backslash. strip them
+        // before storing, or the same address lands twice with junk on its tail.
+        const bs = String.fromCharCode(92);
+        const cleanRef = (value) => {
+            let out = String(value);
+            ["n", "r", "t"].forEach((ch) => { out = out.split(bs + ch).join(""); });
+            while (out.endsWith(bs)) out = out.slice(0, -1);
+            return out;
+        };
+
+        const add = (kind, value) => {
+            const clean = cleanRef(value || "");
+            if (!clean) return;
+            const key = `${kind}:${clean}`;
+            const row = found.get(key) || { kind, value: clean, count: 0 };
+            row.count += 1;
+            found.set(key, row);
+        };
+
+        (text.match(/https?:\/\/[^\s<>"'`)\]]+/g) || []).forEach((raw) => {
+            add("url", raw.replace(/[.,;:!?]+$/, ""));
+        });
+
+        const urlValues = [...found.values()].filter((row) => row.kind === "url").map((row) => row.value);
+        const insideUrl = (value) => urlValues.some((url) => url.includes(value));
+
+        // path-looking tokens: at least one slash and an extension. a slice of an
+        // address is not a file: .../wiki/Character.ai is a page, not a path.
+        // an absolute path must start at a real root: "/wiki/Character.ai" is the
+        // tail of a scheme-less address, not a file
+        const roots = ["/home/", "/usr/", "/etc/", "/tmp/", "/opt/", "/var/", "/mnt/",
+            "/media/", "/srv/", "/root/", "/proc/", "/dev/"];
+
+        (text.match(/(?:~\/|\/|\.\/)?[\w.-]+(?:\/[\w.-]+)+\.[A-Za-z0-9]{1,6}\b/g) || []).forEach((raw) => {
+            if (raw.includes("://") || raw.startsWith("//") || insideUrl(raw)) return;
+            if (raw.startsWith("/") && !roots.some((root) => raw.startsWith(root))) return;
+            add("file", raw.replace(/^\.\//, ""));
+        });
+
+        // bare file names with a known extension, unless a path or a url covers them
+        (text.match(/\b[\w-]+\.(?:py|md|markdown|json|ya?ml|toml|ini|cfg|js|css|html|txt|sh|log)\b/g) || []).forEach((raw) => {
+            const covered = [...found.values()].some((row) => row.kind === "file" && row.value.endsWith(`/${raw}`));
+            if (!covered && !insideUrl(raw)) add("file", raw);
+        });
+
+        const contentText = contentParts.join(" ");
+        const toolText = toolParts.join(" ");
+        for (const row of found.values()) {
+            const inContent = contentText.includes(row.value);
+            const inTools = toolText.includes(row.value);
+            row.sources = { content: inContent, tools: inTools };
+            if (!inContent && !inTools) row.sources.content = true;
+        }
+
+        this.refs = [...found.values()].sort((a, b) => {
+            if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
+            return a.value.localeCompare(b.value);
+        });
+    },
+
+    // remembered per browser, like the tab and the open state
+    restoreRefPrefs() {
+        try {
+            const content = localStorage.getItem("chatProRefContent");
+            const tools = localStorage.getItem("chatProRefTools");
+            if (content !== null) this.refShowContent = content === "1";
+            if (tools !== null) this.refShowTools = tools === "1";
+        } catch (error) { /* private mode */ }
+    },
+
+    toggleRefSource(which) {
+        if (which === "tools") this.refShowTools = !this.refShowTools;
+        else this.refShowContent = !this.refShowContent;
+        try {
+            localStorage.setItem("chatProRefContent", this.refShowContent ? "1" : "0");
+            localStorage.setItem("chatProRefTools", this.refShowTools ? "1" : "0");
+        } catch (error) { /* private mode */ }
+    },
+
+    filteredRefs() {
+        const query = (this.refsQuery || "").trim().toLowerCase();
+        return this.refs.filter((row) => {
+            if (this.refKind !== "all" && row.kind !== this.refKind) return false;
+            const sources = row.sources || { content: true, tools: false };
+            const shown = (sources.content && this.refShowContent) || (sources.tools && this.refShowTools);
+            if (!shown) return false;
+            return !query || row.value.toLowerCase().includes(query);
+        });
+    },
+
+    openRef(row) {
+        if (!row) return;
+        if (row.kind === "url") {
+            window.open(row.value, "_blank", "noopener");
+            return;
+        }
+        this.copyRef(row.value);
+    },
+
+    // a path is not clickable on its own yet (no editor route wired): copying it
+    // is the honest action; opening it in libreta is the next step.
+    async copyRef(value) {
+        const ui = Alpine.store("ui");
+        try {
+            await navigator.clipboard.writeText(value);
+            ui.notice = `Copied ${value}`;
+        } catch (error) {
+            ui.notice = value;
+        }
+        setTimeout(() => { if (ui.notice && ui.notice.includes(value)) ui.notice = null; }, 4000);
     },
 
     /* ----------------
@@ -1082,6 +1238,7 @@ const CHAT_PRO = {
 document.addEventListener("alpine:init", () => {
     Alpine.store("chatPro", CHAT_PRO);
     CHAT_PRO.restorePanel();
+    CHAT_PRO.restoreRefPrefs();
     setTimeout(() => CHAT_PRO.patch(), 0);
 });
 

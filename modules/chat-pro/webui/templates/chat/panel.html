@@ -48,6 +48,7 @@
 {%- endmacro -%}
 
 {%- set known_tabs = ['branches', 'search', 'links', 'tasks'] -%}
+{%- set tab_labels = {'branches': 'Branches', 'search': 'Search', 'links': 'References', 'tasks': 'Tasks'} -%}
 {%- set tab_order = [] -%}
 {%- set wanted = (module_config.get('tab_order') if module_config else '') or '' -%}
 {%- for part in wanted.split(',') -%}
@@ -73,7 +74,8 @@
             <button type="button" class="cp-tab" role="tab"
                     :class="{ active: $store.chatPro.panelTab === '{{ name }}' }"
                     :aria-selected="$store.chatPro.panelTab === '{{ name }}'"
-                    title="{{ name | capitalize }}" aria-label="{{ name | capitalize }}"
+                    title="{{ tab_labels.get(name, name | capitalize) }}"
+                    aria-label="{{ tab_labels.get(name, name | capitalize) }}"
                     @click="$store.chatPro.setPanelTab('{{ name }}')">{{ tab_icon(name) }}</button>
             {% endfor %}
         </div>
@@ -116,15 +118,70 @@
        whole chat page down with a TemplateNotFound #}
     <div class="cp-view cp-search-host" x-show="$store.chatPro.panelTab === 'search'">{% include 'chat_nav/parts/panel.html' ignore missing %}</div>
 
-    {# ---------------- links & files (placeholder) ---------------- #}
-    <div class="cp-view cp-placeholder" x-show="$store.chatPro.panelTab === 'links'">
-        <div class="cp-section-label">Everything this chat points at</div>
-        <div class="cp-row"><span class="cp-chip">link</span><span class="cp-row-text">https://example.com/some-page</span></div>
-        <div class="cp-row"><span class="cp-chip">file</span><span class="cp-row-text">~/Documents/Notes/plan.md</span></div>
-        <div class="cp-row"><span class="cp-chip">file</span><span class="cp-row-text">modules/chat-pro/module.py</span></div>
-        <div class="cp-hint">Links will open in a tab; file references will open in libreta (or the editor)
-            when the path really exists.</div>
-        <div class="cp-soon">coming next</div>
+    {# ---------------- references: urls and file paths in this chat ------------- #}
+    {# scanned client-side from the history chat already holds, so it is instant
+       and works on any branch. the filter is local; the button rescans. #}
+    <div class="cp-view cp-refs" x-show="$store.chatPro.panelTab === 'links'">
+        <div class="cp-refs-bar">
+            <input type="text" class="cp-refs-input" placeholder="Filter references..."
+                   spellcheck="false" autocomplete="off"
+                   x-model="$store.chatPro.refsQuery">
+            {# where a reference was seen: the messages' own text, or tool output.
+               two independent toggles - a path listed by `ls` is not the same
+               kind of reference as one the answer points at. #}
+            <button type="button" class="cp-srcbtn" :class="{ off: !$store.chatPro.refShowContent }"
+                    :aria-pressed="$store.chatPro.refShowContent"
+                    title="References in messages" aria-label="References in messages"
+                    @click="$store.chatPro.toggleRefSource('content')">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+            </button>
+            <button type="button" class="cp-srcbtn" :class="{ off: !$store.chatPro.refShowTools }"
+                    :aria-pressed="$store.chatPro.refShowTools"
+                    title="References in tool output" aria-label="References in tool output"
+                    @click="$store.chatPro.toggleRefSource('tools')">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                </svg>
+            </button>
+            <button type="button" class="cp-refs-btn" @click="$store.chatPro.scanRefs()"
+                    title="Rescan the conversation" aria-label="Rescan the conversation">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12a9 9 0 1 1-2.6-6.4"></path>
+                    <path d="M21 3v6h-6"></path>
+                </svg>
+            </button>
+        </div>
+
+        <div class="cp-refs-kinds">
+            <button type="button" class="cp-refkind" :class="{ on: $store.chatPro.refKind === 'all' }"
+                    @click="$store.chatPro.refKind = 'all'">All</button>
+            <button type="button" class="cp-refkind" :class="{ on: $store.chatPro.refKind === 'url' }"
+                    @click="$store.chatPro.refKind = 'url'">Links</button>
+            <button type="button" class="cp-refkind" :class="{ on: $store.chatPro.refKind === 'file' }"
+                    @click="$store.chatPro.refKind = 'file'">Files</button>
+            <span class="cp-refs-count" x-text="$store.chatPro.filteredRefs().length + ' found'"></span>
+        </div>
+
+        <div class="cp-refs-list">
+            <template x-for="row in $store.chatPro.filteredRefs()" :key="row.kind + ':' + row.value">
+                <button type="button" class="cp-ref" :title="row.value" @click="$store.chatPro.openRef(row)">
+                    <span class="cp-ref-chip" :class="row.kind" x-text="row.kind === 'url' ? 'link' : 'file'"></span>
+                    <span class="cp-ref-tool" x-show="row.sources && row.sources.tools && !row.sources.content"
+                          title="Only mentioned in tool output">tool</span>
+                    <span class="cp-ref-text" x-text="row.value"></span>
+                    <span class="cp-ref-count" x-show="row.count > 1" x-text="row.count + '×'"></span>
+                </button>
+            </template>
+            <div class="cp-refs-empty" x-show="!$store.chatPro.filteredRefs().length">
+                <span x-show="!$store.chatPro.refs.length">Nothing found yet - press refresh.</span>
+                <span x-show="$store.chatPro.refs.length">No reference matches that filter.</span>
+            </div>
+        </div>
     </div>
 
         {# ---------------- tasks: delegate's panel, when that module is on -------- #}
