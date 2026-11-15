@@ -66,9 +66,8 @@ def stamp_id(message, node_id):
     metadata[NODE_KEY] = node_id
 
 
-def preview(message, limit=80):
-    """one line of the message for the branch panel"""
-    role = message.get("role") or "?"
+def message_text(message):
+    """the plain text of a message, block lists flattened ('' when it has none)"""
     content = message.get("content")
 
     if isinstance(content, list):
@@ -78,7 +77,28 @@ def preview(message, limit=80):
                 parts.append(str(block.get("text")))
         content = " ".join(parts)
 
-    text = " ".join(str(content or "").split())
+    return " ".join(str(content or "").split())
+
+
+def is_reply(message):
+    """does this message *say* something a branch row could quote?
+
+    a branch often opens with tool calls (the assistant's first move in an agentic
+    chain), and preview() can only say "[tool call]" there. a reply is a user or
+    assistant message with real text: no tool results, no tool-call-only steps, no
+    reasoning, no internal context (screenshots, injected data).
+    """
+    if (message.get("_metadata") or {}).get("internal"):
+        return False
+    if message.get("role") not in ("user", "assistant"):
+        return False
+    return bool(message_text(message))
+
+
+def preview(message, limit=80):
+    """one line of the message for the branch panel"""
+    role = message.get("role") or "?"
+    text = message_text(message)
 
     if role == "tool":
         text = "[tool result] " + text
@@ -408,6 +428,27 @@ class ChatTree:
             current = nxt
         return total
 
+    def _branch_preview(self, node_id, limit=80):
+        """the first thing this branch actually *says*
+
+        a branch row exists to tell the alternatives apart, and the alternative often
+        starts with tool calls - whose own preview is the literal "[tool call]" on every
+        row, which says nothing. follow the branch's preferred chain to the first reply
+        and quote that; when the branch has no text at all (a branch that is pure tool
+        work), fall back to what the node itself says.
+        """
+        seen = set()
+        current = node_id
+        while current and current not in seen and len(seen) < 400:
+            seen.add(current)
+            message = (self.nodes.get(current) or {}).get("message") or {}
+            if is_reply(message):
+                return preview(message, limit)
+            current = (self.nodes.get(current) or {}).get("active_child")
+
+        node = self.nodes.get(node_id) or {}
+        return preview(node.get("message") or {}, limit)
+
     @staticmethod
     def _subtree_size(node_id, children):
         total = 1
@@ -502,7 +543,8 @@ class ChatTree:
                 "fork": fork,
                 "depth": depth,
                 "role": message.get("role"),
-                "preview": preview(message),
+                # an alternative quotes its first reply, not its first tool call
+                "preview": self._branch_preview(nid) if kind == "branch" else preview(message),
                 "on_path": nid in active,
                 "messages": self._preferred_length(nid),
                 "subtree": self._subtree_size(nid, children),
