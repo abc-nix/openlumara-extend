@@ -742,6 +742,42 @@ document.addEventListener("alpine:init", () => {
     Alpine.store("chatNav", CHAT_NAV_STORE);
 });
 
+// --------------------------------------------------------- sidebar tab setting
+
+// core builds a tab for every sidebars/*.html it finds, so a module setting
+// cannot stop that discovery: "show_sidebar_tab: false" renders only a marker,
+// and the tab (plus its now-empty panel) is hidden here.
+const HIDE_TAB_CSS = ".sidebar-tab[data-cn-hidden], .sidebar-panel[data-cn-hidden] { display: none !important; }";
+
+function hideChatNavSidebarTab() {
+    const marker = document.querySelector('[data-cn-sidebar-tab="off"]');
+    if (!marker) return;
+
+    if (!document.getElementById("cn-hide-tab-style")) {
+        const style = document.createElement("style");
+        style.id = "cn-hide-tab-style";
+        style.textContent = HIDE_TAB_CSS;
+        document.head.appendChild(style);
+    }
+
+    const panel = marker.closest(".sidebar-panel");
+    if (panel) panel.dataset.cnHidden = "1";
+
+    const tab = document.querySelector('.sidebar-tab[data-tab="chat_nav/chat_nav"]');
+    if (!tab) return;
+    tab.dataset.cnHidden = "1";
+
+    // a saved selection pointing at a hidden tab would leave the sidebar empty
+    const shell = document.querySelector(".sidebar-shell");
+    const data = shell && window.Alpine ? Alpine.$data(shell) : null;
+    if (data && data.sidebarTab === "chat_nav/chat_nav") {
+        data.sidebarTab = "";
+        try { localStorage.removeItem("sidebarTab"); } catch (error) { /* private mode */ }
+    }
+}
+
+document.addEventListener("alpine:initialized", hideChatNavSidebarTab);
+
 // ----------------------------------------------------------- the find bar
 
 const CHAT_NAV_FINDBAR = {
@@ -835,7 +871,9 @@ const CHAT_NAV_PANEL = {
         if (this._inited) return;
         this._inited = true;
 
-        this._root = document.querySelector(".chat-nav");
+        // this.$root, not the first .chat-nav in the page: two hosts can
+        // render the panel at once (dock + sidebar)
+        this._root = this.$root || document.querySelector(".chat-nav");
 
         const nav = Alpine.store("chatNav");
         nav.configure();

@@ -1021,3 +1021,18 @@
 @supports not (border-color: color-mix(in srgb, red 50%, transparent)) {
     .cp-graph-mini { border-color: var(--border-color); }
 }
+
+/* chat_nav hosted in the dock's Search tab: its panel already lays itself out,
+   so the view only supplies the width. when that module is disabled the include
+   renders nothing (:empty) - say so instead of a blank tab. */
+.cp-search-host > .chat-nav {
+    flex: 1;
+    min-width: 0;
+}
+
+.cp-search-host:empty::after {
+    content: "Chat Nav is not enabled.";
+    margin: auto;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}

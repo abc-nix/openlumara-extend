@@ -84,22 +84,11 @@
         {% include 'chat-pro/parts/branches.html' %}
     </div>
 
-    {# ---------------- search (placeholder) ---------------- #}
-    <div class="cp-view cp-placeholder" x-show="$store.chatPro.panelTab === 'search'">
-        <div class="cp-search">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m20 20-4.2-4.2"></path>
-            </svg>
-            <input type="text" placeholder="Search every message, every branch" disabled>
-        </div>
-        <div class="cp-hint">
-            Will search the whole tree - including branches you are not on - and jump to the
-            hit, switching the branch first when needed.
-        </div>
-        <div class="cp-skeleton"><span></span><span></span><span></span></div>
-        <div class="cp-soon">coming next</div>
-    </div>
+    {# ---------------- search: chat_nav's panel, when that module is on -------- #}
+    {# ignore missing: module templates enter the loader only while the module is
+       enabled, and a missing include must degrade to an empty tab - not take the
+       whole chat page down with a TemplateNotFound #}
+    <div class="cp-view cp-search-host" x-show="$store.chatPro.panelTab === 'search'">{% include 'chat_nav/parts/panel.html' ignore missing %}</div>
 
     {# ---------------- links & files (placeholder) ---------------- #}
     <div class="cp-view cp-placeholder" x-show="$store.chatPro.panelTab === 'links'">

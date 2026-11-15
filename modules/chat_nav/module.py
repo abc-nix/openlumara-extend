@@ -27,6 +27,10 @@ class ChatNav(core.module.Module):
             "description": "Show the chat navigator tab in the sidebar and load its webui assets.",
             "default": True
         },
+        "show_sidebar_tab": {
+            "description": "Show the Chat Nav tab in the left sidebar. Turn it off when another dock (chat-pro's right panel) hosts the same panel - two live copies would share one index.",
+            "default": True
+        },
         "search_user_by_default": {
             "description": "Search your own messages by default.",
             "default": True
