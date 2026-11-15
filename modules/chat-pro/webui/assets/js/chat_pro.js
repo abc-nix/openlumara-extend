@@ -45,6 +45,7 @@ const CHAT_PRO = {
     // so reopening lands where the user left it.
     panelOpen: false,
     panelTab: "branches",
+    panelFull: false,     // docked beside the chat, or covering the chat window
     _headerObserver: null,
 
     // the branch graph (modals/chatpro_graph.html): every node of the tree,
@@ -115,6 +116,7 @@ const CHAT_PRO = {
         requestAnimationFrame(measure);
 
         win.classList.toggle("cp-panel-open", Boolean(open));
+        win.classList.toggle("cp-panel-full", Boolean(this.panelFull));
 
         // the header can keep growing after this point (model switcher, theme
         // fonts, streaming badge): follow it instead of measuring once
@@ -129,6 +131,14 @@ const CHAT_PRO = {
 
     closePanel() {
         this.setPanelOpen(false);
+    },
+
+    // full ⇄ docked. the flag, not the tab, decides the geometry, so every tab
+    // gets it for free; it is remembered per browser like the open state.
+    togglePanelFull() {
+        this.panelFull = !this.panelFull;
+        try { localStorage.setItem("chatProPanelFull", this.panelFull ? "1" : "0"); } catch (error) { /* private mode */ }
+        this._applyPanelLayout(this.panelOpen);
     },
 
     /* ----------------
@@ -173,6 +183,7 @@ const CHAT_PRO = {
     restorePanel() {
         try {
             this.panelOpen = localStorage.getItem("chatProPanelOpen") === "1";
+            this.panelFull = localStorage.getItem("chatProPanelFull") === "1";
             const tab = localStorage.getItem("chatProPanelTab");
             if (["branches", "search", "links", "tasks"].includes(tab)) { this.panelTab = tab; }
         } catch (error) { /* private mode */ }

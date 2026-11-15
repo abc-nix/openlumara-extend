@@ -68,8 +68,6 @@
        icon-only, in the sidebar tab's own shape (36px tile, radius 8, accent on
        the active one); each name is its tooltip and its aria-label. #}
     <div class="cp-head">
-        <span class="cp-head-title">Chat Pro</span>
-
         <div class="cp-tabs" role="tablist" aria-label="Chat Pro sections">
             {% for name in tab_order %}
             <button type="button" class="cp-tab" role="tab"
@@ -79,6 +77,29 @@
                     @click="$store.chatPro.setPanelTab('{{ name }}')">{{ tab_icon(name) }}</button>
             {% endfor %}
         </div>
+
+        {# full ⇄ docked: same control delegate's panel carries, so the dock can
+           take the whole chat window when a tab needs room. works across tabs. #}
+        <button type="button" class="cp-fullbtn"
+                :title="$store.chatPro.panelFull
+                    ? 'Docked — put the panel back beside the chat'
+                    : 'Full screen — cover the whole chat window'"
+                :aria-label="$store.chatPro.panelFull
+                    ? 'Dock the Chat Pro panel' : 'Show the Chat Pro panel full screen'"
+                @click="$store.chatPro.togglePanelFull()">
+            <svg x-show="!$store.chatPro.panelFull" aria-hidden="true"
+                 xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2"/>
+                <rect x="6" y="7" width="12" height="10" rx="1"/>
+            </svg>
+            <svg x-show="$store.chatPro.panelFull" aria-hidden="true"
+                 xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2"/>
+                <rect x="13" y="7" width="5" height="10" rx="1"/>
+            </svg>
+        </button>
 
         <button type="button" class="cp-close" @click="$store.chatPro.closePanel()"
                 title="Hide the Chat Pro panel" aria-label="Close">&times;</button>

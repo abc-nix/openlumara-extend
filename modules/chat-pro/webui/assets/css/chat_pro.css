@@ -391,19 +391,13 @@
     align-items: center;
     gap: 10px;
     min-height: 48px;
-    padding: 6px 8px 6px 12px;
+    padding: 6px 8px;
     border-bottom: 1px solid var(--border-color, #e0e0ea);
-}
-
-.cp-head-title {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-primary, #111118);
 }
 
 .cp-close {
     flex: none;
-    margin-left: auto;
+    margin-left: 2px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -425,13 +419,42 @@
     color: var(--text-primary, #111118);
 }
 
+/* full ⇄ docked: same control delegate's panel carries, placed just left of
+   the close. it belongs to the dock, not a tab, so every tab has it. */
+.cp-fullbtn {
+    flex: none;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--text-muted, #8888a0);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cp-fullbtn svg {
+    width: 15px;
+    height: 15px;
+}
+
+.cp-fullbtn:hover {
+    background: var(--bg-tertiary, #ebebf2);
+    color: var(--text-primary, #111118);
+}
+
 /* the tabs live in the header band next to the dock's name: icon-only, in the
    sidebar tab's own shape (36px tile, radius 8, the accent on the active one).
    the name is the tooltip and the aria-label, so no text row is needed. */
 .cp-tabs {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
 }
 
 .cp-tab {
@@ -1057,4 +1080,32 @@
     height: 100%;
     font-size: 0.78rem;
     color: var(--text-muted);
+}
+
+/* ==========================================================================
+   full screen
+   ========================================================================== */
+
+/* absolute children resolve against the chat window (delegate does the same
+   only while its panel is open). without this the cover sized itself against
+   the page and slid over the left sidebar. */
+#chat-window.cp-panel-open {
+    position: relative;
+}
+
+/* the dock covers the chat window (header included), exactly like delegate's
+   full mode; the panel keeps its own expand and close controls, so nothing is
+   stranded behind it. every tab gets this for free - it is dock geometry. */
+#chat-window.cp-panel-full .cp-cover {
+    top: 0;
+    left: 0;
+    width: 100%;
+    border-left: none;
+}
+
+#chat-window.cp-panel-full #messages,
+#chat-window.cp-panel-full #input {
+    margin-right: 0;
+    width: 100%;
+    min-width: 100%;
 }
