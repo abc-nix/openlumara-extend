@@ -1279,3 +1279,31 @@
     text-transform: uppercase;
     color: var(--text-muted, #8888a0);
 }
+
+/* jump-to-message arrow: faint until the row is hovered, like the prune x */
+.cp-ref-jump {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    color: var(--text-muted, #8888a0);
+    opacity: 0; /* the prune x rule: invisible until the row is hovered */
+    cursor: pointer;
+    transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.cp-ref-jump svg { width: 13px; height: 13px; }
+.cp-ref:hover .cp-ref-jump,
+.cp-ref-jump:focus-visible { opacity: 1; }
+.cp-ref-jump:hover, .cp-ref-jump:focus-visible { color: var(--accent, #7c3aed); opacity: 1; }
+
+/* the turn a jump landed on: a short accent ring, then it fades away */
+.cp-flash {
+    outline: 2px solid var(--accent, #7c3aed);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm, 6px);
+}

@@ -276,37 +276,48 @@ const CHAT_PRO = {
     // whatever branch is open. the refresh button re-runs it.
     scanRefs() {
         const chat = Alpine.store("chat");
-        const contentParts = [];
-        const toolParts = [];
+        const parts = [];
 
         (chat.turnHistory || []).forEach((turn) => {
-            (turn.messages || []).forEach((message) => {
-                // tool results are their own stream: a path listed by `ls` is
-                // not the same kind of reference as one the answer points at
-                const bucket = message.role === "tool" ? toolParts : contentParts;
+            const base = turn.first_message_index || 0;
+            (turn.messages || []).forEach((message, offset) => {
+                const index = base + offset;
+                // tool results are their own stream: a path listed by `ls` is not
+                // the same kind of reference as one the answer points at
+                const source = message.role === "tool" ? "tools" : "content";
+                const push = (value) => {
+                    if (value) parts.push({ value: String(value), source, index });
+                };
+
                 const content = message.content;
                 if (typeof content === "string") {
-                    bucket.push(content);
+                    push(content);
                 } else if (Array.isArray(content)) {
                     content.forEach((block) => {
-                        if (block && block.type === "text" && block.text) bucket.push(String(block.text));
+                        if (block && block.type === "text" && block.text) push(block.text);
                     });
                 }
                 if (Array.isArray(message.tool_calls)) {
                     message.tool_calls.forEach((call) => {
                         const args = call && call.function ? call.function.arguments : null;
-                        if (args) toolParts.push(typeof args === "string" ? args : JSON.stringify(args));
+                        if (args) push(typeof args === "string" ? args : JSON.stringify(args));
                     });
                 }
             });
         });
 
-        const text = contentParts.concat(toolParts).join(" ");
-        const found = new Map();
+        // the below_message anchors exist for user messages and assistant
+        // finals only; a tool step cannot be addressed, so it must not pretend
+        const anchorable = new Set();
+        (chat.turnHistory || []).forEach((turn) => {
+            const base = turn.first_message_index || 0;
+            (turn.messages || []).forEach((message, offset) => {
+                const final = message.role === "assistant" && !(message.tool_calls || []).length;
+                if (message.role === "user" || final) anchorable.add(base + offset);
+            });
+        });
 
-        // text from tool output and json-ish payloads carries escaped line breaks
-        // ("...\n"), and a url or path never ends with a backslash. strip them
-        // before storing, or the same address lands twice with junk on its tail.
+        const found = new Map();
         const bs = String.fromCharCode(92);
         const cleanRef = (value) => {
             let out = String(value);
@@ -315,48 +326,54 @@ const CHAT_PRO = {
             return out;
         };
 
-        const add = (kind, value) => {
+        // hits: the message indexes this reference was seen in, so a row can jump
+        const add = (kind, value, source, index) => {
             const clean = cleanRef(value || "");
             if (!clean) return;
-            const key = `${kind}:${clean}`;
-            const row = found.get(key) || { kind, value: clean, count: 0 };
+            const key = kind + ":" + clean;
+            const row = found.get(key) || {
+                kind, value: clean, count: 0,
+                sources: { content: false, tools: false },
+                hits: []
+            };
             row.count += 1;
+            row.sources[source] = true;
+            if (!row.hits.includes(index)) row.hits.push(index);
             found.set(key, row);
         };
 
-        (text.match(/https?:\/\/[^\s<>"'`)\]]+/g) || []).forEach((raw) => {
-            add("url", raw.replace(/[.,;:!?]+$/, ""));
-        });
-
-        const urlValues = [...found.values()].filter((row) => row.kind === "url").map((row) => row.value);
-        const insideUrl = (value) => urlValues.some((url) => url.includes(value));
-
-        // path-looking tokens: at least one slash and an extension. a slice of an
-        // address is not a file: .../wiki/Character.ai is a page, not a path.
-        // an absolute path must start at a real root: "/wiki/Character.ai" is the
-        // tail of a scheme-less address, not a file
         const roots = ["/home/", "/usr/", "/etc/", "/tmp/", "/opt/", "/var/", "/mnt/",
             "/media/", "/srv/", "/root/", "/proc/", "/dev/"];
+        const urlValues = [];
 
-        (text.match(/(?:~\/|\/|\.\/)?[\w.-]+(?:\/[\w.-]+)+\.[A-Za-z0-9]{1,6}\b/g) || []).forEach((raw) => {
-            if (raw.includes("://") || raw.startsWith("//") || insideUrl(raw)) return;
-            if (raw.startsWith("/") && !roots.some((root) => raw.startsWith(root))) return;
-            add("file", raw.replace(/^\.\//, ""));
+        parts.forEach((part) => {
+            const text = part.value;
+
+            (text.match(/https?:\/\/[^\s<>"'`)\]]+/g) || []).forEach((raw) => {
+                const value = cleanRef(raw).replace(/[.,;:!?]+$/, "");
+                add("url", value, part.source, part.index);
+                urlValues.push(value);
+            });
+
+            // a slice of an address is not a file: .../wiki/Character.ai is a page.
+            // an absolute path must start at a real root, and // is a protocol.
+            (text.match(/(?:~\/|\/|\.\/)?[\w.-]+(?:\/[\w.-]+)+\.[A-Za-z0-9]{1,6}\b/g) || []).forEach((raw) => {
+                if (raw.includes("://") || raw.startsWith("//")) return;
+                if (raw.startsWith("/") && !roots.some((root) => raw.startsWith(root))) return;
+                if (urlValues.some((url) => url.includes(raw))) return;
+                add("file", raw.replace(/^\.\//, ""), part.source, part.index);
+            });
+
+            // bare names with a known extension, unless a path already covers them
+            (text.match(/\b[\w-]+\.(?:py|md|markdown|json|ya?ml|toml|ini|cfg|js|css|html|txt|sh|log)\b/g) || []).forEach((raw) => {
+                const covered = [...found.values()].some((row) => row.kind === "file" && row.value.endsWith("/" + raw));
+                if (covered || urlValues.some((url) => url.includes(raw))) return;
+                add("file", raw, part.source, part.index);
+            });
         });
 
-        // bare file names with a known extension, unless a path or a url covers them
-        (text.match(/\b[\w-]+\.(?:py|md|markdown|json|ya?ml|toml|ini|cfg|js|css|html|txt|sh|log)\b/g) || []).forEach((raw) => {
-            const covered = [...found.values()].some((row) => row.kind === "file" && row.value.endsWith(`/${raw}`));
-            if (!covered && !insideUrl(raw)) add("file", raw);
-        });
-
-        const contentText = contentParts.join(" ");
-        const toolText = toolParts.join(" ");
         for (const row of found.values()) {
-            const inContent = contentText.includes(row.value);
-            const inTools = toolText.includes(row.value);
-            row.sources = { content: inContent, tools: inTools };
-            if (!inContent && !inTools) row.sources.content = true;
+            row.jumpHits = row.hits.filter((index) => anchorable.has(index));
         }
 
         this.refs = [...found.values()].sort((a, b) => {
@@ -365,7 +382,45 @@ const CHAT_PRO = {
         });
     },
 
-    // remembered per browser, like the tab and the open state
+    // jump to the message that mentions a reference; repeated clicks walk its
+    // occurrences. scrollToTurn mounts lazy turns, so the flash waits for it.
+    async jumpToRef(row) {
+        const hits = (row && row.jumpHits) || [];
+        if (!hits.length) return;
+
+        row._cursor = ((row._cursor ?? -1) + 1) % hits.length;
+        const messageIndex = hits[row._cursor];
+
+        const turns = Alpine.store("chat").turnHistory || [];
+        const turnIndex = turns.findIndex((turn) => {
+            const first = turn.first_message_index || 0;
+            const last = first + Math.max(1, (turn.messages || []).length) - 1;
+            return messageIndex >= first && messageIndex <= last;
+        });
+        if (turnIndex < 0) return;
+
+        await Alpine.store("ui").scrollToTurn(turnIndex);
+
+        // land on the message, not its turn: one turn can hold dozens of steps and
+        // both mentions may live in the same one. the anchor comes from
+        // chat/turns/*.html (the below_message slot), bound to message.index.
+        const anchor = document.querySelector('#messages [data-cp-msg="' + messageIndex + '"]');
+        let element = null;
+
+        if (anchor) {
+            const target = anchor.closest(".message-wrapper") || anchor.parentElement;
+            if (target) {
+                target.scrollIntoView({ block: "center" });
+                element = target;
+            }
+        }
+        if (!element) element = document.querySelector('#messages [data-turn-index="' + turnIndex + '"]');
+        if (!element) return;
+
+        element.classList.add("cp-flash");
+        setTimeout(() => element.classList.remove("cp-flash"), 1200);
+    },
+
     restoreRefPrefs() {
         try {
             const content = localStorage.getItem("chatProRefContent");

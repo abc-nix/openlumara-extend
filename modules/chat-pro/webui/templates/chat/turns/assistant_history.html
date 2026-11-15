@@ -1,0 +1,6 @@
+{# chat-pro - a per-message anchor for "jump to the message that mentions a
+   reference". `message` is an x-for variable, so the index must be bound with
+   :data-cp-msg (a jinja value would be the same for every message). #}
+{% macro below_message(ctx) %}
+<span class="cp-msg-anchor" :data-cp-msg="message.index"></span>
+{% endmacro %}

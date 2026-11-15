@@ -170,6 +170,20 @@
         <div class="cp-refs-list">
             <template x-for="row in $store.chatPro.filteredRefs()" :key="row.kind + ':' + row.value">
                 <button type="button" class="cp-ref" :title="row.value" @click="$store.chatPro.openRef(row)">
+                    {# jump: a span, because the row is already a button; repeated
+                       clicks walk the mentions of the same reference #}
+                    <span class="cp-ref-jump" role="button" tabindex="0"
+                          x-show="row.jumpHits && row.jumpHits.length"
+                          :aria-label="'Jump to the message that mentions ' + row.value"
+                          :title="'Jump to the message (' + row.jumpHits.length + (row.jumpHits.length === 1 ? ' mention)' : ' mentions)')"
+                          @click.stop="$store.chatPro.jumpToRef(row)"
+                          @keydown.enter.stop="$store.chatPro.jumpToRef(row)"
+                          @keydown.space.stop.prevent="$store.chatPro.jumpToRef(row)">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="15 6 9 12 15 18"></polyline>
+                        </svg>
+                    </span>
                     <span class="cp-ref-chip" :class="row.kind" x-text="row.kind === 'url' ? 'link' : 'file'"></span>
                     <span class="cp-ref-tool" x-show="row.sources && row.sources.tools && !row.sources.content"
                           title="Only mentioned in tool output">tool</span>
