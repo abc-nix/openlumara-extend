@@ -56,6 +56,11 @@ class ChatPro(core.module.Module):
             "description": "Show the branch control in the message action row (> to start a variant, < n/m > to navigate them).",
             "default": True
         },
+        "tab_order": {
+            "description": "Order of the dock tabs, comma separated: branches, search, links, tasks. Unknown names are ignored and any missing tab is appended at the end, so this only reorders - it never hides a tab. Applied on save (the page reloads).",
+            "default": "branches,search,links,tasks",
+            "type": "text"
+        },
         "always_active": {
             "description": "Keep every chat on the branch tree from its first message, so core's own Regenerate/Delete preserve answers even before a branch is made. Costs a tree file, ids in every message and one reconcile per change; off by default.",
             "default": False

@@ -9,6 +9,57 @@
    mount: claimed via `below_header` in chat-pro/chat/index.html.
    state: $store.chatPro.panelOpen / panelTab (persisted in localStorage). #}
 
+{#- the tabs are icon-only and their order comes from the `tab_order` setting.
+   unknown names are ignored, duplicates collapsed and anything missing appended,
+   so the setting only reorders - it never hides a tab. -#}
+{%- macro tab_icon(name) -%}
+    {%- if name == 'branches' -%}
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="7" cy="5" r="2"></circle>
+        <circle cx="7" cy="19" r="2"></circle>
+        <circle cx="17" cy="19" r="2"></circle>
+        <path d="M7 7v10"></path>
+        <path d="M7 12.5h5.5a2 2 0 0 1 2 2v2.5"></path>
+    </svg>
+    {%- elif name == 'search' -%}
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6.5"></circle>
+        <path d="m20 20-4.2-4.2"></path>
+    </svg>
+    {%- elif name == 'links' -%}
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+    </svg>
+    {%- elif name == 'tasks' -%}
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m3.5 6 1.6 1.6L7.8 4.8"></path>
+        <path d="m3.5 12 1.6 1.6L7.8 10.8"></path>
+        <path d="m3.5 18 1.6 1.6L7.8 16.8"></path>
+        <path d="M11 6h9"></path>
+        <path d="M11 12h9"></path>
+        <path d="M11 18h9"></path>
+    </svg>
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- set known_tabs = ['branches', 'search', 'links', 'tasks'] -%}
+{%- set tab_order = [] -%}
+{%- set wanted = (module_config.get('tab_order') if module_config else '') or '' -%}
+{%- for part in wanted.split(',') -%}
+    {%- set name = part.strip() | lower -%}
+    {%- if name in known_tabs and name not in tab_order -%}
+        {%- set _ = tab_order.append(name) -%}
+    {%- endif -%}
+{%- endfor -%}
+{%- for name in known_tabs if name not in tab_order -%}
+    {%- set _ = tab_order.append(name) -%}
+{%- endfor -%}
+
 <div class="cp-cover" x-show="$store.chatPro.panelOpen" x-cloak
      @keydown.escape.window="$store.chatPro.closePanel()">
 
@@ -19,60 +70,13 @@
         <span class="cp-head-title">Chat Pro</span>
 
         <div class="cp-tabs" role="tablist" aria-label="Chat Pro sections">
+            {% for name in tab_order %}
             <button type="button" class="cp-tab" role="tab"
-                    :class="{ active: $store.chatPro.panelTab === 'branches' }"
-                    :aria-selected="$store.chatPro.panelTab === 'branches'"
-                    title="Branches" aria-label="Branches"
-                    @click="$store.chatPro.setPanelTab('branches')">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="7" cy="5" r="2"></circle>
-                    <circle cx="7" cy="19" r="2"></circle>
-                    <circle cx="17" cy="19" r="2"></circle>
-                    <path d="M7 7v10"></path>
-                    <path d="M7 12.5h5.5a2 2 0 0 1 2 2v2.5"></path>
-                </svg>
-            </button>
-
-            <button type="button" class="cp-tab" role="tab"
-                    :class="{ active: $store.chatPro.panelTab === 'search' }"
-                    :aria-selected="$store.chatPro.panelTab === 'search'"
-                    title="Search" aria-label="Search"
-                    @click="$store.chatPro.setPanelTab('search')">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="10.5" cy="10.5" r="6.5"></circle>
-                    <path d="m20 20-4.2-4.2"></path>
-                </svg>
-            </button>
-
-            <button type="button" class="cp-tab" role="tab"
-                    :class="{ active: $store.chatPro.panelTab === 'links' }"
-                    :aria-selected="$store.chatPro.panelTab === 'links'"
-                    title="Links" aria-label="Links"
-                    @click="$store.chatPro.setPanelTab('links')">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-                </svg>
-            </button>
-
-            <button type="button" class="cp-tab" role="tab"
-                    :class="{ active: $store.chatPro.panelTab === 'tasks' }"
-                    :aria-selected="$store.chatPro.panelTab === 'tasks'"
-                    title="Tasks" aria-label="Tasks"
-                    @click="$store.chatPro.setPanelTab('tasks')">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="m3.5 6 1.6 1.6L7.8 4.8"></path>
-                    <path d="m3.5 12 1.6 1.6L7.8 10.8"></path>
-                    <path d="m3.5 18 1.6 1.6L7.8 16.8"></path>
-                    <path d="M11 6h9"></path>
-                    <path d="M11 12h9"></path>
-                    <path d="M11 18h9"></path>
-                </svg>
-            </button>
+                    :class="{ active: $store.chatPro.panelTab === '{{ name }}' }"
+                    :aria-selected="$store.chatPro.panelTab === '{{ name }}'"
+                    title="{{ name | capitalize }}" aria-label="{{ name | capitalize }}"
+                    @click="$store.chatPro.setPanelTab('{{ name }}')">{{ tab_icon(name) }}</button>
+            {% endfor %}
         </div>
 
         <button type="button" class="cp-close" @click="$store.chatPro.closePanel()"
