@@ -586,8 +586,35 @@ class ChatPro(core.module.Module):
         def message_of(node_id):
             return (tree.nodes.get(node_id) or {}).get("message") or {}
 
+        def internal(node_id):
+            return bool((message_of(node_id).get("_metadata") or {}).get("internal"))
+
+        # messages flagged internal exist for the model's context only (screenshots,
+        # injected data): core's group_history drops them, so the chat never renders
+        # one. a card for such a message is a card with nothing behind it, and its
+        # child redraws the same turn one step later - 21 of those were 42 cards the
+        # chat does not show, and the depth that made a click land on the first
+        # message (post-mortem 20). skip those turns and re-parent across them; the
+        # history and the tree are untouched, this is a display decision only.
+        hidden = {turn["id"] for turn in turns
+                  if turn["nodes"] and all(internal(node_id) for node_id in turn["nodes"])}
+
+        def visible_turn(node_id):
+            """the nearest card that *renders*, walking up past the hidden ones"""
+            guard = 0
+            while node_id and node_id in tree.nodes and guard < 5000:
+                turn_id = turn_of_node.get(node_id)
+                if turn_id and turn_id not in hidden:
+                    return turn_id
+                node_id = (tree.nodes.get(node_id) or {}).get("parent")
+                guard += 1
+            return None
+
         cards = []
         for turn in turns:
+            if turn["id"] in hidden:
+                continue
+
             group = turn["nodes"]
             start = turn["id"]
             start_message = message_of(start)
@@ -602,7 +629,7 @@ class ChatPro(core.module.Module):
             parent_node = (tree.nodes.get(start) or {}).get("parent")
             cards.append({
                 "id": start,
-                "parent": turn_of_node.get(parent_node) if parent_node else None,
+                "parent": visible_turn(parent_node) if parent_node else None,
                 "seq": (tree.nodes.get(start) or {}).get("seq", 0),
                 "role": start_message.get("role") or "?",
                 "preview": preview(answer, 220),
@@ -625,7 +652,7 @@ class ChatPro(core.module.Module):
         active_turns = []
         for node_id in tree.active:
             turn_id = turn_of_node.get(node_id)
-            if turn_id and turn_id not in active_turns:
+            if turn_id and turn_id not in hidden and turn_id not in active_turns:
                 active_turns.append(turn_id)
 
         return {
