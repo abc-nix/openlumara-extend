@@ -71,8 +71,16 @@ class ChatNav(core.module.Module):
             "max": 120,
             "step": 1
         },
+        "search_all_words_by_default": {
+            "description": "Start with the panel's AND switch on (all words): every word of a query must appear in the message, not necessarily together (one hit per message, placed where they sit closest). Off by default, so a query is matched as the whole string you typed, the way the browser's find works - which is also what the floating Ctrl+F bar searches, since both views share one engine. The switch is remembered per browser once you touch it.",
+            "default": False
+        },
+        "ignore_markdown_by_default": {
+            "description": "Start with the panel's MD switch on: the emphasis markers markdown renders away (* and _, bold and italics) count as nothing, so a phrase can run across them the way the rendered page reads, and snippets show the text without the markers. Off: the raw markdown is searched, markers included, which is what you need to search for a literal * or a pair of underscores around a phrase. Underscores inside a word (chat_nav) are never treated as markers. Remembered per browser once you touch the switch.",
+            "default": True
+        },
         "search_per_occurrence": {
-            "description": "Navigate every occurrence of a word instead of one hit per message, landing on that occurrence and painting it apart from the other matches. Applies to your messages and the assistant's final answers; reasoning and tool hits stay one per block, because their rendered text cannot be addressed per occurrence.",
+            "description": "Navigate every occurrence of the typed string instead of one hit per message, landing on that occurrence and painting it apart from the other matches. Applies to your messages and the assistant's final answers; reasoning and tool hits stay one per block, because their rendered text cannot be addressed per occurrence. With the AND switch on, a hit is always the message itself, placed on the words' tightest run.",
             "default": True
         },
         "take_over_ctrl_f": {

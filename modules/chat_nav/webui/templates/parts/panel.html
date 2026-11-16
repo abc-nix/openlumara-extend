@@ -27,16 +27,30 @@
         </button>
     </div>
 
-    {# kind filters: what counts as a match. counts appear once a query is typed #}
-    <div class="cn-chips">
-        <template x-for="chip in $store.chatNav.chips" :key="chip.kind">
-            <button type="button" class="cn-chip" :class="{ 'on': $store.chatNav.filters[chip.kind] }"
-                :title="chip.hint" @click="$store.chatNav.toggle(chip.kind)">
-                <span x-text="chip.label"></span>
-                <span class="cn-count" x-show="$store.chatNav.counts[chip.kind]"
-                    x-text="$store.chatNav.counts[chip.kind]"></span>
-            </button>
-        </template>
+    {# what counts as a match: the kind chips wrap on the left, and the word-mode
+       switch sits on the right edge, past a separator - it narrows the query
+       itself, so it is not a sixth kind #}
+    <div class="cn-filters">
+        <div class="cn-chips">
+            <template x-for="chip in $store.chatNav.chips" :key="chip.kind">
+                <button type="button" class="cn-chip" :class="{ 'on': $store.chatNav.filters[chip.kind] }"
+                    :title="chip.hint" @click="$store.chatNav.toggle(chip.kind)">
+                    <span x-text="chip.label"></span>
+                    <span class="cn-count" x-show="$store.chatNav.counts[chip.kind]"
+                        x-text="$store.chatNav.counts[chip.kind]"></span>
+                </button>
+            </template>
+        </div>
+
+        <div class="cn-wordmode">
+            <span class="cn-filters-sep"></span>
+            <button type="button" class="cn-chip cn-and" :class="{ 'on': $store.chatNav.markdownMode }"
+                title="MD: ignore the emphasis markers markdown renders away, so **bold** and _italic_ count as plain text and a query can span them. Off: the raw text is searched, markers included."
+                @click="$store.chatNav.toggleMarkdown()">MD</button>
+            <button type="button" class="cn-chip cn-and" :class="{ 'on': $store.chatNav.andMode }"
+                title="AND / all words: every word you type must appear in the message, not necessarily together. Off (default): the whole query is matched as typed, like the browser's find."
+                @click="$store.chatNav.toggleAnd()">AND</button>
+        </div>
     </div>
 
     {# results status: match count, hidden matches, prev/next #}

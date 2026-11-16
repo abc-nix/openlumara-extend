@@ -99,6 +99,41 @@
     color: var(--text-primary);
 }
 
+/* --- filters: kind chips + the word-mode switch --- */
+
+/* one row, two jobs: the chips wrap on the left, the two word-mode switches
+   (MD, AND) keep their place on the right edge, past a separator, so they never
+   read as extra kinds. the row is 242px wide in the sidebar, so the chips wrap
+   under them */
+.cn-filters {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.cn-filters .cn-chips {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.cn-wordmode {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+.cn-filters-sep {
+    width: 1px;
+    height: 12px;
+    background: var(--border-color);
+}
+
+.cn-and {
+    white-space: nowrap;
+}
+
 /* --- kind chips --- */
 
 .cn-chips {

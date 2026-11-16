@@ -13,7 +13,14 @@
 
    block  = one user message or one whole assistant chain (a turn).
    record = a piece of a block tagged with a kind; the chips pick which kinds
-   count as a match. */
+   count as a match.
+
+   a query is matched as the string you typed, one hit per occurrence, the way
+   the browser's own find works. two word-mode switches sit beside the kind
+   chips: "AND" loosens the query to all-words - every word must appear in the
+   message, and the hit is then the message, placed on the tightest run of text
+   holding them all - and "MD" ignores the emphasis markers markdown renders
+   away, so a phrase can span **bold** or _italics_ the way the page reads. */
 
 const CHAT_NAV_CHIPS = [
     { kind: "user", label: "You", hint: "your own messages" },
@@ -86,6 +93,104 @@ function asText(value) {
 function condense(text, limit = 90) {
     const flat = text.replace(/\s+/g, " ").trim();
     return flat.length > limit ? flat.slice(0, limit - 1) + "…" : flat;
+}
+
+// bold and italic markers are rendered away, so they must not stand between you
+// and a match: * is always dropped, _ only when it is a marker - between two
+// letters or digits it belongs to the word (chat_nav, user_modules).
+function stripEmphasis(text) {
+    if (!text.includes("*") && !text.includes("_")) return text;
+
+    const word = /[\p{L}\p{N}]/u;
+    let out = "";
+
+    for (let i = 0; i < text.length; i++) {
+        const character = text[i];
+
+        if (character === "*") continue;
+        if (character === "_") {
+            const before = text[i - 1] || "";
+            const after = text[i + 1] || "";
+            if (!(word.test(before) && word.test(after))) continue;
+        }
+
+        out += character;
+    }
+
+    return out;
+}
+
+// the text a record is searched in: lowercased, with every run of whitespace
+// collapsed to one space - what the rendered page shows, and therefore what the
+// browser's own find matches. `plain` (the MD switch) also drops the emphasis
+// markers markdown renders away. every position used for a hit (snippet centre,
+// occurrence order) is a position in that copy, never in the raw text; both
+// variants are cached because the switch can be flipped while a chat is open.
+function recordFlat(record, plain) {
+    const key = plain ? "flatPlain" : "flat";
+
+    if (record[key] === undefined) {
+        const text = plain ? stripEmphasis(record.text) : record.text;
+        record[key] = text.replace(/\s+/g, " ").toLowerCase();
+    }
+
+    return record[key];
+}
+
+// the same rules applied to what you type, so the query and the copy it is
+// matched against always speak the same language
+function normalizeQuery(text, plain) {
+    const value = plain ? stripEmphasis(text) : text;
+    return value.replace(/\s+/g, " ").toLowerCase();
+}
+
+// "all words" mode: every occurrence of every term, in text order. that is the
+// same order collectRanges() reports for the rendered message, so a hit's
+// occurrence index can address one specific match when the chat is painted.
+function termOffsets(flat, terms) {
+    const marks = [];
+
+    for (const term of terms) {
+        let from = 0;
+        while (true) {
+            const at = flat.indexOf(term, from);
+            if (at < 0) break;
+            marks.push({ at, term, span: term.length });
+            from = at + term.length;
+        }
+    }
+
+    return marks.sort((a, b) => a.at - b.at);
+}
+
+// in "all words" mode a hit is the message itself, so it is placed on the
+// tightest run of text that holds every term - what a reader calls "where the
+// match is". returns {span, left, right, at} over marks (at is the run's start,
+// left/right index the marks it covers), or null if a term is missing.
+function tightestWindow(marks, terms) {
+    const counts = new Map();
+    let have = 0;
+    let best = null;
+
+    for (let right = 0, left = 0; right < marks.length; right++) {
+        const term = marks[right].term;
+        const seen = (counts.get(term) || 0) + 1;
+        counts.set(term, seen);
+        if (seen === 1) have += 1;
+
+        while (have === terms.length) {
+            const span = marks[right].at + marks[right].span - marks[left].at;
+            if (!best || span < best.span) best = { span, left, right, at: marks[left].at };
+
+            const leftTerm = marks[left].term;
+            const rest = counts.get(leftTerm) - 1;
+            counts.set(leftTerm, rest);
+            if (rest === 0) have -= 1;
+            left += 1;
+        }
+    }
+
+    return best;
 }
 
 function turnInfo(turn, toolLimit) {
@@ -161,12 +266,16 @@ function turnInfo(turn, toolLimit) {
     let chars = 0;
     for (const record of records) chars += record.text.length;
 
+    // the outline preview is display only, so it never shows the emphasis
+    // markers whatever the MD switch says
+    const previewText = preview || (records.length ? records[0].text : "") || "empty block";
+
     const info = {
         toolLimit,
         records,
         chars,
         toolSteps,
-        preview: condense(preview || (records.length ? records[0].text : "") || "empty block")
+        preview: condense(stripEmphasis(previewText))
     };
 
     if (turn.live !== true) _turnCache.set(turn, info);
@@ -184,15 +293,16 @@ function escapeRegExp(text) {
 }
 
 // a hit carries its block (jump target), its message anchor and which
-// occurrence of the term it is, a highlighted snippet and the terms that
-// produced it, so the chat can be highlighted after the jump too
-function makeHit(block, record, terms, position, sequence, occurrence) {
-    const text = record.text;
+// occurrence it is, a highlighted snippet and the needles that produced it, so
+// the chat can be highlighted after the jump too. span is how many occurrences
+// the match covers: 1 for the typed string, more for an "all words" window.
+function makeHit(block, record, needles, position, sequence, occurrence, span, plain) {
+    const text = recordFlat(record, plain);
     const start = Math.max(0, position - 45);
     const end = Math.min(text.length, position + 120);
 
-    let html = escapeHtml(text.slice(start, end).replace(/\s+/g, " "));
-    const patterns = terms.map(term => escapeRegExp(escapeHtml(term))).filter(Boolean);
+    let html = escapeHtml(text.slice(start, end));
+    const patterns = needles.map(term => escapeRegExp(escapeHtml(term))).filter(Boolean);
     if (patterns.length) {
         html = html.replace(new RegExp("(" + patterns.join("|") + ")", "gi"), "<mark>$1</mark>");
     }
@@ -207,44 +317,127 @@ function makeHit(block, record, terms, position, sequence, occurrence) {
         kind: record.kind in RECORD_LABEL ? RECORD_LABEL[record.kind] : record.kind,
         msgIndex: record.msgIndex,
         occurrence,
-        terms,
+        span: Math.max(1, span || 1),
+        terms: needles,
         html
     };
 }
 
-// every occurrence of the needles inside the given elements, in document
-// order - the same order the index counted them in
-function collectRanges(roots, needles, limit) {
-    const ranges = [];
+// collapse every run of whitespace to one space, keeping the original index of
+// every kept character, so a match found in the collapsed text can be turned
+// back into an offset on the text it came from.
+function collapseWithMap(text) {
+    const flat = [];
+    const map = [];
+    let spaceAt = -1;
+
+    for (let i = 0; i < text.length; i++) {
+        const character = text[i];
+
+        if (/\s/.test(character)) {
+            if (spaceAt < 0) spaceAt = i;
+            continue;
+        }
+
+        if (spaceAt >= 0 && flat.length) {
+            map.push(spaceAt);
+            flat.push(" ");
+        }
+        spaceAt = -1;
+
+        map.push(i);
+        flat.push(character);
+    }
+
+    return { flat: flat.join(""), map };
+}
+
+// every occurrence of the needles inside the given elements, in document order
+// - the same order the index counted them in (ties keep the needles' order),
+// which is what lets a hit's occurrence index address one specific range.
+//
+// the elements' text nodes are concatenated first and their whitespace
+// collapsed across node edges, so the result lines up with the search copies
+// and a match may cross an inline element (`**bold**`, a link, italics)
+// exactly the way the rendered text reads. crossNode=false stops every match
+// at a node boundary: that is the mode where the index still holds the markers,
+// so a match spanning them was never counted and painting it would shift every
+// later occurrence in the message.
+function collectRanges(roots, needles, limit, crossNode) {
+    const nodes = [];
+    let raw = "";
 
     for (const root of roots) {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
 
-        while (ranges.length < limit && walker.nextNode()) {
+        while (walker.nextNode()) {
             const node = walker.currentNode;
             const text = node.nodeValue;
-            if (!text || text.length < 2) continue;
+            if (!text) continue;
 
-            const lower = text.toLowerCase();
-            for (const needle of needles) {
-                let from = 0;
-
-                while (ranges.length < limit) {
-                    const at = lower.indexOf(needle, from);
-                    if (at < 0) break;
-
-                    const range = new Range();
-                    range.setStart(node, at);
-                    range.setEnd(node, Math.min(node.length, at + needle.length));
-                    ranges.push(range);
-
-                    from = at + needle.length;
-                }
-            }
+            const lowered = text.toLowerCase();
+            nodes.push({ node, from: raw.length });
+            raw += lowered;
         }
     }
 
-    return ranges;
+    if (!raw || !nodes.length) return [];
+
+    const flat = collapseWithMap(raw);
+    if (!flat.flat) return [];
+
+    // flat offset -> the text node that holds it, and where inside that node
+    const locate = offset => {
+        let low = 0;
+        let high = nodes.length - 1;
+
+        while (low < high) {
+            const middle = (low + high + 1) >> 1;
+            if (nodes[middle].from <= offset) low = middle;
+            else high = middle - 1;
+        }
+
+        return { node: nodes[low].node, offset: offset - nodes[low].from };
+    };
+
+    const found = [];
+
+    for (const needle of needles) {
+        if (!needle) continue;
+
+        let from = 0;
+
+        while (found.length < limit) {
+            const at = flat.flat.indexOf(needle, from);
+            if (at < 0) break;
+
+            const start = flat.map[at];
+            const last = flat.map[at + needle.length - 1];
+
+            if (start === undefined || last === undefined || last < start) {
+                from = at + needle.length;
+                continue;
+            }
+
+            const head = locate(start);
+            const tail = locate(last);
+
+            if (!crossNode && head.node !== tail.node) {
+                from = at + needle.length;
+                continue;
+            }
+
+            const range = new Range();
+            range.setStart(head.node, head.offset);
+            range.setEnd(tail.node, tail.offset + 1);
+            found.push({ at, range });
+
+            from = at + needle.length;
+        }
+    }
+
+    found.sort((a, b) => a.at - b.at);
+    return found.map(item => item.range);
 }
 
 function messagesContainer() {
@@ -264,6 +457,12 @@ const CHAT_NAV_STORE = {
 
     query: "",
     filters: { user: true, answer: true, process: false, tools: false, commands: false },
+    // "all words" is a filter, not a kind: a query searches for the string you
+    // typed (the browser's find), and this switch loosens that to AND instead,
+    // while the second switch decides whether the emphasis markers markdown
+    // renders away (bold, italics) stand between you and a match
+    andMode: false,
+    markdownMode: true,
     chips: CHAT_NAV_CHIPS,
     counts: {},
     results: [],
@@ -306,6 +505,14 @@ const CHAT_NAV_STORE = {
             const key = "default" + chip.kind.charAt(0).toUpperCase() + chip.kind.slice(1);
             this.filters[chip.kind] = saved === null ? data[key] === "1" : saved === "1";
         }
+
+        // the two word-mode switches, remembered like the chips; the module
+        // settings decide their starting state
+        const savedAnd = localStorage.getItem("chatNavAnd");
+        this.andMode = savedAnd === null ? data.defaultAnd === "1" : savedAnd === "1";
+
+        const savedMarkdown = localStorage.getItem("chatNavMarkdown");
+        this.markdownMode = savedMarkdown === null ? data.defaultMarkdown === "1" : savedMarkdown === "1";
     },
 
     // rebuilds the index whenever the chat or its turn list actually changes.
@@ -406,6 +613,22 @@ const CHAT_NAV_STORE = {
         if (_view.query) this.runSearch();
     },
 
+    // the panel's own switch: the whole query is matched as typed, or every
+    // word in it must be present somewhere in the message
+    toggleAnd() {
+        this.andMode = !this.andMode;
+        localStorage.setItem("chatNavAnd", this.andMode ? "1" : "0");
+        if (_view.query) this.runSearch();
+    },
+
+    // whether the markers that markdown renders away are searched as if they
+    // were not there; off means the raw text, markers included
+    toggleMarkdown() {
+        this.markdownMode = !this.markdownMode;
+        localStorage.setItem("chatNavMarkdown", this.markdownMode ? "1" : "0");
+        if (_view.query) this.runSearch();
+    },
+
     clear() {
         this.setQuery("", false);
         this.runSearch();
@@ -416,7 +639,17 @@ const CHAT_NAV_STORE = {
         const follow = this._follow;
         this._follow = false;
 
-        if (!query) {
+        // the query is searched as the string you typed, like the browser's
+        // find: runs of whitespace count as one space because that is what the
+        // rendered page shows, and with the MD switch on the emphasis markers
+        // that markdown renders away count as nothing. AND mode splits it into
+        // terms that must all be present instead, and then a hit is the message.
+        const plain = this.markdownMode;
+        const needle = normalizeQuery(query, plain);
+        const andMode = this.andMode;
+
+        // empty, or nothing left after the markers were dropped
+        if (!needle) {
             this.results = [];
             this.counts = {};
             this.activeHit = -1;
@@ -427,8 +660,8 @@ const CHAT_NAV_STORE = {
             return;
         }
 
-        const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-        const anchor = terms[0];
+        const needles = andMode ? [...new Set(needle.split(" "))].filter(Boolean) : [needle];
+
         const perOccurrence = this.perOccurrence;
         const enabled = new Set(CHAT_NAV_CHIPS.filter(chip => this.filters[chip.kind]).map(chip => chip.kind));
 
@@ -441,66 +674,55 @@ const CHAT_NAV_STORE = {
 
         for (const block of _index.blocks) {
             for (const record of block.records) {
-                if (record.lower === undefined) record.lower = record.text.toLowerCase();
+                const flat = recordFlat(record, plain);
 
-                // every term must be present (same AND semantics as core.search)
-                let position = -1;
-                let matchedAll = true;
+                // where the match is, in this record's own text: `at` places the
+                // snippet, `occurrence` picks the painted range, `span` says how
+                // many occurrences the match covers
+                const matches = [];
 
-                for (const term of terms) {
-                    const found = record.lower.indexOf(term);
-                    if (found < 0) {
-                        matchedAll = false;
-                        break;
+                if (andMode) {
+                    // every term must be present, not necessarily together; the
+                    // hit lands on the tightest run that holds all of them
+                    const window_ = tightestWindow(termOffsets(flat, needles), needles);
+                    if (!window_) continue;
+
+                    matches.push({
+                        at: window_.at,
+                        occurrence: window_.left,
+                        span: window_.right - window_.left + 1
+                    });
+                } else {
+                    let from = 0;
+                    while (true) {
+                        const at = flat.indexOf(needle, from);
+                        if (at < 0) break;
+                        matches.push({ at, occurrence: matches.length, span: 1 });
+                        from = at + needle.length;
                     }
-                    if (position < 0 || found < position) position = found;
+                    if (!matches.length) continue;
                 }
-                if (!matchedAll) continue;
+
+                // records the DOM cannot address per message keep one hit, and
+                // so does the whole search when per-occurrence is off
+                if (!andMode && (!perOccurrence || record.msgIndex === undefined)) matches.length = 1;
 
                 const chip = RECORD_CHIP[record.kind] || record.kind;
                 const isEnabled = enabled.has(chip);
 
-                // occurrences are enumerated for the first term, and only for
-                // records the DOM can address per message: everywhere else
-                // there is no way to scroll to one specific occurrence, so a
-                // record stays a single hit
-                if (!perOccurrence || record.msgIndex === undefined) {
-                    total += 1;
-                    counts[chip] = (counts[chip] || 0) + 1;
+                total += matches.length;
+                counts[chip] = (counts[chip] || 0) + matches.length;
 
-                    if (!isEnabled) {
-                        hidden += 1;
-                        continue;
-                    }
-
-                    shown += 1;
-                    if (hits.length < this.maxResults) {
-                        hits.push(makeHit(block, record, terms, position, sequence++, 0));
-                    }
+                if (!isEnabled) {
+                    hidden += matches.length;
                     continue;
                 }
 
-                let from = 0;
-                let occurrence = 0;
+                shown += matches.length;
 
-                while (true) {
-                    const at = record.lower.indexOf(anchor, from);
-                    if (at < 0) break;
-
-                    total += 1;
-                    counts[chip] = (counts[chip] || 0) + 1;
-
-                    if (isEnabled) {
-                        shown += 1;
-                        if (hits.length < this.maxResults) {
-                            hits.push(makeHit(block, record, terms, at, sequence++, occurrence));
-                        }
-                    } else {
-                        hidden += 1;
-                    }
-
-                    occurrence += 1;
-                    from = at + anchor.length;
+                for (const match of matches) {
+                    if (hits.length >= this.maxResults) break;
+                    hits.push(makeHit(block, record, needles, match.at, sequence++, match.occurrence, match.span, plain));
                 }
             }
         }
@@ -594,34 +816,45 @@ const CHAT_NAV_STORE = {
         if (!this.results.length) return;
 
         const active = this.activeHit >= 0 ? this.results[this.activeHit] : null;
-        const terms = (active || this.results[0]).terms || [];
-        const needle = terms[0] ? terms[0].toLowerCase() : "";
-        if (!needle) return;
+        // every hit of one search carries the same needles: the typed string,
+        // or the words of an AND query. matches may cross an inline element
+        // only when the index dropped the markers too, so painting and counts
+        // always describe the same text.
+        const needles = (active || this.results[0]).terms || [];
+        if (!needles.length) return;
+
+        const crossNode = this.markdownMode;
 
         const others = [];
         let activeRange = null;
         let scrollTarget = null;
 
         // 1) message-anchored hits: occurrences are in document order, so a
-        // hit's occurrence index picks its own range
+        // hit's occurrence index picks its own range. a match covers `span`
+        // consecutive occurrences (1 for the typed string, the words of the
+        // tightest window for an "all words" query)
         for (const [msgIndex, hits] of _groups.messages) {
             const anchor = document.querySelector('#messages [data-cn-msg="' + msgIndex + '"]');
             if (!anchor || !anchor.parentElement) continue;
 
             const bodies = anchor.parentElement.querySelectorAll("[x-md]");
             const roots = bodies.length ? Array.from(bodies) : [anchor.parentElement];
-            const ranges = collectRanges(roots, [needle], 120);
+            const ranges = collectRanges(roots, needles, 400, crossNode);
             if (!ranges.length) continue;
 
             for (const hit of hits) {
-                const range = ranges[hit.occurrence];
-                if (!range) continue;
+                const first = hit.occurrence || 0;
+                const span = Math.max(1, hit.span || 1);
 
-                if (hit === active) {
-                    activeRange = range;
-                    if (scroll) scrollTarget = range;
-                } else if (others.length < 400) {
-                    others.push(range);
+                for (let index = first; index < first + span && index < ranges.length; index++) {
+                    const range = ranges[index];
+
+                    if (hit === active && !activeRange) {
+                        activeRange = range;
+                        if (scroll) scrollTarget = range;
+                        continue;
+                    }
+                    if (others.length < 400) others.push(range);
                 }
             }
         }
@@ -631,7 +864,7 @@ const CHAT_NAV_STORE = {
         if (active && active.msgIndex === undefined) {
             const element = document.querySelector('#messages [data-turn-index="' + active.block + '"]');
             if (element) {
-                const blockRanges = collectRanges([element], terms.map(term => term.toLowerCase()), 40);
+                const blockRanges = collectRanges([element], needles, 40, crossNode);
 
                 for (const range of blockRanges) {
                     if (others.length >= 400) break;

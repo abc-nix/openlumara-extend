@@ -92,18 +92,34 @@ None.
   answers by default, plus reasoning, tool calls/results and command output if
   you turn them on. Only the enabled kinds are counted, so a search that only
   hits tool output reports no matches instead of noise.
-- **Per occurrence**: hits step through each occurrence of a word; the current
-  one is painted in the accent colour and the rest grey, and matches in
+- **The query is matched as the string you typed**, the way the browser's own
+  find works: runs of whitespace count as one space, because that is what the
+  rendered page shows. Two **word-mode switches** sit on the right edge of the
+  chip row, past a separator (they narrow the query, so they are not extra
+  kinds), and both are remembered per browser:
+  - **MD** (on by default) ignores the emphasis markers markdown renders away:
+    `*` always, `_` only when it is a marker rather than part of a word
+    (`chat_nav` keeps its underscore). A phrase can then run across
+    `**bold**`/`_italics_` the way the page reads, and snippets show the text
+    without the markers. Off, the raw markdown is searched, markers included.
+  - **AND** (off by default) loosens the query to all words: every word must
+    appear in the message, not necessarily together, and a hit is then the
+    message itself, placed on the tightest run of text holding all the words.
+  The floating find bar follows both switches, because both views share one
+  engine.
+- **Per occurrence**: hits step through each occurrence of the query; the
+  current one is painted in the accent colour and the rest grey, and matches in
   messages that render later light up as you scroll to them.
 - Jumps reuse the webui's own lazy mounting, centre on the matched text and
   flash the block.
 
 **Settings**
 
-`search_per_occurrence` (one hit per occurrence), `highlight_seconds` (`0` keeps
-the highlight until the search changes), `take_over_ctrl_f` (Ctrl+F opens the
-find bar; the sidebar and modals keep the native find) and the per-kind search
-defaults.
+`search_all_words_by_default` (start with AND on), `ignore_markdown_by_default`
+(start with MD on), `search_per_occurrence` (one hit per occurrence of the
+query), `highlight_seconds` (`0` keeps the highlight until the search changes),
+`take_over_ctrl_f` (Ctrl+F opens the find bar; the sidebar and modals keep the
+native find) and the per-kind search defaults.
 
 ### docprocess
 
