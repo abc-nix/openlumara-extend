@@ -119,6 +119,10 @@ def _short_import(source: str):
     return text.split(" as ", 1)[0].strip()
 
 
+# prose formats whose outline is a heading map instead of a symbol map
+_PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".rst")
+
+
 class Editor(EditorRoutes, PathResolver, core.module.Module):
     """Browse, preview, search and manage your workspace folders from the webui sidebar, with one consistent AI file-tool family. Replaces foldertree, file_manager and media_reader."""
 
@@ -300,7 +304,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 for r in roots:
                     lines.append(f"- {r.name or str(r)} ({r})")
                 lines.append("file paths are relative to the workspace root; workspace is the name above, its path, or its 0-based index, or '<workspace>/<subfolder>' to scope into a subfolder, e.g. '" + (roots[0].name or str(roots[0])) + "/some/subdir' (see editor_workspaces)")
-                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file")
+                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file (markdown/rst files get a heading map instead)")
                 if self.config.get("read_outside_sandbox"):
                     lines.append("read-only tools may also open absolute paths outside these workspaces (read_outside_sandbox)")
                 if not self.config.get("sandboxed"):
@@ -521,7 +525,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def outline(self, workspace: str, path: str):
-        """lists every function and class in a source file with its line range and signature - map a file before reading it"""
+        """lists every function and class in a source file with its line range and signature, or a markdown/rst file's headings - map a file before reading it"""
         try:
             target = self._resolve_path(workspace, path, read_only=True)
         except ValueError as e:
@@ -549,6 +553,17 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             return self.result("file is not valid utf-8 text - use info for metadata", False)
         except Exception as e:
             return self.result(str(e), False)
+
+        # prose first: headings need no parser, so this works even when
+        # tree-sitter is missing or the file's grammar has no definitions
+        if target.suffix.lower() in _PROSE_SUFFIXES:
+            sections = self._render_sections(code, rst=target.suffix.lower() == ".rst")
+            if not sections:
+                return self.result({
+                    "error": "no headings found",
+                    "note": "this file has no markdown/rst headings to map - use read",
+                }, False)
+            return self.result("\n".join(sections))
 
         if not HAVE_TSLP:
             return self.result({
@@ -702,6 +717,39 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         if imports:
             lines.append("imports: " + " | ".join(imports))
         return "\n".join(lines)
+
+    def _render_sections(self, code, rst=False):
+        """heading map for prose: one line per heading with its line number,
+        indented by level. no parser needed.
+
+        markdown uses ATX headings (#..###### - "#tag" without a space is not
+        one), rst uses underline headings (the next line repeats one
+        punctuation char), so the underline rule is only applied to rst -
+        otherwise a markdown frontmatter "---" would read as a heading.
+        fenced code blocks are skipped, so a # inside a sample is not a heading.
+        """
+        lines = code.split("\n")
+        out = []
+        in_fence = False
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_fence = not in_fence
+                continue
+            if in_fence or not stripped:
+                continue
+            if stripped.startswith("#"):
+                level = len(stripped) - len(stripped.lstrip("#"))
+                if 1 <= level <= 6 and (len(stripped) == level or stripped[level] == " "):
+                    out.append(f"{'    ' * (level - 1)}ln:{i + 1} {stripped}")
+                    continue
+            if rst and i + 1 < len(lines):
+                under = lines[i + 1].strip()
+                if (len(under) >= 3 and len(set(under)) == 1
+                        and under[0] in "=-~^*+\"'"
+                        and len(under) >= len(stripped)):
+                    out.append(f"ln:{i + 1} {stripped}")
+        return out
 
     # ----------------------
     # tools: writing
