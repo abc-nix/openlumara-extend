@@ -1,0 +1,36 @@
+/* -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-27) harness:openlumara
+   editor module view styles: the read_media tool card image. the tool result
+   only carries metadata, so the picture is re-fetched from /api/ext/editor/
+   media and shrunk by css - the src is the real image, so right-click ->
+   open image in new tab shows it at native size. scoped under the tool card
+   like the other editor views (see shared.css). */
+
+.tool-call-card {
+    .media-attach {
+        display: flex;
+        flex-direction: column;
+        /* a flex column stretches its children to the card width, which makes
+           the thumbnail full-bleed and (with max-height) squashed - anchor it */
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .media-attach-thumb {
+        display: block;
+        /* fixed height + auto width keeps the aspect ratio and a thumbnail
+           footprint; object-fit contains panoramas clamped by max-width */
+        height: 160px;
+        width: auto;
+        max-width: 100%;
+        object-fit: contain;
+        border-radius: var(--radius-sm, 6px);
+        cursor: zoom-in;
+    }
+
+    .media-attach-path {
+        font-family: var(--code-font);
+        font-size: 0.72rem;
+        color: var(--text-muted, #888);
+        word-break: break-all;
+    }
+}

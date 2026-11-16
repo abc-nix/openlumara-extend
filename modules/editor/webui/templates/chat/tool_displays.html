@@ -1,0 +1,128 @@
+<!-- -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-25) harness:openlumara
+   editor module tool views: read/write/append/create (code block), edit
+   (diff), grep (grouped matches), path (glob list + move/copy/delete/
+   mkdir one-liner) and media (read_media image, fetched from the module
+   route). fills the "tool_views" slot of the webui's
+   templates/chat/tool_displays.html via the extension system: the core
+   template calls extension_slot("tool_views"), which renders this macro
+   because the file mirrors the caller's relative path (chat/tool_displays.html).
+   markup is pure Alpine: `tool` + `cacheKey` come from the card's x-data
+   scope (chat/toolcalls.html), not from jinja. helpers live in
+   assets/js/tool_view_helpers.js (editor-prefixed: coder may be enabled at
+   the same time and its own generic globals already exist), styling in
+   assets/css/custom_tool_views/. -->
+{% macro tool_views() %}
+
+<template x-if="toolDisplayView(tool) === 'editor-code'"
+          x-data="{ get args() { return toolArgs(tool, cacheKey) },
+                    get response() { return toolResponse(tool) },
+                    get code() {
+                        if (this.response?.status === 'error') return '';
+                        const c = this.response?.content;
+                        if (c && typeof c === 'object') return c.content ?? '';
+                        return this.args.content ?? '';
+                    },
+                    get html() { return codeLinesHtml(this.code, editorLangForPath(this.args.path), this.args.line_start, cacheKey) } }">
+    <div>
+        <div class="file-read-box hljs" x-show="html" x-auto-scroll x-fade-html="html"></div>
+        <div class="grep-note" x-show="response?.content?.truncation_note" x-text="response?.content?.truncation_note ?? ''"></div>
+        <div class="grep-note" x-show="response?.content?.char_truncation_note" x-text="response?.content?.char_truncation_note ?? ''"></div>
+        <div class="display-footer" x-show="args.path" x-text="args.path"></div>
+    </div>
+</template>
+
+<template x-if="toolDisplayView(tool) === 'editor-edit'"
+          x-data="{ get args() { return toolArgs(tool, cacheKey) },
+                    get html() { return editorDiffHtml(this.args.original_code, this.args.replacement_code, editorLangForPath(this.args.path), cacheKey) },
+                    get sideHtml() { return editorDiffSideHtml(this.args.original_code, this.args.replacement_code, editorLangForPath(this.args.path), cacheKey) } }">
+    <div class="diff-container">
+        <div class="tool-display hljs diff-unified" x-show="html" x-auto-scroll x-fade-html="html"></div>
+        <div class="diff-side hljs" x-show="sideHtml" x-auto-scroll x-fade-html="sideHtml"></div>
+        <div class="display-footer" x-show="args.path" x-text="args.path"></div>
+    </div>
+</template>
+
+<template x-if="toolDisplayView(tool) === 'editor-grep'"
+          x-data="{ get args() { return toolArgs(tool, cacheKey) },
+                    get response() { return toolResponse(tool) },
+                    get groups() { return editorGrepGroups(this.response, this.args) } }">
+    <div>
+        <div class="grep-running" x-show="!response">
+            <span class="grep-running-label">searching</span>
+            <span class="grep-running-pattern" x-show="args.regex_pattern" x-text="args.regex_pattern"></span>
+            <span class="grep-running-label" x-show="args.regex_pattern && (args.workspace || args.sub_path)">in</span>
+            <span class="grep-running-pattern" x-show="args.workspace || args.sub_path"
+                  x-text="(args.workspace ? args.workspace + ': ' : '') + (args.sub_path ?? '')"></span>
+        </div>
+        <div class="grep-results" x-show="groups.length">
+            <template x-for="g in groups">
+                <div class="grep-file">
+                    <div class="grep-file-name" x-text="g.file"></div>
+                    <div class="grep-box">
+                        <template x-for="row in editorGrepRows(g.matches)">
+                            <div class="grep-line" :class="'grep-' + row.kind">
+                                <span class="grep-num" x-text="row.num"></span>
+                                <span class="grep-text" x-text="row.text"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <div class="grep-note" x-show="response?.content?.note" x-text="response?.content?.note ?? ''"></div>
+    </div>
+</template>
+
+<template x-if="toolDisplayView(tool) === 'editor-media'"
+          x-data="{ src: '', loaded: '', err: '',
+                    load() {
+                        const r = toolResponse(tool)?.content;
+                        // only fetch when an image was actually attached: videos,
+                        // non-media files and oversize/attach=false results carry a note
+                        if (!r?.path || r.note || !String(r.mime_type ?? '').startsWith('image/')) return;
+                        const key = r.path + ':' + r.size_bytes;
+                        if (key === this.loaded) return;
+                        this.loaded = key;
+                        this.err = '';
+                        const a = toolArgs(tool, cacheKey) ?? {};
+                        const qs = new URLSearchParams({ workspace: a.workspace ?? '', path: r.path });
+                        simpleApiFetch('/api/ext/editor/media?' + qs)
+                            .then(j => { this.src = 'data:' + j.mime + ';base64,' + j.b64; })
+                            .catch(e => {
+                                this.err = (typeof e === 'string' && e) || e?.message
+                                           || 'could not load the image';
+                                this.loaded = '';   // allow a retry on the next effect run
+                            });
+                    } }"
+          x-effect="load()">
+    <div class="media-attach">
+        <template x-if="src">
+            <img class="media-attach-thumb" :src="src" loading="lazy" alt="attached image">
+        </template>
+        <div class="media-attach-path" x-show="toolResponse(tool)?.content?.path"
+             x-text="toolResponse(tool)?.content?.path"></div>
+        <div class="display-error" x-show="err" x-text="err"></div>
+    </div>
+</template>
+
+<template x-if="toolDisplayView(tool) === 'editor-path'"
+          x-data="{ get args() { return toolArgs(tool, cacheKey) },
+                    get response() { return toolResponse(tool) },
+                    get path() { return this.args.path ?? this.args.orig_path ?? this.args.sub_path ?? '' },
+                    get files() { return editorGlobFiles(this.response) } }">
+    <div>
+        <div class="grep-running" x-show="!response">
+            <span class="grep-running-pattern" x-show="path" x-text="path"></span>
+            <span class="grep-running-label" x-show="args.target_path">-&gt;</span>
+            <span class="grep-running-pattern" x-show="args.target_path" x-text="args.target_path"></span>
+        </div>
+        <div class="glob-files" x-show="files.length">
+            <template x-for="f in files">
+                <div class="glob-file" x-text="f"></div>
+            </template>
+        </div>
+        <div class="grep-note" x-show="response?.content?.note" x-text="response?.content?.note ?? ''"></div>
+    </div>
+</template>
+
+{% endmacro %}

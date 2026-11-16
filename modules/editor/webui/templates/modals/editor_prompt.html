@@ -1,0 +1,41 @@
+{# -- AI GENERATED CODE (deepseek-v4-flash) :: 2026-10-16
+   tiny name-prompt modal powering the sidebar context menu: new file /
+   new folder / rename / move. state lives in EDITOR_PANEL.prompt, exposed
+   to this app-root modal via the reactive $store.editorPanel (registered
+   in editor.js on alpine:init) -- plain EDITOR_PANEL references here are
+   NOT reactive outside the panel's x-data scope.
+   Auto-discovered, opened via $store.ui.openModal('editor_prompt'). #}
+<template x-if="$store.ui.currentModal === 'editor_prompt' && $store.editorPanel.prompt.mode" x-cloak>
+    <div class="modal ed-prompt-modal" @keydown.escape.window="$store.editorPanel.closePrompt()">
+        <div class="header">
+            <h2 class="ed-prompt-title" x-text="$store.editorPanel.prompt.title"></h2>
+            <button class="close" @click="$store.editorPanel.closePrompt()" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="ed-prompt-body">
+            <input
+                type="text"
+                x-model="$store.editorPanel.prompt.value"
+                :placeholder="$store.editorPanel.prompt.hint"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Name"
+                @keydown.enter.prevent="$store.editorPanel.submitPrompt()"
+                x-init="$nextTick(() => { $el.focus(); $el.select(); })"
+            >
+
+            <div class="ed-prompt-error" x-show="$store.editorPanel.prompt.error" x-text="$store.editorPanel.prompt.error"></div>
+
+            <div class="ed-prompt-actions">
+                <button type="button" class="ed-action" @click="$store.editorPanel.closePrompt()">cancel</button>
+                <button
+                    type="button"
+                    class="ed-action primary"
+                    :disabled="$store.editorPanel.prompt.submitting"
+                    @click="$store.editorPanel.submitPrompt()"
+                    x-text="$store.editorPanel.prompt.submitting ? 'working..' : 'ok'"
+                ></button>
+            </div>
+        </div>
+    </div>
+</template>

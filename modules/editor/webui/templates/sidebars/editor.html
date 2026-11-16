@@ -1,0 +1,340 @@
+{# -- AI GENERATED CODE (deepseek-v4-flash) :: 2026-10-16
+   editor sidebar tab: workspace picker + lazy file tree + dual search
+   (names / content) + right-click menu + select mode. Logic lives in
+   assets/js/editor.js (global EDITOR_PANEL). Style: foldertree options,
+   coder look. #}
+<!-- x-intersect fires on each tab switch; first load fetches the
+     workspace root, folders load on expand -->
+<div class="editor-panel" :class="{ 'ed-wide': wideScroll }" x-data="EDITOR_PANEL" x-intersect.enter="refresh()">
+
+    <div class="ed-header">
+        <span class="ed-title" :title="workspacePath">Editor</span>
+        <span class="ed-ro-badge" x-show="readOnly" title="the editor module is in read-only mode">read-only</span>
+        <button type="button" class="ed-refresh" title="Reload tree" @click="reload()">
+            {% include 'svg/reload.svg' %}
+        </button>
+    </div>
+
+    {# workspace picker: full-width row, only in picker mode with
+       multiple workspaces #}
+    <select class="ed-ws-select" x-show="!combineTrees && workspaces.length > 1"
+        :value="wsIndex"
+        title="Select workspace"
+        @change="selectWorkspace($event.target.value)">
+        <template x-for="(ws, i) in workspaces" :key="i">
+            <option :value="i" x-text="ws.name"></option>
+        </template>
+    </select>
+
+    {# action bar: one icon button per view option #}
+    <div class="ed-bar">
+        <button type="button" class="ed-tool"
+            :class="{ 'active': showHidden }"
+            :title="showHidden
+                ? 'Hidden files are shown (click to hide them)'
+                : 'Hidden files are hidden (click to show them)'"
+            :aria-pressed="showHidden"
+            @click="setShowHidden(!showHidden)">
+            <span class="ed-tool-icon" x-show="showHidden">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </span>
+            <span class="ed-tool-icon" x-show="!showHidden">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </span>
+        </button>
+
+        <button type="button" class="ed-tool"
+            :class="{ 'active': wideScroll }"
+            :title="wideScroll ? 'Wide mode on \u2014 click to fit names' : 'Wide mode \u2014 names overflow, scroll sideways'"
+            :aria-pressed="wideScroll"
+            @click="setWideScroll(!wideScroll)">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 8 22 12 18 16"/><polyline points="6 8 2 12 6 16"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+        </button>
+
+        {# sort dropdown: popover reusing the shared .category-menu look #}
+        <div class="ed-sort" x-data="{ open: false, top: 0, left: 0 }">
+            <button type="button" class="ed-tool" :title="sortLabel()"
+                @click="
+                    const r = $el.getBoundingClientRect();
+                    top = r.bottom + 4;
+                    left = r.left;
+                    open = !open;
+                ">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
+            </button>
+            <template x-teleport="body">
+                <div class="category-menu ed-sort-menu" x-show="open" x-transition.opacity.duration.120ms
+                    :style="`top: ${top}px; left: ${left}px; width: 150px`"
+                    @click.stop @click.away="open = false"
+                    @keydown.escape.window="open = false">
+                    <template x-for="opt in [{k: 'name', l: 'Name'}, {k: 'modified', l: 'Modified'}, {k: 'size', l: 'Size'}]" :key="opt.k">
+                        <button type="button" class="category-option" @click="setSort(opt.k); open = false">
+                            <span class="cat-icon" x-show="sortKey === opt.k">{% include 'svg/checkmark.svg' %}</span>
+                            <span x-text="opt.l"></span>
+                        </button>
+                    </template>
+                    <div class="category-menu-divider"></div>
+                    <button type="button" class="category-option" @click="toggleSortDir()">
+                        <span class="cat-icon" x-show="sortDir === 'asc'">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M6 11l6-6 6 6"/></svg>
+                        </span>
+                        <span class="cat-icon" x-show="sortDir !== 'asc'">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5M6 13l6 6 6-6"/></svg>
+                        </span>
+                        <span x-text="sortDir === 'asc' ? 'Ascending' : 'Descending'"></span>
+                    </button>
+                </div>
+            </template>
+        </div>
+
+        {# search mode toggle: names (default) or content (coder-style) #}
+        <button type="button" class="ed-tool"
+            :class="{ 'active': searchMode === 'content' }"
+            :title="searchMode === 'content'
+                ? 'Content search on \u2014 click for name search'
+                : 'Name search on \u2014 click for content search'"
+            :aria-pressed="searchMode === 'content'"
+            @click="toggleSearchMode()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+
+        <button type="button" class="ed-tool"
+            :class="{ 'active': searchOpen }"
+            :title="searchOpen ? 'Close search' : 'Search in the workspace'"
+            :aria-pressed="searchOpen"
+            @click="toggleSearch()">
+            {% include 'svg/search.svg' %}
+        </button>
+
+        {# select-mode toggle + selection readout. The caret opens the actions
+           popover. Session-only. #}
+        <div class="ed-sel-group">
+            <button type="button" class="ed-tool ed-sel"
+                :class="{ 'active': selectMode }"
+                :title="selectMode ? 'Select mode on \u2014 click rows to select them (click to leave)' : 'Select mode \u2014 pick files/folders to act on'"
+                :aria-pressed="selectMode"
+                @click="setSelectMode(!selectMode)">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            </button>
+            <template x-if="selectedItems.length > 0">
+                <span class="ed-sel-readout" x-data="{ open: false, top: 0, left: 0 }">
+                    <span class="ed-sel-count" x-text="selectedItems.length"></span>
+                    <span class="ed-sel-note" x-show="selNote" :title="selNote" x-text="selNote"></span>
+                    <button type="button" class="ed-tool ed-caret"
+                        :class="{ 'active': open }"
+                        :title="'Actions for ' + selectedItems.length + ' selected item(s)'"
+                        :aria-pressed="open"
+                        @click="
+                            const r = $el.getBoundingClientRect();
+                            top = r.bottom + 4;
+                            left = Math.max(8, r.right - 200);
+                            open = !open;
+                        ">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    <template x-teleport="body">
+                        <div class="category-menu ed-actions-menu" x-show="open" x-transition.opacity.duration.120ms
+                            :style="`top: ${top}px; left: ${left}px; width: 190px`"
+                            @click.stop @click.away="open = false"
+                            @keydown.escape.window="open = false">
+                            <button type="button" class="category-option"
+                                :disabled="!selAllFiles()"
+                                :title="selAllFiles() ? 'Attach the selected file(s) to the next chat message' : 'Folders cannot be attached \u2014 select files only'"
+                                @click="if (selAllFiles()) { open = false; attachFiles(); }">
+                                <span class="cat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg></span>
+                                <span>Attach</span>
+                            </button>
+                            <button type="button" class="category-option"
+                                :title="'Copy the selected path(s) to the clipboard, one per line'"
+                                @click="open = false; copyPaths();">
+                                <span class="cat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+                                <span>Copy path</span>
+                            </button>
+                            <button type="button" class="category-option"
+                                :disabled="!selSingle()"
+                                :title="selSingle() ? 'Open with the system default app' : 'Select exactly one item'"
+                                @click="if (selSingle()) { open = false; openSelected(); }">
+                                <span class="cat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
+                                <span>Open</span>
+                            </button>
+                            <button type="button" class="category-option"
+                                :disabled="!selSingle()"
+                                :title="selSingle() ? 'Rename this item' : 'Select exactly one item'"
+                                @click="if (selSingle()) { open = false; startRename(); }">
+                                <span class="cat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>
+                                <span>Rename</span>
+                            </button>
+                        </div>
+                    </template>
+                </span>
+            </template>
+        </div>
+    </div>
+
+    {# search row: names mode shows plain input; content mode adds regex toggle #}
+    <template x-if="searchOpen">
+        <div class="ed-search">
+            <input type="text"
+                :placeholder="searchMode === 'content' ? 'search file contents..' : 'search names in the workspace..'"
+                :value="searchQuery"
+                x-init="$nextTick(() => $el.focus())"
+                @keydown.escape="exitSearch()"
+                @input.debounce.400ms="runSearch($event.target.value)">
+            <button type="button" class="ed-search-mode" :class="{ on: contentRegex }"
+                x-show="searchMode === 'content'"
+                title="regex mode" @click="contentRegex = !contentRegex; runSearch(searchQuery)">.*</button>
+            <button type="button" class="ed-tool" title="Clear search"
+                x-show="searchQuery" @click="exitSearch()">
+                {% include 'svg/cross.svg' %}
+            </button>
+        </div>
+    </template>
+
+    <template x-if="workspaceError">
+        <div class="ed-error" x-text="workspaceError"></div>
+    </template>
+
+    <div class="ed-tree">
+        {# x-for needs one root element per iteration, so all conditionals
+           inside the row use x-show, not x-if. #}
+        <template x-for="row in rows" :key="row.key">
+            <div class="ed-row"
+                :class="{ 'dir': row.node.is_dir, 'ed-muted': row.loading, 'ed-hidden': (row.node.name || '').startsWith('.'), 'selected': !row.loading && selected && selected.path === row.node.path, 'sel': selectMode && isSelected(row.node.path) }"
+                :style="`padding-left: ${6 + row.depth * 14}px`"
+                @click="if (!row.loading) { selectMode ? toggleSelect(row.node) : (row.node.is_dir ? toggle(row.node) : previewFile(row.node)) }"
+                @contextmenu.prevent="if (!row.loading && !selectMode) openMenu($event, row.node)">
+
+                {# selection checkbox: plain tick when selected #}
+                <span class="ed-check" x-show="selectMode && !row.loading"
+                    :class="{ 'checked': isSelected(row.node.path) }">
+                    <span x-show="isSelected(row.node.path)">{% include 'svg/checkmark.svg' %}</span>
+                </span>
+                {# chevron: expands/collapses folders, even in select mode #}
+                <span class="ed-chevron" x-show="!row.loading && row.node.is_dir" :class="{ 'open': row.node.open }"
+                    @click.stop="toggle(row.node)">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" width="12" height="12"><path fill="currentColor" d="M4 1l5 5-5 5z"/></svg>
+                </span>
+                <span class="ed-spacer" x-show="!row.loading && !row.node.is_dir"></span>
+                <span class="ed-muted-label" x-show="row.loading">loading..</span>
+
+                <span class="ed-icon" x-show="!row.loading && row.node.is_dir">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </span>
+                <span class="ed-icon" x-show="!row.loading && !row.node.is_dir">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                </span>
+
+                <span class="ed-name" x-show="!row.loading && renamingPath !== row.node.path" x-text="row.node.name" :title="row.node.path"></span>
+                {# inline rename editor (Enter commits, Esc cancels) #}
+                <template x-if="!row.loading && renamingPath === row.node.path">
+                    <input class="ed-rename" type="text" :value="row.node.name" @click.stop
+                        @keydown.enter.prevent="commitRename(row.node, $el.value)"
+                        @keydown.escape.prevent="renamingPath = null"
+                        x-init="$nextTick(() => { $el.focus(); $el.select(); })">
+                </template>
+                <span class="ed-size" x-show="!row.loading && !row.node.is_dir" x-text="formatSize(row.node.size)"></span>
+            </div>
+        </template>
+
+        <!-- per-folder errors render as a note under the row -->
+        <template x-for="row in errorRows()" :key="row.key">
+            <div class="ed-error ed-error-inline" :style="`padding-left: ${20 + row.depth * 14}px`"
+                 x-text="row.node.error"></div>
+        </template>
+
+        <template x-if="!searching && root && root.truncated">
+            <div class="ed-note">listing truncated (max_entries setting)</div>
+        </template>
+
+        <template x-if="searching && searchTree && searchTree.error">
+            <div class="ed-error" x-text="searchTree.error"></div>
+        </template>
+
+        <template x-if="searching && searchNoMatch">
+            <div class="ed-note">no matching names found</div>
+        </template>
+
+        {# why the search stopped (backend `capped`): scan limit or results limit #}
+        <template x-if="searching && searchTruncated && searchCap === 'scan'">
+            <div class="ed-error">too many entries to scan: not all folders were searched. Raise the scan cap (search_scan_limit) in the module settings for deeper results.</div>
+        </template>
+        <template x-if="searching && searchTruncated && searchCap === 'results'">
+            <div class="ed-note" x-text="`showing first ${searchMatchCount} matches (search_max_results cap) \u2014 raise it in settings for more`"></div>
+        </template>
+        <template x-if="searching && searchTruncated && !searchCap">
+            <div class="ed-note">search truncated (search_max_results / scan cap)</div>
+        </template>
+
+        <template x-if="loaded && !searching && root && rows.length === 0 && !workspaceError">
+            <div class="ed-note">workspace folder is empty</div>
+        </template>
+    </div>
+
+    {# content-search results: flat list replacing the tree until cleared #}
+    <div class="ed-tree ed-results" x-show="searching && searchMode === 'content'" x-cloak>
+        <template x-if="contentSearch.running">
+            <div class="ed-note">searching..</div>
+        </template>
+        <template x-if="!contentSearch.running && contentSearch.error">
+            <div class="ed-error" x-text="contentSearch.error"></div>
+        </template>
+        <template x-if="!contentSearch.running && !contentSearch.error && contentSearch.results.length === 0 && contentSearch.done">
+            <div class="ed-note">no matches in file contents</div>
+        </template>
+        <template x-if="contentSearch.truncated">
+            <div class="ed-note">showing first 200 matches - refine your query</div>
+        </template>
+        <template x-for="(r, i) in contentSearch.results" :key="i">
+            <div class="ed-result" @click="openContentResult(r)" :title="`${r.file}:${r.line}`">
+                <div class="ed-result-file">
+                    <span class="p" x-text="r.file"></span><span class="ln" x-text="':' + r.line"></span>
+                </div>
+                <div class="ed-result-line" x-text="r.text"></div>
+            </div>
+        </template>
+    </div>
+
+    <!-- file preview footer: only occupies space once a file is picked -->
+    <template x-if="selected">
+        <div class="ed-preview">
+            <div class="ed-preview-header">
+                <span class="ed-preview-name" x-text="selected.name" :title="selected.path"></span>
+                <button type="button" class="ed-refresh" title="Close preview" @click="closePreview()">
+                    {% include 'svg/cross.svg' %}
+                </button>
+            </div>
+            <template x-if="previewBusy">
+                <div class="ed-note ed-preview-note">loading preview..</div>
+            </template>
+            <template x-if="preview && preview.text !== null">
+                <pre class="ed-preview-body" x-text="preview.text"></pre>
+            </template>
+            <template x-if="preview && preview.text === null">
+                <div class="ed-note ed-preview-note" x-text="previewNote()"></div>
+            </template>
+            <template x-if="preview && preview.truncated">
+                <div class="ed-note ed-preview-note">preview truncated (max_preview_kb setting)</div>
+            </template>
+        </div>
+    </template>
+
+    {# right-click menu. position:fixed so the sidebar's overflow never
+       clips it; closes on any outside click or Escape. No "Ask AI":
+       Attach replaces it. #}
+    <template x-if="menu.open">
+        <div class="ed-menu" :style="`left: ${menu.x}px; top: ${menu.y}px`"
+            @click.window="closeMenu()"
+            @keydown.escape.window="closeMenu()">
+            <button type="button" class="ed-menu-item" @click="menuAction((row) => openPrompt('new_file', row))">New file</button>
+            <button type="button" class="ed-menu-item" @click="menuAction((row) => openPrompt('new_folder', row))">New folder</button>
+            <hr class="ed-menu-sep">
+            <button type="button" class="ed-menu-item" @click="menuAction((row) => openPrompt('rename', row))">Rename</button>
+            <button type="button" class="ed-menu-item" @click="menuAction((row) => openPrompt('move', row))">Move</button>
+            <button type="button" class="ed-menu-item" x-show="!readOnly" @click="menuAction((row) => duplicateRow(row))">Duplicate</button>
+            <button type="button" class="ed-menu-item" @click="menuAction((row) => copyPath(row))">Copy path</button>
+            <button type="button" class="ed-menu-item" x-show="!rowIsDir(menu.row)" @click="menuAction((row) => attachRow(row))">Attach</button>
+            <hr class="ed-menu-sep">
+            <button type="button" class="ed-menu-item danger" @click="menuAction((row) => deleteRow(row))">Delete</button>
+        </div>
+    </template>
+</div>

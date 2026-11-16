@@ -1,0 +1,74 @@
+/* -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-25) harness:openlumara
+   editor module view styles shared across several editor views: the code-box
+   primitives (read/create/edit boxes + line rows, markup from the webui's
+   shared.js codeLinesHtml) and the running-args one-liner (grep +
+   editor-path views). vendored from the coder module
+   (modules/coder/webui/assets/css/custom_tool_views/shared.css) so editor
+   views stay styled while coder is disabled; identical selectors are
+   harmless if both modules are enabled. */
+
+.tool-call-card {
+    /* file read view: highlighted code block (hljs output via x-html).
+       the hljs class on the box picks up the active code theme's token
+       colors; layout is ours */
+    .file-read-box {
+        font-family: var(--code-font);
+        font-size: 0.8rem;
+        line-height: 1.55;
+        max-height: 320px;
+        overflow: auto;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        tab-size: 4;
+        /* the .hljs class pulls token colors from the active code theme,
+           but themes also set an opaque .hljs background - kill it, the
+           box keeps the card's own background */
+        background: transparent;
+    }
+
+    /* line rows inside read/create boxes: number gutter + wrapped code.
+       generated markup has no whitespace between lines, so the container's
+       pre-wrap never paints stray blanks */
+    .code-line {
+        display: flex;
+        gap: 10px;
+
+        .code-num {
+            flex-shrink: 0;
+            min-width: 2.5em;
+            text-align: right;
+            user-select: none;
+            opacity: 0.45;
+        }
+
+        .code-text {
+            min-width: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+    }
+
+    /* while-running preview: dim one-liner of the streamed args (grep and
+       editor-path views share it: "searching 'x' in y", "moving \u00b7 dev: a") */
+    .grep-running {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+
+        .grep-running-label {
+            opacity: 0.7;
+            font-style: italic;
+        }
+
+        .grep-running-pattern {
+            font-family: var(--code-font);
+            color: var(--accent);
+            word-break: break-all;
+        }
+    }
+}

@@ -1,0 +1,151 @@
+/* -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-25) harness:openlumara
+   editor module view styles: the edit diff (unified + side-by-side).
+   vendored from the coder module
+   (modules/coder/webui/assets/css/custom_tool_views/file_edit.css), loaded
+   via /ext-assets/ (auto-globbed, like the module JS). */
+
+.tool-call-card {
+    /* diff display (editor edits): +/- gutter lines, tinted.
+       streams live from args */
+    .tool-display {
+        font-family: var(--code-font);
+        font-size: 0.8rem;
+        line-height: 1.55;
+        max-height: 260px;
+        overflow-y: auto;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px 10px;
+        /* kill the code theme's opaque .hljs background, like the other
+           code boxes - card background stays */
+        background: transparent;
+
+        .diff-line {
+            display: flex;
+            gap: 8px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            border-radius: 3px;
+
+            .diff-gutter {
+                flex-shrink: 0;
+                width: 1em;
+                user-select: none;
+                opacity: 0.7;
+            }
+
+            &.diff-del {
+                background: color-mix(in srgb, var(--error, #f87171) 10%, transparent);
+                .diff-gutter { color: var(--error, #f87171); }
+            }
+
+            &.diff-add {
+                background: color-mix(in srgb, #4ade80 10%, transparent);
+                .diff-gutter { color: #4ade80; }
+            }
+
+            /* collapsed unchanged stretch */
+            &.diff-gap {
+                opacity: 0.55;
+                .diff-text { font-style: italic; }
+            }
+        }
+    }
+}
+
+/* editor edit view: github-style two-column diff.
+   both layouts render inside .diff-container, which is a size container
+   itself: the switch keys off the CARD's actual width, so it follows the
+   chat width / message width settings, the sidebar, and window resizes
+   automatically - pure css, always reactive. side-by-side once the box
+   is wide enough for two columns to read well, unified below that.
+   x-show's inline display:none still wins over these rules, so a layout
+   with no content stays hidden regardless. no line numbers - the cell
+   tints convey old vs new. */
+.diff-container {
+    container-type: inline-size;
+
+    .diff-side {
+        display: none;
+    }
+}
+
+@container (min-width: 640px) {
+    .diff-container .diff-unified {
+        display: none;
+    }
+
+    .diff-container .diff-side {
+        display: block;
+        font-family: var(--code-font);
+        font-size: 0.8rem;
+        line-height: 1.55;
+        max-height: 320px;
+        overflow-y: auto;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px 10px;
+        /* the .hljs class pulls token colors from the active code
+           theme, but themes also set an opaque .hljs background -
+           kill it, the box keeps the card's own background */
+        background: transparent;
+    }
+}
+
+.diff-container .diff-side {
+    .diff2-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 0px;
+
+        /* flex row of gutter + code, like the unified diff-line rows */
+        .diff2-cell {
+            display: flex;
+            gap: 8px;
+            min-width: 0;
+            border-radius: 0px;
+            padding: 0 6px;
+        }
+
+        .diff2-gutter {
+            flex-shrink: 0;
+            width: 1em;
+            user-select: none;
+            opacity: 0.7;
+        }
+
+        .diff2-text {
+            min-width: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .diff2-del {
+            background: color-mix(in srgb, var(--error, #f87171) 10%, transparent);
+            .diff2-gutter { color: var(--error, #f87171); }
+        }
+
+        .diff2-add {
+            background: color-mix(in srgb, #4ade80 10%, transparent);
+            .diff2-gutter { color: #4ade80; }
+        }
+
+        /* filler cell opposite a pure add/delete run */
+        .diff2-empty {
+            background: color-mix(in srgb, var(--text-secondary, #888) 5%, transparent);
+        }
+
+        /* collapsed-unchanged marker spans both columns; unchanged code
+           lines sit plain in the left column instead */
+        &.diff2-gap .diff2-full {
+            grid-column: 1 / -1;
+        }
+
+        &.diff2-gap {
+            opacity: 0.55;
+
+            .diff2-full { font-style: italic; }
+        }
+    }
+}

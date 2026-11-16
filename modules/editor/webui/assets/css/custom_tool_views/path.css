@@ -1,0 +1,24 @@
+/* -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-25) harness:openlumara
+   editor module view styles: the editor-path view's glob result list
+   (the running one-liner it shares with grep lives in shared.css).
+   vendored from the coder module
+   (modules/coder/webui/assets/css/custom_tool_views/path.css). */
+
+.tool-call-card {
+    /* editor-path view (glob/move/delete): plain list of result file paths */
+    .glob-files {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        max-height: 240px;
+        overflow-y: auto;
+        margin-top: 4px;
+
+        .glob-file {
+            font-family: var(--code-font);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+    }
+}

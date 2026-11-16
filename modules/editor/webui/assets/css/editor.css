@@ -1,0 +1,577 @@
+/* -- AI GENERATED CODE (deepseek-v4-flash) :: 2026-10-16
+   editor sidebar panel styling, themed with core CSS vars.
+   Base: foldertree panel (ft-*) + coder menu/search/result (coder-*),
+   renamed under the ed- prefix so both can coexist while foldertree/coder
+   are still enabled. */
+.editor-panel {
+    padding: 7px;
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    gap: var(--gap);
+}
+
+.editor-panel .ed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 2px 4px;
+}
+
+.editor-panel .ed-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary, #999);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.editor-panel .ed-ro-badge {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--danger, #e57373);
+    border: 1px solid var(--danger, #e57373);
+    border-radius: 4px;
+    padding: 1px 5px;
+    flex: none;
+}
+
+/* workspace picker (picker mode only): full-width row under the title */
+.editor-panel .ed-ws-select {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 11px;
+    padding: 3px 6px;
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.05));
+    color: var(--text-primary, #eee);
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    border-radius: 6px;
+    outline: none;
+}
+
+.editor-panel .ed-refresh {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-secondary, #999);
+    cursor: pointer;
+}
+
+.editor-panel .ed-refresh:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #eee);
+}
+
+.editor-panel .ed-refresh svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* action bar under the title: view-option icon buttons */
+.editor-panel .ed-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 2px;
+}
+
+.editor-panel .ed-tool {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-secondary, #999);
+    cursor: pointer;
+}
+
+.editor-panel .ed-tool:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #eee);
+}
+
+.editor-panel .ed-tool.active {
+    color: var(--text-primary, #eee);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.09));
+}
+
+/* sort button: popover reuses .category-menu styling */
+.editor-panel .ed-sort {
+    display: inline-flex;
+}
+
+/* search row (looks like the chats sidebar search field) */
+.editor-panel .ed-search {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 2px;
+}
+
+.editor-panel .ed-search input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    font-size: 12px;
+    color: var(--text-primary, #eee);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    border-radius: 8px;
+    outline: none;
+}
+
+.editor-panel .ed-search input:focus {
+    border-color: var(--border-strong, rgba(255, 255, 255, 0.2));
+}
+
+.editor-panel .ed-search-mode {
+    flex: none;
+    height: 26px;
+    min-width: 26px;
+    padding: 0 4px;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+    border-radius: 6px;
+    background: none;
+    color: var(--text-secondary, #999);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.editor-panel .ed-search-mode.on {
+    color: var(--text-primary, #eee);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.09));
+}
+
+.editor-panel .ed-search-mode:hover,
+.editor-panel .ed-search-clear:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #eee);
+}
+
+.editor-panel .ed-tool-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.editor-panel .ed-tool svg {
+    width: 15px;
+    height: 15px;
+}
+
+/* tree scroll area */
+.editor-panel .ed-tree {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.editor-panel .ed-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-primary, #eee);
+    cursor: pointer;
+    user-select: none;
+}
+
+/* hidden entries (dotfiles/dirs shown via the hidden toggle): muted so they
+   read as "there but special" -- dimmed text + slight opacity, a touch
+   clearer than coder's pure-opacity rows */
+.editor-panel .ed-row.ed-hidden {
+    opacity: 0.65;
+}
+.editor-panel .ed-row.ed-hidden .ed-name {
+    color: var(--text-secondary, #999);
+}
+
+.editor-panel .ed-row:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+}
+
+.editor-panel .ed-row.selected {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.09));
+    outline: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.editor-panel .ed-chevron {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    color: var(--text-secondary, #999);
+    transition: transform 120ms ease;
+}
+
+.editor-panel .ed-chevron.open {
+    transform: rotate(90deg);
+}
+
+.editor-panel .ed-spacer {
+    width: 12px;
+    flex: none;
+}
+
+.editor-panel .ed-icon {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    color: var(--text-secondary, #999);
+}
+
+.editor-panel .ed-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.editor-panel .ed-row.dir .ed-icon {
+    color: var(--text-primary, #ddd);
+}
+
+.editor-panel .ed-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* wide mode: rows keep their natural width, tree scrolls sideways.
+   min-width:100% keeps short rows full-width. */
+.editor-panel.ed-wide .ed-tree {
+    overflow-x: auto;
+}
+
+/* select-mode button + readout pinned to the right end of the action bar */
+.editor-panel .ed-sel-group {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.editor-panel .ed-sel-readout {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.editor-panel .ed-sel-count {
+    min-width: 12px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary, #999);
+}
+.editor-panel .ed-caret {
+    width: 22px;
+}
+
+/* per-row selection checkbox (plain tick when checked) */
+.editor-panel .ed-check {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    align-self: center;
+    margin: 0 5px 0 3px;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.25));
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.editor-panel .ed-check.checked {
+    border-color: var(--text-primary, #ddd);
+}
+.editor-panel .ed-check svg {
+    width: 10px;
+    height: 10px;
+    color: var(--text-primary, #ddd);
+}
+
+/* disabled actions in the popover */
+.ed-actions-menu .category-option:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* action feedback beside the count */
+.editor-panel .ed-sel-note {
+    max-width: 130px;
+    font-size: 11px;
+    color: var(--text-secondary, #999);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* inline rename editor (replaces the row's name span) */
+.editor-panel .ed-rename {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 2px 5px;
+    background: var(--bg-primary, #111);
+    color: var(--text-primary, #ddd);
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.3));
+    border-radius: 3px;
+}
+
+/* selected rows (select mode) */
+.editor-panel .ed-row.sel {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.09));
+    outline: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+}
+.editor-panel.ed-wide .ed-row {
+    width: max-content;
+    min-width: 100%;
+}
+.editor-panel.ed-wide .ed-name {
+    flex: 1 0 auto;
+    min-width: max-content;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.editor-panel .ed-size {
+    flex: none;
+    font-size: 11px;
+    color: var(--text-secondary, #999);
+}
+
+.editor-panel .ed-muted {
+    color: var(--text-secondary, #999);
+    cursor: default;
+    font-style: italic;
+}
+
+.editor-panel .ed-muted-label {
+    color: var(--text-secondary, #999);
+    font-style: italic;
+}
+
+.editor-panel .ed-note {
+    padding: 4px 6px;
+    font-size: 12px;
+    color: var(--text-secondary, #999);
+}
+
+.editor-panel .ed-error {
+    padding: 4px 6px;
+    font-size: 12px;
+    color: var(--danger, #e57373);
+}
+
+.editor-panel .ed-error-inline {
+    padding-top: 0;
+}
+
+/* content search results (flat list, coder style) */
+.editor-panel .ed-results {
+    flex: 1;
+}
+
+.editor-panel .ed-result {
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.editor-panel .ed-result:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+}
+
+.editor-panel .ed-result-file {
+    font-size: 12px;
+    color: var(--text-primary, #eee);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.editor-panel .ed-result-file .ln {
+    color: var(--text-secondary, #999);
+}
+
+.editor-panel .ed-result-line {
+    font-size: 12px;
+    color: var(--text-secondary, #999);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* preview footer: fixed under the tree, own scroll */
+.editor-panel .ed-preview {
+    flex: none;
+    max-height: 45%;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    padding-top: 4px;
+    min-height: 0;
+}
+
+.editor-panel .ed-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 0 2px;
+}
+
+.editor-panel .ed-preview-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary, #eee);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.editor-panel .ed-preview-body {
+    flex: 1;
+    min-height: 0;
+    margin: 4px 0 0;
+    padding: 6px;
+    overflow: auto;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-primary, #ddd);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
+    border-radius: 6px;
+    white-space: pre;
+}
+
+.editor-panel .ed-preview-note {
+    padding: 6px 2px;
+}
+
+/* right-click menu (coder style, ed- prefixed) */
+.ed-menu {
+    position: fixed;
+    z-index: 1000;
+    min-width: 160px;
+    padding: 4px;
+    background: var(--bg-primary, #16161d);
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.ed-menu-item {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: var(--text-primary, #eee);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ed-menu-item:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
+}
+
+.ed-menu-item.danger {
+    color: var(--danger, #e57373);
+}
+
+.ed-menu-sep {
+    border: none;
+    border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    margin: 4px 6px;
+}
+
+/* prompt modal (coder_prompt style, ed- prefixed) */
+.ed-prompt-modal {
+    width: 340px;
+    max-width: calc(100vw - 40px);
+}
+
+.ed-prompt-modal .ed-prompt-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ed-prompt-modal input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: var(--text-primary, #eee);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+    border-radius: 8px;
+    outline: none;
+}
+
+.ed-prompt-modal input[type="text"]:focus {
+    border-color: var(--border-strong, rgba(255, 255, 255, 0.3));
+}
+
+.ed-prompt-modal .ed-prompt-error {
+    font-size: 12px;
+    color: var(--danger, #e57373);
+}
+
+.ed-prompt-modal .ed-prompt-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.ed-prompt-modal .ed-action {
+    padding: 6px 14px;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+    border-radius: 8px;
+    background: none;
+    color: var(--text-primary, #eee);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.ed-prompt-modal .ed-action:hover {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.07));
+}
+
+.ed-prompt-modal .ed-action.primary {
+    background: var(--accent, #4a6cf7);
+    border-color: var(--accent, #4a6cf7);
+    color: #fff;
+}
+
+.ed-prompt-modal .ed-action.primary:hover {
+    filter: brightness(1.1);
+}
+
+.ed-prompt-modal .ed-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
