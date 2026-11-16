@@ -1,0 +1,217 @@
+/* chat-pro - the references tab. */
+
+/* ---------------- references: urls + file paths ---------------- */
+.cp-refs {
+    padding: 7px;
+    gap: 6px;
+}
+
+.cp-refs-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+}
+
+.cp-refs-input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 9px;
+    border: 1px solid var(--border-color, #e0e0ea);
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--text-primary, #111118);
+    font-family: inherit;
+    font-size: 0.78rem;
+}
+
+.cp-refs-input::placeholder { color: var(--text-muted, #8888a0); }
+.cp-refs-input:focus { outline: none; border-color: var(--accent, #7c3aed); }
+
+.cp-refs-btn {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border-color, #e0e0ea);
+    border-radius: var(--radius-sm, 6px);
+    background: none;
+    color: var(--text-muted, #8888a0);
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.cp-refs-btn svg { width: 14px; height: 14px; }
+.cp-refs-btn:hover { color: var(--text-primary, #111118); border-color: var(--accent, #7c3aed); }
+
+.cp-refs-kinds {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+}
+
+.cp-refkind {
+    padding: 2px 8px;
+    border: 1px solid var(--border-color, #e0e0ea);
+    border-radius: 999px;
+    background: none;
+    color: var(--text-muted, #8888a0);
+    font-family: inherit;
+    font-size: 0.66rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.cp-refkind:hover { color: var(--text-primary, #111118); }
+.cp-refkind.on { border-color: var(--accent, #7c3aed); color: var(--accent, #7c3aed); }
+
+.cp-refs-count {
+    margin-left: auto;
+    font-size: 0.66rem;
+    color: var(--text-muted, #8888a0);
+    white-space: nowrap;
+}
+
+.cp-refs-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cp-ref {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    padding: 5px 6px;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: none;
+    color: var(--text-secondary, #52526a);
+    font-family: inherit;
+    font-size: 0.78rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cp-ref:hover { background: var(--bg-secondary, #f3f3f8); color: var(--text-primary, #111118); }
+
+.cp-ref-chip {
+    flex: none;
+    font-size: 0.6rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted, #8888a0);
+}
+
+.cp-ref-chip.url { color: var(--accent, #7c3aed); }
+
+.cp-ref-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cp-ref-count {
+    flex: none;
+    font-size: 0.62rem;
+    color: var(--text-muted, #8888a0);
+    font-variant-numeric: tabular-nums;
+}
+
+.cp-refs-empty {
+    padding: 8px 6px;
+    font-size: 0.72rem;
+    color: var(--text-muted, #8888a0);
+}
+
+/* source toggles: message text and tool output, independent.
+   speech bubble = references the messages mention
+   wrench        = references tool calls/results mention */
+.cp-srcbtn {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: none;
+    color: var(--accent, #7c3aed);
+    cursor: pointer;
+    transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.cp-srcbtn svg { width: 15px; height: 15px; }
+.cp-srcbtn:hover { background: var(--bg-secondary, #f3f3f8); }
+.cp-srcbtn.off { color: var(--text-muted, #8888a0); opacity: 0.4; }
+
+/* a row only mentioned by tools carries a quiet marker */
+.cp-ref-tool {
+    flex: none;
+    padding: 0 4px;
+    border: 1px solid var(--border-color, #e0e0ea);
+    border-radius: 3px;
+    font-size: 0.54rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted, #8888a0);
+}
+
+/* jump-to-message arrow: faint until the row is hovered, like the prune x */
+.cp-ref-jump {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    color: var(--text-muted, #8888a0);
+    opacity: 0; /* the prune x rule: invisible until the row is hovered */
+    cursor: pointer;
+    transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.cp-ref-jump svg { width: 13px; height: 13px; }
+.cp-ref:hover .cp-ref-jump,
+.cp-ref-jump:focus-visible { opacity: 1; }
+.cp-ref-jump:hover, .cp-ref-jump:focus-visible { color: var(--accent, #7c3aed); opacity: 1; }
+
+/* the turn a jump landed on: a short accent ring, then it fades away */
+.cp-flash {
+    outline: 2px solid var(--accent, #7c3aed);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm, 6px);
+}
+
+/* the handoff summary produced by context compression: informational, not a
+   branch state, so it gets the info colour instead of the accent. placed after
+   .on-path so it wins on the current path too. */
+.cp-gcard.compressed {
+    border-color: color-mix(in srgb, var(--info, #38bdf8) 55%, transparent);
+    background: color-mix(in srgb, var(--info, #38bdf8) 6%, var(--bg-secondary));
+    box-shadow: inset 2px 0 0 var(--info, #38bdf8);
+}
+
+.cp-gcard.compressed .cp-grole {
+    color: var(--info, #38bdf8);
+}
+
+.cp-gcard.compressed .cp-gsteps {
+    color: var(--info, #38bdf8);
+    opacity: 0.8;
+}

@@ -1,0 +1,536 @@
+/* chat-pro - the branch graph window and its landmark rail. */
+
+/* ==========================================================================
+   branch graph (modals/chatpro_graph.html)
+   ========================================================================== */
+
+/* the map's window: the dock is 360px wide and a canvas is not, so the tree
+   gets a modal-sized surface instead of a column */
+.cp-graph-modal {
+    width: min(1180px, 94vw);
+    height: min(860px, 90vh);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.cp-graph-modal .header {
+    flex: none;
+}
+
+.cp-graph-stats {
+    margin-left: auto;
+    margin-right: 10px;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.cp-graph-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* legend: same uppercase micro-labels the dock uses */
+.cp-graph-legend {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.cp-leg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.cp-leg-swatch {
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+}
+
+.cp-leg-swatch.role-user { border-color: var(--accent); }
+.cp-leg-swatch.role-assistant { background: var(--bg-tertiary); }
+
+.cp-leg-line {
+    width: 18px;
+    height: 0;
+    border-top: 1px dashed var(--border-color);
+}
+
+.cp-leg-line.on-path { border-top-color: var(--accent); }
+
+.cp-graph-viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-primary);
+    cursor: grab;
+    touch-action: none;
+}
+
+.cp-graph-viewport.panning { cursor: grabbing; }
+
+.cp-graph-stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    user-select: none;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+
+.cp-graph-edges {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.cp-edge {
+    fill: none;
+    stroke: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 3;
+}
+
+.cp-edge.on-path {
+    stroke: var(--accent);
+    opacity: 0.7;
+}
+
+.cp-gcard {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary, #f3f3f8);
+    color: var(--text-primary);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* on the active path: accent edge plus a 2px inset bar, no outer shadow */
+.cp-gcard.on-path {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* off-path is *stated*, not dimmed: a dashed outline rhymes with the dashed
+   off-path edges, and fading the whole card would take the fill with it */
+.cp-gcard.off-path {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.cp-gcard.off-path:hover {
+    border-style: solid;
+    background: var(--bg-tertiary);
+}
+
+/* hover lives after the state rules on purpose: it has to win on the current
+   path too, where the plain :hover rule used to lose to .on-path */
+.cp-gcard:hover,
+.cp-gcard.on-path:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-secondary));
+}
+
+/* the turn the chat is currently scrolled to: an extra inner ring on top of the
+   path, so "here" reads differently from "on this branch" */
+.cp-gcard.is-viewing {
+    box-shadow: inset 2px 0 0 var(--accent),
+                inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.cp-gcard.is-viewing .cp-grole {
+    color: var(--accent);
+}
+
+.cp-grole {
+    padding-right: 40px;
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.cp-gcard.role-user.on-path .cp-grole { color: var(--accent); }
+
+/* the step count of a turn with tool calls: a footnote, not a header */
+.cp-gsteps {
+    margin-top: auto;
+    font-size: 0.54rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.cp-gtime {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    font-size: 0.54rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.cp-gcard.on-path .cp-gprev {
+    color: var(--text-primary);
+}
+
+.cp-gprev {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.72rem;
+    line-height: 1.25;
+    color: var(--text-secondary);
+}
+
+/* level of detail: under this scale the text is not readable anyway, so the
+   cards become shapes and a 113-node tree stays legible as structure */
+.cp-graph-viewport.lod-far .cp-gprev,
+.cp-graph-viewport.lod-far .cp-gtime,
+.cp-graph-viewport.lod-far .cp-gsteps {
+    display: none;
+}
+
+.cp-graph-viewport.lod-far .cp-gcard { padding: 4px; }
+
+/* ---------------- the graph's landmark rail (fork points + summaries) ----------------
+   floats over the canvas on the left, so it costs the layout no width: fitGraph and
+   the focus maths keep working off the viewport alone. it ends above the zoom stack. */
+.cp-graph-rail {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    max-height: calc(100% - 128px);
+    width: 208px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    overflow: auto;
+    border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
+    box-shadow: 0 6px 18px #0000001f;
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    line-height: 1.3;
+    z-index: 3;
+    cursor: default;
+}
+
+.cp-rail-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.cp-rail-head:hover {
+    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+    color: var(--text-primary);
+}
+
+.cp-rail-title { flex: 1; text-align: left; }
+.cp-rail-count { font-variant-numeric: tabular-nums; }
+.cp-rail-caret { width: 10px; text-align: center; }
+.cp-rail-mark { color: var(--accent); font-size: 0.8rem; }
+
+.cp-rail-mark.cp-rail-info {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    background: var(--info, #38bdf8);
+}
+
+.cp-rail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-bottom: 4px;
+}
+
+.cp-rail-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cp-rail-row:hover { background: color-mix(in srgb, var(--text-primary) 9%, transparent); }
+
+/* a branch row is marked when the fork point sits on the open path; a compression row
+   keeps its info colour always - it is a type, not a state, and compressions are on the
+   path nearly every time, so an on-path override would hide the one thing marking them */
+.cp-rail-row.on-path { box-shadow: inset 2px 0 0 var(--accent); }
+.cp-rail-row.compressed,
+.cp-rail-row.compressed.on-path { box-shadow: inset 2px 0 0 var(--info, #38bdf8); }
+
+.cp-rail-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cp-rail-detail {
+    color: var(--text-secondary);
+    font-size: 0.66rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* a fork point is marked on the canvas too, so it is spottable without the rail */
+.cp-gfork {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    color: var(--accent);
+    font-size: 0.72rem;
+    line-height: 1;
+    opacity: 0.85;
+}
+
+/* landed on a landmark: the rail moved the camera, this says where it went */
+.cp-gcard.is-focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+@media (max-width: 760px) {
+    .cp-graph-rail { display: none; }
+}
+
+.cp-graph-zoom {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cp-graph-zoom button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cp-graph-zoom button:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.cp-graph-zoom .cp-zoom-fit svg {
+    width: 14px;
+    height: 14px;
+}
+
+.cp-graph-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+/* the graph button in the Branches header, right of the count */
+.chat-pro-tree .cpt-graph {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 4px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.chat-pro-tree .cpt-graph svg {
+    width: 14px;
+    height: 14px;
+}
+
+.chat-pro-tree .cpt-graph:hover {
+    color: var(--accent);
+    background: var(--bg-secondary);
+}
+
+.chat-pro-tree .cpt-graph:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* no color-mix: fall back to the chrome tokens (less contrast on dark, but the
+   cards and edges keep their outline) */
+@supports not (border-color: color-mix(in srgb, red 50%, transparent)) {
+    .cp-gcard { border-color: var(--border-color); }
+    .cp-gcard.off-path { border-color: var(--border-color); }
+    .cp-edge { stroke: var(--border-color); }
+    .cp-gcard.on-path { background: var(--bg-secondary); }
+}
+
+/* hover miniature: the turn's text through the chat's markdown pipeline, shown
+   next to the card and clamped to the box (never the whole message) */
+.cp-graph-mini {
+    position: fixed;
+    z-index: 1002; /* above .modal */
+    display: none;
+    max-height: 360px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--text-primary) 16%, transparent);
+    border-radius: var(--radius-md, 10px);
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-medium);
+    color: var(--text-primary);
+    font-family: var(--font-primary);
+    pointer-events: none;
+}
+
+.cp-graph-mini.open { display: block; }
+
+.cp-mini-loading {
+    padding: 10px 12px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.cp-mini-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px;
+    border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
+    font-size: 0.6rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.cp-mini-role {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.cp-mini-time {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+}
+
+.cp-mini-body {
+    max-height: 300px;
+    overflow: hidden;
+    padding: 9px 12px 14px;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--text-primary);
+    -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+    mask-image: linear-gradient(to bottom, #000 82%, transparent);
+}
+
+.cp-mini-body p { margin: 0 0 8px; }
+.cp-mini-body h1,
+.cp-mini-body h2,
+.cp-mini-body h3 {
+    margin: 10px 0 6px;
+    font-size: 0.9rem;
+    line-height: 1.25;
+}
+.cp-mini-body ul,
+.cp-mini-body ol { margin: 0 0 8px; padding-left: 18px; }
+.cp-mini-body li { margin: 2px 0; }
+.cp-mini-body blockquote {
+    margin: 0 0 8px;
+    padding-left: 8px;
+    border-left: 2px solid var(--border-color);
+    color: var(--text-secondary);
+}
+.cp-mini-body pre {
+    max-height: 140px;
+    margin: 0 0 8px;
+    padding: 8px;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    font-size: 0.72rem;
+}
+.cp-mini-body code {
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--bg-tertiary);
+    font-size: 0.72rem;
+}
+.cp-mini-body pre code { padding: 0; background: none; }
+.cp-mini-body img { max-width: 100%; height: auto; }
+.cp-mini-body a { color: var(--accent); }
+
+@supports not (border-color: color-mix(in srgb, red 50%, transparent)) {
+    .cp-graph-mini { border-color: var(--border-color); }
+}
