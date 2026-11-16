@@ -122,6 +122,23 @@ def _short_import(source: str):
 # prose formats whose outline is a heading map instead of a symbol map
 _PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".rst")
 
+# a block target that names lines instead of a symbol: "ln:12-40", "12-40", "ln:12"
+_SPAN_TARGET = regex.compile(r"^(?:ln:)?\s*(\d+)\s*(?:-\s*(\d+))?$")
+
+
+def _span_target(target):
+    """(start_line, end_line) from a line-range target, or None.
+
+    1-based and inclusive; a bare number is a single line. this is the target
+    form every text file understands, whether or not it has a grammar.
+    """
+    match = _SPAN_TARGET.match(str(target or "").strip())
+    if not match:
+        return None
+    start = int(match.group(1))
+    end = int(match.group(2)) if match.group(2) else start
+    return (start, end)
+
 
 class Editor(EditorRoutes, PathResolver, core.module.Module):
     """Browse, preview, search and manage your workspace folders from the webui sidebar, with one consistent AI file-tool family. Replaces foldertree, file_manager and media_reader."""
@@ -290,7 +307,8 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         self.disabled_tools = []
         if self.config.get("read-only"):
             self.disabled_tools.extend(
-                ["write", "append", "edit", "create", "move", "copy", "delete", "mkdir"]
+                ["write", "append", "edit", "create", "replace_block",
+                 "move", "copy", "delete", "mkdir"]
             )
         # the webui routes have their own gate (webui.py _read_only_guard).
 
@@ -691,6 +709,47 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
         return {"symbols": symbols, "imports": imports}
 
+    async def _locate_symbol(self, code, file_path, target_symbol):
+        """(start_line, end_line) of a definition named by a dotted path, or None.
+
+        walks the structure tree one name at a time, so Alpha.run and
+        Beta.run stay distinct - a plain text search would hit whichever came
+        first. spans are 0-indexed and end-inclusive, excluding decorators.
+        """
+        if not HAVE_TSLP:
+            return None
+        lang = tslp.detect_language_from_path(str(file_path))
+        if not lang:
+            return None
+        try:
+            extraction = tslp.process(code, tslp.ProcessConfig(
+                language=lang,
+                structure=True,
+                imports=False,
+                exports=False,
+                parse_timeout_ms=2000,
+            ))
+        except Exception:
+            return None
+        if not extraction:
+            return None
+
+        candidates = extraction.structure
+        item = None
+        for part in str(target_symbol).split("."):
+            item = None
+            for candidate in candidates:
+                if candidate.name == part:
+                    item = candidate
+                    break
+            if not item:
+                return None
+            candidates = item.children
+
+        if not item or not item.span:
+            return None
+        return (int(item.span.start_line), int(item.span.end_line))
+
     def _render_compact(self, structure):
         """renders the symbol list as a compact text outline: one line per
         definition, indented by nesting depth, prefixed with its line range."""
@@ -750,6 +809,45 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                         and len(under) >= len(stripped)):
                     out.append(f"ln:{i + 1} {stripped}")
         return out
+
+    def _line_indent(self, lines, line_idx):
+        """the leading whitespace of a 0-indexed line."""
+        line = lines[line_idx]
+        return line[: len(line) - len(line.lstrip())]
+
+    def _reindent_block(self, content, target_indent):
+        """re-indents a block to a target indentation, keeping its own nesting.
+
+        only the block's COMMON leading indent is stripped, then the target
+        indent is applied. stripping every line's own indent instead (what the
+        pre-rewrite coder did) flattens nested blocks and writes invalid code.
+        leading and trailing blank lines are trimmed for predictable spacing.
+        """
+        content_lines = str(content or "").split("\n")
+
+        block_indent = None
+        for line in content_lines:
+            if line.strip():
+                indent = line[: len(line) - len(line.lstrip())]
+                if block_indent is None:
+                    block_indent = indent
+                else:
+                    block_indent = os.path.commonprefix([block_indent, indent])
+        if block_indent is None:
+            return []
+
+        reindented = []
+        for line in content_lines:
+            if not line.strip():
+                reindented.append("")
+            else:
+                reindented.append(target_indent + line[len(block_indent):])
+
+        while reindented and not reindented[0]:
+            reindented.pop(0)
+        while reindented and not reindented[-1]:
+            reindented.pop()
+        return reindented
 
     # ----------------------
     # tools: writing
@@ -842,6 +940,75 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         except Exception as e:
             return self.result(str(e), False)
         return self.result(f"edited {path}")
+
+    @core.module.tool
+    async def replace_block(self, workspace: str, path: str, target: str, content: str):
+        """replaces a whole block: a function/class by name ('Class.method') or exact lines ('ln:12-40'). content is re-indented to the block and syntax-checked"""
+        try:
+            target_path = self._resolve_path(workspace, path)
+        except ValueError as e:
+            return self.result(str(e), False)
+        if not target_path.is_file():
+            return self.result(f"'{target_path.name}' is not a file", False)
+
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                code = f.read()
+        except UnicodeDecodeError:
+            return self.result("file is not valid utf-8 text - cannot edit it", False)
+        except Exception as e:
+            return self.result(str(e), False)
+        if not code:
+            return self.result("file is empty", False)
+
+        lines = code.split("\n")
+        total = len(lines) - 1 if lines and lines[-1] == "" else len(lines)
+
+        span = _span_target(target)
+        if span:
+            start, end = span
+            if start < 1 or end < start or end > total:
+                return self.result({
+                    "error": f"line range {start}-{end} does not fit this {total}-line file",
+                    "note": "use outline or read to find the right range",
+                }, False)
+            start_idx, end_idx = start - 1, end - 1
+            label = f"lines {start}-{end}"
+        else:
+            if not HAVE_TSLP:
+                return self.result({
+                    "error": "this installation has no tree-sitter runtime, so symbols cannot be located",
+                    "note": "pass a line range instead, e.g. 'ln:12-40' (use outline or read to find it)",
+                }, False)
+            located = await self._locate_symbol(code, target_path, target)
+            if not located:
+                return self.result({
+                    "error": f"symbol '{target}' was not found in {path}",
+                    "note": "names are dotted, e.g. 'Class.method'; use outline to see what is available, or pass a line range like 'ln:12-40'",
+                }, False)
+            start_idx, end_idx = located
+            label = f"'{target}'"
+
+        new_lines = self._reindent_block(content, self._line_indent(lines, start_idx))
+        if not new_lines:
+            return self.result("replacement content was empty - pass the complete new block", False)
+
+        merged = "\n".join(lines[:start_idx] + new_lines + lines[end_idx + 1:])
+        errors = await self._syntax_gate(merged, target_path)
+        if errors:
+            return self.result({
+                "errors": errors,
+                "message": "syntax check failed - file was not written",
+            }, False)
+        try:
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write(merged)
+        except Exception as e:
+            return self.result(str(e), False)
+        if span:
+            return self.result(f"replaced {label} in {path}")
+        return self.result(
+            f"replaced {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}")
 
     # ----------------------
     # tools: file management
