@@ -19,6 +19,7 @@
 # - the tree routes use foldertree's ws index; the AI tools use coder-style
 #   selectors (basename / full path / 0-based index).
 
+import ast
 import os
 import asyncio
 import difflib
@@ -48,7 +49,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     category = "development"
 
-    dependencies = ["filetype", "regex", "tree-sitter-language-pack"]
+    dependencies = ["filetype", "regex", "tree-sitter", "tree-sitter-language-pack"]
 
     # single source of truth: settings defaults and runtime fallbacks
     _DEFAULT_MAX_ENTRIES = 500
@@ -449,13 +450,19 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         """return a list of syntax errors, or [] when skipped/clean.
 
         mirrors the coder: languages treesitter cannot check (unknown,
-        vimdoc/plaintext, html) are never blocked; a failed parse is blocked
-        for safety; diagnostics are reported with line/col.
+        vimdoc/plaintext, html) and ones its checker is too aggressive on
+        (glsl) are never blocked; a failed parse is blocked for safety;
+        diagnostics are reported with line/col.
+
+        python also goes through CPython's own parser: treesitter's error
+        recovery silently accepts unindented function/class bodies
+        ("def f():\\nreturn 1"), so a file python itself rejects would
+        otherwise land on disk.
         """
         if not self.config.get("syntax_check", True) or not HAVE_TSLP:
             return []
         lang = tslp.detect_language_from_path(str(target))
-        if not lang or lang in ("vimdoc", "html", "htm"):
+        if not lang or lang in ("vimdoc", "html", "htm", "glsl"):
             return []
         try:
             result = tslp.process(code, tslp.ProcessConfig(
@@ -464,10 +471,18 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             return []
         if not result:
             return ["failed to parse the file for syntax errors - file was not written to disk"]
-        return [
+        errors = [
             f"line {d.span.start_line + 1}, col {d.span.start_column + 1}: {d.message}"
             for d in (result.diagnostics or [])
         ]
+        if lang == "python":
+            # the BOM must go first, or a valid file is rejected as an
+            # illegal character; the parser itself flags the bad indentation
+            try:
+                ast.parse(code.lstrip("\ufeff"), filename=str(target))
+            except SyntaxError as e:
+                errors.append(f"line {e.lineno or 1}, col {e.offset or 1}: {e.msg}")
+        return errors
 
     # ----------------------
     # tools: writing
