@@ -44,6 +44,81 @@ from .paths import PathResolver
 from .webui import EditorRoutes
 
 
+def _strip_sig_comment(signature: str):
+    """drops a trailing # or // comment from a signature.
+
+    the language pack bakes the comment sitting after a def line into the
+    signature itself. quote-aware, so a # inside a quoted default
+    (color="#fff") survives.
+    """
+    quote = None
+    i = 0
+    while i < len(signature):
+        char = signature[i]
+        if quote:
+            if char == "\\":
+                i += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in ("'", '"', "`"):
+            quote = char
+        elif char == "#" or (char == "/" and signature[i + 1:i + 2] == "/"):
+            return signature[:i].rstrip()
+        i += 1
+    return signature
+
+
+def _look_up_decorators(lines: list, def_index: int):
+    """the decorator stack sitting directly above a definition, or None.
+
+    the pack's spans start at the def/class keyword, so the
+    decorated_definition wrapper (and every @decorator with it) is lost.
+    walks upward tracking bracket depth, so a decorator wrapped across
+    several lines is consumed as one chunk - a chunk only counts if it
+    bottoms out at a line starting with @.
+    """
+    decorators = []
+    chunk = []
+    depth = 0
+    i = def_index - 1
+    while i >= 0:
+        line = lines[i]
+        stripped = line.strip()
+        if depth == 0 and (not stripped or stripped.startswith("#")):
+            i -= 1
+            continue
+        # counting upward: a line closing more brackets than it opens means
+        # the statement continues on a line further above
+        depth += line.count(")") + line.count("]") - line.count("(") - line.count("[")
+        if depth < 0:
+            depth = 0
+        chunk.insert(0, _strip_sig_comment(stripped))
+        if depth == 0:
+            if chunk[0].startswith("@"):
+                decorators.insert(0, " ".join(chunk))
+            else:
+                break
+            chunk = []
+        i -= 1
+    if not decorators:
+        return None
+    joined = " ".join(decorators)
+    return joined if len(joined) <= 120 else joined[:117] + "..."
+
+
+def _short_import(source: str):
+    """module name from an import statement: 'import os' -> 'os',
+    'from pathlib import Path' -> 'pathlib', 'import glob as g' -> 'glob'.
+    keeps the outline narrow."""
+    text = " ".join(str(source or "").split())
+    if text.startswith("import "):
+        text = text[len("import "):]
+    elif text.startswith("from "):
+        text = text[len("from "):].split(" import ", 1)[0].strip()
+    return text.split(" as ", 1)[0].strip()
+
+
 class Editor(EditorRoutes, PathResolver, core.module.Module):
     """Browse, preview, search and manage your workspace folders from the webui sidebar, with one consistent AI file-tool family. Replaces foldertree, file_manager and media_reader."""
 
@@ -225,6 +300,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 for r in roots:
                     lines.append(f"- {r.name or str(r)} ({r})")
                 lines.append("file paths are relative to the workspace root; workspace is the name above, its path, or its 0-based index, or '<workspace>/<subfolder>' to scope into a subfolder, e.g. '" + (roots[0].name or str(roots[0])) + "/some/subdir' (see editor_workspaces)")
+                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file")
                 if self.config.get("read_outside_sandbox"):
                     lines.append("read-only tools may also open absolute paths outside these workspaces (read_outside_sandbox)")
                 if not self.config.get("sandboxed"):
@@ -443,6 +519,51 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                     out["note"] = "binary content is not returned inline"
         return self.result(out)
 
+    @core.module.tool
+    async def outline(self, workspace: str, path: str):
+        """lists every function and class in a source file with its line range and signature - map a file before reading it"""
+        try:
+            target = self._resolve_path(workspace, path, read_only=True)
+        except ValueError as e:
+            return self.result(str(e), False)
+        if not target.exists():
+            return self.result(f"'{target.name}' does not exist", False)
+        if not target.is_file():
+            return self.result(f"'{target.name}' is not a file", False)
+
+        max_read_kb = self._num_setting("max_read_kb", 10240)
+        if max_read_kb:
+            try:
+                if target.stat().st_size > max_read_kb * 1024:
+                    return self.result({
+                        "error": f"file is over max_read_kb ({max_read_kb} KB)",
+                        "note": "raise max_read_kb, or use grep to search it instead",
+                    }, False)
+            except OSError:
+                pass
+
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                code = f.read()
+        except UnicodeDecodeError:
+            return self.result("file is not valid utf-8 text - use info for metadata", False)
+        except Exception as e:
+            return self.result(str(e), False)
+
+        if not HAVE_TSLP:
+            return self.result({
+                "error": "this installation has no tree-sitter runtime, so files cannot be parsed",
+                "note": "use read instead",
+            }, False)
+
+        structure = await self._extract_code_structure(code, target)
+        if not structure:
+            return self.result({
+                "error": "no functions or classes found",
+                "note": "this file has no definitions to map, or its language is not supported - use read",
+            }, False)
+        return self.result(self._render_compact(structure))
+
     # -------------------------------
     # helper: syntax gate (treesitter)
     # -------------------------------
@@ -483,6 +604,104 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             except SyntaxError as e:
                 errors.append(f"line {e.lineno or 1}, col {e.offset or 1}: {e.msg}")
         return errors
+
+    # ------------------------------------
+    # helper: code structure (treesitter)
+    # ------------------------------------
+    async def _extract_code_structure(self, code, file_path):
+        """the treesitter structure of a source file: symbols with their line
+        spans, signatures and decorators, plus imports.
+
+        returns None when there is no grammar, the parse fails or the file
+        exposes no definitions, so the caller can tell the AI to read instead.
+        """
+        if not HAVE_TSLP:
+            return None
+        lang = tslp.detect_language_from_path(str(file_path))
+        if not lang:
+            return None
+        try:
+            extraction = tslp.process(code, tslp.ProcessConfig(
+                language=lang,
+                structure=True,
+                imports=True,
+                comments=False,
+                docstrings=False,
+                parse_timeout_ms=2000,
+            ))
+        except Exception:
+            return None
+        if not extraction:
+            return None
+
+        def flatten(items, prefix=""):
+            flattened = []
+            for item in items:
+                full_name = f"{prefix}{item.name}" if item.name else prefix.rstrip(".")
+                entry = {"name": full_name or "(anonymous)", "kind": str(item.kind)}
+                if item.span:
+                    entry["start_line"] = int(item.span.start_line) + 1
+                    entry["end_line"] = int(item.span.end_line) + 1
+                if item.signature:
+                    entry["signature"] = " ".join(item.signature.split())
+                flattened.append(entry)
+                if item.children:
+                    flattened.extend(flatten(item.children, prefix=f"{full_name}."))
+            return flattened
+
+        symbols = flatten(extraction.structure)
+        if not symbols:
+            return None
+
+        # the pack bakes comments into signatures and its spans skip
+        # decorators: clean both up so the outline shows what each symbol is
+        code_lines = code.splitlines()
+        for entry in symbols:
+            if entry.get("signature"):
+                cleaned = _strip_sig_comment(entry["signature"])
+                if cleaned:
+                    entry["signature"] = cleaned
+                else:
+                    del entry["signature"]
+            if entry.get("start_line"):
+                decorators = _look_up_decorators(code_lines, entry["start_line"] - 1)
+                if decorators:
+                    entry["decorators"] = decorators
+
+        imports = []
+        for imported in getattr(extraction, "imports", None) or []:
+            name = _short_import(getattr(imported, "source", ""))
+            if name and name not in imports:
+                imports.append(name)
+
+        return {"symbols": symbols, "imports": imports}
+
+    def _render_compact(self, structure):
+        """renders the symbol list as a compact text outline: one line per
+        definition, indented by nesting depth, prefixed with its line range."""
+        lines = []
+        for symbol in structure["symbols"]:
+            if "start_line" not in symbol:
+                continue
+            full_name = symbol["name"]
+            display = symbol.get("signature") or full_name.rsplit(".", 1)[-1].lstrip(".")
+            if not display:
+                continue
+            # broken grammar output: an anonymous single-line span adds nothing
+            if full_name == "(anonymous)" and len(display.split()) <= 1 \
+                    and symbol["end_line"] == symbol["start_line"]:
+                continue
+            depth = full_name.count(".") - (1 if full_name.startswith(".") else 0)
+            prefix = ""
+            if symbol.get("decorators"):
+                prefix = symbol["decorators"] + " "
+            # no separator before ln: at depth 0 - the indent IS the marker
+            indent = "    " * max(0, depth)
+            lines.append(f"{indent}ln:{symbol['start_line']}-{symbol['end_line']} {prefix}{display}")
+        imports = structure.get("imports")
+        if imports:
+            lines.append("imports: " + " | ".join(imports))
+        return "\n".join(lines)
 
     # ----------------------
     # tools: writing
