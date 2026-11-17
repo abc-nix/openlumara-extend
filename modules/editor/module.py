@@ -1,6 +1,6 @@
-# editor: workspace backbone + AI file tools (phase 2: read/navigation + write).
-# webui filetree (replaces foldertree) + the workspace resolution machinery
-# the AI tools build on.
+# editor: workspace backbone + one file-tool family for the AI. replaces
+# foldertree (webui filetree), file_manager, media_reader and the coder's file
+# tools, so coder and file_manager can stay disabled.
 #
 # -- AI GENERATED CODE (deepseek-v4-flash) :: 2026-10-16
 # Thin contract surface like docprocess: settings, events, AI tools and the
@@ -15,7 +15,7 @@
 #   the openlumara root (that was the file_manager bug).
 # - sandboxed ON: tools can only touch files inside configured workspaces.
 # - sandboxed OFF: workspaces still work for relative paths; absolute paths
-#   anywhere are also accepted (phase 2 uses this).
+#   anywhere are also accepted.
 # - the tree routes use foldertree's ws index; the AI tools use coder-style
 #   selectors (basename / full path / 0-based index).
 
@@ -192,7 +192,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         },
         "sandboxed": {
             "default": True,
-            "description": "When on, file access is restricted to the configured workspaces. When off, absolute paths anywhere also work (the AI tools; phase 2).",
+            "description": "When on, file access is restricted to the configured workspaces. When off, absolute paths anywhere also work (the AI tools).",
         },
         "read_outside_sandbox": {
             "default": False,
@@ -351,7 +351,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         return "\n\n".join(parts) if parts else None
 
     # --------------------
-    # AI tools (phase 2: read/navigation first; write/manage/search follow)
+    # AI tools (navigation, writing, the editing family, search)
     # --------------------
     @core.module.tool
     async def workspaces(self):
