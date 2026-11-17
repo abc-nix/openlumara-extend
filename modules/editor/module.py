@@ -1218,11 +1218,13 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         if span:
             # arbitrary text: nothing to infer, insert exactly what was passed
             block = reindented
-        elif before:
-            # exactly one blank line between the new block and the neighbour
-            block = reindented + [""]
         else:
-            block = [""] + reindented
+            # a block landing between two neighbours needs a blank line on each
+            # side that does not already have one - adding unconditionally
+            # doubled an existing blank on one side and left the other glued
+            needs_before = insert_idx > 0 and lines[insert_idx - 1].strip() != ""
+            needs_after = insert_idx < len(lines) and lines[insert_idx].strip() != ""
+            block = ([""] if needs_before else []) + reindented + ([""] if needs_after else [])
 
         merged = "\n".join(lines[:insert_idx] + block + lines[insert_idx:])
         if not prose:
