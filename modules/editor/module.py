@@ -128,7 +128,7 @@ _PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".rst")
 # no parser, so these also work when the tree-sitter runtime is missing
 _CONFIG_SUFFIXES = (".json", ".yaml", ".yml")
 
-# never collect more key rows than this, even with outline_max_keys = 0
+# never collect more landmark rows than this, even with outline_max_keys = 0
 _CONFIG_KEY_CEILING = 50000
 
 # a key line in a yaml mapping (matched on the text after any "- "): a quoted
@@ -243,7 +243,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         "outline_max_keys": {
             "type": "number",
             "default": 200,
-            "description": "Maximum keys outline lists for json/yaml config files (they get a key map instead of a symbol map). 0 = unlimited, up to a 50000-key safety ceiling.",
+            "description": "Maximum rows outline lists for json/yaml files: config keys, or one row per record in a json record list. 0 = unlimited, up to a 50000-row safety ceiling.",
         },
         "grep_max_file_kb": {
             "type": "number",
@@ -364,7 +364,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 for r in roots:
                     lines.append(f"- {r.name or str(r)} ({r})")
                 lines.append("file paths are relative to the workspace root; workspace is the name above, its path, or its 0-based index, or '<workspace>/<subfolder>' to scope into a subfolder, e.g. '" + (roots[0].name or str(roots[0])) + "/some/subdir' (see editor_workspaces)")
-                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file (markdown/rst files get a heading map, json/yaml files a key map instead)")
+                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file (markdown/rst files get a heading map, json/yaml configs a key map, json record lists a line-per-record map instead)")
                 lines.append("editor_replace_block and editor_insert_block take a definition name ('Class.method'), a markdown/rst heading ('Settings'), or a line range ('ln:12-40') as their target")
                 if self.config.get("read_outside_sandbox"):
                     lines.append("read-only tools may also open absolute paths outside these workspaces (read_outside_sandbox)")
@@ -586,7 +586,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def outline(self, workspace: str, path: str):
-        """lists every function and class in a source file with its line range and signature, a markdown/rst file's headings, or a json/yaml config's keys with their lines - map a file before reading it"""
+        """lists every function and class in a source file with its line range and signature, a markdown/rst file's headings, a json/yaml config's keys, or a json record list's entries (line, label, size) - map a file before reading it"""
         try:
             target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
@@ -641,7 +641,8 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 return self.result({
                     "content": "\n".join(keys),
                     "truncated": True,
-                    "truncation_note": (f"showing the first {len(keys)} keys - raise "
+                    # "entries" covers both reports: config keys and record rows
+                    "truncation_note": (f"showing the first {len(keys)} entries - raise "
                                         "outline_max_keys for the rest (0 = unlimited)"),
                 })
             return self.result("\n".join(keys))
@@ -1022,18 +1023,144 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         walk(data, "", 0)
         return rows
 
-    def _config_key_rows(self, code, suffix, limit):
-        """(rows, capped) - the key rows of a config file, capped at limit.
+    def _json_element_lines(self, code):
+        """the 1-based line each element of a root-level json array starts on.
 
-        limit = 0 means no limit (the ceiling still applies). one row past the
-        limit is collected first, so a file with exactly `limit` keys is not
-        reported as truncated. invalid json (or a yaml file without a single
-        key) returns no rows, which the caller reports as an error the model
-        can act on.
+        walks the brackets and records a line only while the root array is the
+        single open container, so a record's own nested lists are ignored.
+        string literals are blanked first, like the depth count elsewhere.
+        """
+        starts = []
+        depth = 0
+        for i, line in enumerate(code.split("\n")):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if depth == 1 and stripped[0] in "{[":
+                starts.append(i + 1)
+            bare = _JSON_STRING.sub('""', stripped)
+            depth += (bare.count("{") + bare.count("[")
+                      - bare.count("}") - bare.count("]"))
+            if depth < 0:
+                depth = 0
+        return starts
+
+    def _looks_like_identifier(self, name):
+        """True for field names that name a record instead of describing it.
+
+        "tool_call_id" is the worst offender: it is longer than a short tool
+        result, so 'first long string wins' printed call ids as the record's
+        text. shape-based and short: id/uuid/hash/key suffixes.
+        """
+        name = str(name).lower()
+        return (name == "id" or name.endswith(("_id", "_uuid", "uuid", "_hash", "_key"))
+                or name in ("key", "hash"))
+
+    def _record_summary(self, record):
+        """one landmark line for a record, from shapes only (no field names).
+
+        short scalars come first, because they identify the record ("role=user",
+        "type=click", "timestamp=1794…"); the longest string that is not an
+        identifier becomes '1234B "first words"' (ids lose to results, or a
+        tool row showed its call id instead of the output); nested containers
+        are reduced to a count ("2 tool_calls"). a schema dump would be the same
+        for every element and so identify nothing - that was the first, useless
+        version of this map.
+        """
+        labels = []
+        best = None  # (length, rendered text): the longest non-id string wins
+        nested = []
+        for key, value in record.items():
+            if isinstance(value, bool) or isinstance(value, (int, float)):
+                labels.append(f"{key}={value}")
+            elif isinstance(value, str):
+                plain = " ".join(value.split())
+                if not plain:
+                    continue
+                if len(plain) <= 24:
+                    labels.append(f"{key}={plain}")
+                elif not self._looks_like_identifier(key):
+                    if best is None or len(plain) > best[0]:
+                        cut = "\u2026" if len(plain) > 40 else ""
+                        # no wrapping quotes: a json result brings its own, and
+                        # '"{'status"…' reads as a typo
+                        best = (len(plain), f"{len(value)}B {plain[:40]}{cut}")
+            elif isinstance(value, list):
+                if value:
+                    nested.append(f"{len(value)} {key}")
+            elif isinstance(value, dict):
+                for inner_key, inner in value.items():
+                    if isinstance(inner, bool) or isinstance(inner, (int, float)):
+                        labels.append(f"{inner_key}={inner}")
+                    elif isinstance(inner, str) and 0 < len(inner) <= 24 and "\n" not in inner:
+                        labels.append(f"{inner_key}={inner}")
+        parts = labels[:3]
+        if best:
+            parts.append(best[1])
+        parts.extend(nested[:2])
+        return " ".join(parts) or "(empty record)"
+
+    def _json_record_rows(self, code, data, cap):
+        """(rows, capped) or None - a table of contents for a root array of objects.
+
+        a homogeneous record list has no keys worth mapping: every element
+        repeats them, so the map degenerated into N copies of one schema and
+        a 4.9 MB chat log produced 200 rows that all said "role". the landmark
+        is the record, so each row is its line plus a summary, and the first row
+        is the collection itself (count and the union of its fields).
+
+        returns None when the element lines cannot be lined up with the parsed
+        elements (a one-line document, or an element starting inline), so the
+        caller can fall back to the key map instead of printing wrong lines.
+        """
+        starts = self._json_element_lines(code)
+        if len(starts) != len(data):
+            return None
+        fields = []
+        for record in data:
+            for key in record:
+                if key not in fields:
+                    fields.append(key)
+        plural = "" if len(data) == 1 else "s"
+        rows = [(None, 0, f"{len(data)} record{plural} \u00b7 fields: {', '.join(fields)}")]
+        for line, record in zip(starts, data):
+            rows.append((line, 0, self._record_summary(record)))
+            if cap and len(rows) >= cap:
+                break
+        return rows
+
+    def _config_key_rows(self, code, suffix, limit):
+        """(rows, capped) - the landmark rows of a config file, capped at limit.
+
+        two json shapes, two reports: an object tree gets a key map, a
+        root-level array gets a record table of contents (see
+        _json_record_rows). limit = 0 means no limit (the ceiling still
+        applies). one row past the limit is collected first, so a file with
+        exactly `limit` rows is not reported as truncated. invalid json (or a
+        yaml file without a single key) returns no rows, which the caller
+        reports as an error the model can act on.
         """
         want = limit or _CONFIG_KEY_CEILING
         cap = want + 1
         if suffix == ".json":
+            # a root-level array is not an object tree: its keys repeat per
+            # element, so a key map would say nothing about where anything is
+            if code.lstrip("\ufeff \t\r\n").startswith("["):
+                try:
+                    data = json.loads(code.lstrip("\ufeff"))
+                except Exception:
+                    data = None
+                if isinstance(data, list) and data:
+                    if all(isinstance(record, dict) for record in data):
+                        rows = self._json_record_rows(code, data, cap)
+                        if rows is not None:
+                            return rows[:want], len(rows) > want
+                        # can't align element lines (a one-line document): the
+                        # path walk below still names the keys, so fall through
+                    else:
+                        kinds = ", ".join(sorted({type(value).__name__ for value in data}))
+                        plural = "" if len(data) == 1 else "s"
+                        return [(None, 0, f"{len(data)} item{plural} ({kinds})")], False
             # a minified document has no per-key line to point at, so it goes
             # straight to the path walk - the line scan would map only the keys
             # that happen to share a line with the root bracket
