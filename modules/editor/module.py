@@ -363,11 +363,10 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 lines = [f"## Editor workspaces ({mode} mode):"]
                 for r in roots:
                     lines.append(f"- {r.name or str(r)} ({r})")
-                lines.append("file paths are relative to the workspace root; workspace is the name above, its path, or its 0-based index, or '<workspace>/<subfolder>' to scope into a subfolder, e.g. '" + (roots[0].name or str(roots[0])) + "/some/subdir' (see editor_workspaces)")
-                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file (markdown/rst files get a heading map, json/yaml configs a key map, json record lists a line-per-record map instead)")
-                lines.append("editor_replace_block and editor_insert_block take a definition name ('Class.method'), a markdown/rst heading ('Settings'), or a line range ('ln:12-40') as their target")
+                lines.append("paths are workspace-relative; pass a workspace name, its path or its 0-based index, or 'name/subdir' to scope (see editor_workspaces)")
+                lines.append("use editor_outline before editor_read: it maps definitions, headings, config keys or records with their positions")
                 if self.config.get("read_outside_sandbox"):
-                    lines.append("read-only tools may also open absolute paths outside these workspaces (read_outside_sandbox)")
+                    lines.append("read-only tools may also use absolute paths outside the workspaces")
                 if not self.config.get("sandboxed"):
                     lines.append("pass an empty workspace name to use absolute paths anywhere")
                 parts.append("\n".join(lines))
@@ -586,7 +585,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def outline(self, workspace: str, path: str):
-        """lists every function and class in a source file with its line range and signature, a markdown/rst file's headings, a json/yaml config's keys, or a json record list's entries (line, label, size) - map a file before reading it"""
+        """maps a file before reading it: definitions, headings, config keys or records, each with its position"""
         try:
             target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
@@ -1367,7 +1366,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def edit(self, workspace: str, path: str, original_code: str, replacement_code: str):
-        """replaces original_code with replacement_code in a file. fails if nothing matched. syntax-checked"""
+        """replaces original_code with replacement_code in a file; fails if nothing matched. for a small exact snippet - to replace a whole definition or section use replace_block instead. syntax-checked"""
         try:
             target, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
@@ -1398,7 +1397,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def replace_block(self, workspace: str, path: str, target: str, content: str):
-        """replaces a whole block: a definition by name ('Class.method'), a markdown/rst section by heading ('Settings'), or exact lines ('ln:12-40'). code is re-indented and syntax-checked"""
+        """replaces a whole block: a definition ('Class.method'), a markdown/rst heading ('Settings') or exact lines ('ln:12-40'). prefer it over edit for whole definitions/sections: re-indented, and the merged file is syntax-checked"""
         try:
             target_path, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
@@ -1492,7 +1491,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def insert_block(self, workspace: str, path: str, target: str, content: str, where: str = "before"):
-        """inserts content before/after a definition ('Class.method'), a markdown/rst section ('Settings') or a line ('ln:12'). code is re-indented and syntax-checked"""
+        """inserts content before/after a definition ('Class.method'), a markdown/rst heading ('Settings') or a line ('ln:12'); it adds a block rather than rewriting one - use edit to change existing text, append for end-of-file. re-indented, syntax-checked"""
         if str(where).strip().lower() not in ("before", "after"):
             return self.result(f"'where' must be 'before' or 'after', not '{where}'", False)
         before = str(where).strip().lower() == "before"
