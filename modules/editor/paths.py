@@ -16,6 +16,7 @@
 #   paths and symlink escapes in one check. Non-strict: missing paths pass
 #   resolution and are rejected per-call instead.
 
+import errno
 import os
 from pathlib import Path
 
@@ -292,3 +293,50 @@ class PathResolver:
     def _resolve_path(self, workspace, path, read_only=False):
         """absolute Path for the AI tools - see _resolve_with_base."""
         return self._resolve_with_base(workspace, path, read_only=read_only)[0]
+
+    def _open_target(self, target, mode, base=None):
+        """open a resolved path without following symlinks.
+
+        with a base (workspace root or scoped boundary) core.sandbox_open walks
+        every component, so a symlink swapped in AFTER resolution fails with a
+        clean ValueError instead of redirecting the open somewhere else.
+
+        without a base - a free absolute path from read_outside_sandbox or
+        sandboxed mode off - only the final component is guarded. anchoring such
+        a path to '/' would reject legitimate symlinked system folders
+        (/var/run, a synced ~/.config, a symlinked ~/Downloads).
+
+        modes: r / w / x / a, optionally with b. returns the file object.
+        """
+        flags = getattr(os, "O_NOFOLLOW", 0)
+        if "x" in mode:
+            flags |= os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        elif "a" in mode:
+            flags |= os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        elif "w" in mode:
+            flags |= os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        elif "r" in mode:
+            flags |= os.O_RDONLY
+        else:
+            raise ValueError(f"unsupported open mode: {mode}")
+
+        try:
+            if base is not None:
+                relative = str(Path(target).relative_to(base))
+                fd = core.sandbox_open(str(base), relative, flags, 0o666)
+            else:
+                fd = os.open(str(target), flags, 0o666)
+        except OSError as e:
+            # ELOOP: symlink at the final component. ENOTDIR: a symlinked (or
+            # non-directory) component in the middle of the walk - the kernel
+            # checks O_DIRECTORY before the no-follow rule, so core.sandbox_open
+            # only maps the final-component case.
+            if e.errno in (getattr(errno, "ELOOP", None), errno.ENOTDIR):
+                raise ValueError("Symlinks are not allowed in the requested path")
+            raise
+
+        # fdopen has no 'x' mode; the O_EXCL already happened in os.open
+        fdopen_mode = mode.replace("x", "w")
+        if "b" in mode:
+            return os.fdopen(fd, fdopen_mode)
+        return os.fdopen(fd, fdopen_mode, encoding="utf-8")

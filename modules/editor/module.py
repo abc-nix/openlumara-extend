@@ -20,6 +20,7 @@
 #   selectors (basename / full path / 0-based index).
 
 import ast
+import errno
 import os
 import asyncio
 import difflib
@@ -105,6 +106,23 @@ def _look_up_decorators(lines: list, def_index: int):
         return None
     joined = " ".join(decorators)
     return joined if len(joined) <= 120 else joined[:117] + "..."
+
+
+def _nofollow_open(path, mode="r"):
+    """open a text file refusing a symlink at the final component.
+
+    used by the grep walk: it opens thousands of paths, and core.sandbox_open
+    opens EVERY component of every path - the wrong cost at that scale.
+    os.walk already refuses to descend symlinked folders (followlinks=False),
+    so one O_NOFOLLOW open per file is the right guard here.
+    """
+    try:
+        fd = os.open(str(path), getattr(os, "O_NOFOLLOW", 0) | os.O_RDONLY)
+    except OSError as e:
+        if e.errno == getattr(errno, "ELOOP", None):
+            raise ValueError("Symlinks are not allowed in the requested path")
+        raise
+    return os.fdopen(fd, mode, encoding="utf-8")
 
 
 def _short_import(source: str):
