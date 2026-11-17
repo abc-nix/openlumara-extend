@@ -71,4 +71,31 @@
             word-break: break-all;
         }
     }
+
+    /* block card (replace_block / insert_block): the NEW block only. the text
+       being replaced is deliberately never carried here - it would cost
+       context, which is the whole reason the block tools exist. */
+    .editor-block-pre {
+        margin: 0;
+        font-family: var(--code-font);
+        font-size: 0.8rem;
+        line-height: 1.55;
+        max-height: 260px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        tab-size: 4;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px 10px;
+        /* the code theme paints an opaque .hljs background; keep the card's */
+        background: transparent;
+    }
+
+    .block-head {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+    }
 }

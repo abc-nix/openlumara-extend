@@ -234,3 +234,14 @@ function _editorDiffSideHtmlNow(original, replacement, lang) {
             '</div>';
     }).join('');
 }
+
+
+// block card (replace_block / insert_block): the new block, highlighted but
+// WITHOUT a line gutter - a block's own line 1 is not the file's line 12, so
+// numbering it would mislead. memoized/throttled like codeLinesHtml, or the
+// highlight re-runs for every streamed chunk.
+function editorBlockHtml(code, lang, cacheKey) {
+    if (!code) return '';
+    return streamMemo('block:' + cacheKey, [code, lang], () =>
+        `<pre class="editor-block-pre hljs">${highlightedCode(code, lang)}</pre>`);
+}

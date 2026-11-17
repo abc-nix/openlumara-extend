@@ -1,8 +1,10 @@
 <!-- -- AI GENERATED CODE (deepseek-v4.1-flash) :: (2026-10-25) harness:openlumara
    editor module tool views: read/write/append/create (code block), edit
    (diff), grep (grouped matches), path (glob list + move/copy/delete/
-   mkdir one-liner) and media (read_media image, fetched from the module
-   route). fills the "tool_views" slot of the webui's
+   mkdir one-liner), media (read_media image, fetched from the module route),
+   outline (symbol/heading map as a monospace box) and block (replace_block /
+   insert_block: target + the NEW block ONLY - never the text being replaced,
+   which would cost context). fills the "tool_views" slot of the webui's
    templates/chat/tool_displays.html via the extension system: the core
    template calls extension_slot("tool_views"), which renders this macro
    because the file mirrors the caller's relative path (chat/tool_displays.html).
@@ -122,6 +124,40 @@
             </template>
         </div>
         <div class="grep-note" x-show="response?.content?.note" x-text="response?.content?.note ?? ''"></div>
+    </div>
+</template>
+
+<template x-if="toolDisplayView(tool) === 'editor-outline'"
+          x-data="{ get response() { return toolResponse(tool) } }">
+    <div>
+        <!-- the symbol/heading map is plain text: render it as a monospace box,
+             not as a json string with escaped newlines -->
+        <div class="file-read-box" x-show="typeof response?.content === 'string'"
+             x-text="typeof response?.content === 'string' ? response.content : ''"></div>
+        <div class="display-footer" x-text="toolArgs(tool, cacheKey)?.path ?? ''"></div>
+    </div>
+</template>
+
+<template x-if="toolDisplayView(tool) === 'editor-block'"
+          x-data="{ get args() { return toolArgs(tool, cacheKey) },
+                    get response() { return toolResponse(tool) },
+                    get verb() {
+                        // NOTE: a sibling getter is only reachable through `this`
+                        // inside an x-data object literal - a bare `args` here is
+                        // a ReferenceError and leaves the label empty.
+                        if (toolDisplayName(tool) !== 'editor_insert_block') return 'replacing';
+                        return 'inserting ' + (this.args.where === 'after' ? 'after' : 'before');
+                    },
+                    get html() { return editorBlockHtml(this.args.content, editorLangForPath(this.args.path), cacheKey) } }">
+    <div>
+        <div class="block-head">
+            <span class="grep-running-label" x-text="verb"></span>
+            <span class="grep-running-pattern" x-show="args.target" x-text="args.target ?? ''"></span>
+        </div>
+        <div x-show="html" x-auto-scroll x-fade-html="html"></div>
+        <!-- the tool's own result line: "was lines 12-40", "had no body", ... -->
+        <div class="grep-note" x-show="response?.content" x-text="response?.content ?? ''"></div>
+        <div class="display-footer" x-show="args.path" x-text="args.path ?? ''"></div>
     </div>
 </template>
 

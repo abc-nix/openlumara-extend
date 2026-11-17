@@ -46,4 +46,19 @@ document.addEventListener('alpine:init', () => {
         match: /^editor_read_media$/,
         view: 'editor-media'
     });
+
+    // editor_outline: the symbol/heading map as a monospace box
+    registerToolDisplay({
+        match: /^editor_outline$/,
+        view: 'editor-outline'
+    });
+
+    // editor_replace_block / editor_insert_block: block card (target + the NEW
+    // block + the tool's result line). no diff on purpose: showing the replaced
+    // text would put it in the tool result, i.e. in the context, which is the
+    // cost the block tools exist to avoid.
+    registerToolDisplay({
+        match: /^editor_(replace|insert)_block$/,
+        view: 'editor-block'
+    });
 });
