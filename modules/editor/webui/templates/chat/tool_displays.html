@@ -128,12 +128,26 @@
 </template>
 
 <template x-if="toolDisplayView(tool) === 'editor-outline'"
-          x-data="{ get response() { return toolResponse(tool) } }">
+          x-data="{ get response() { return toolResponse(tool) },
+                    get map() {
+                        // the symbol/heading/key map is plain text. a capped map
+                        // comes back wrapped ({content, truncated,
+                        // truncation_note} - the shape read uses), and checking
+                        // only for a string left that box empty
+                        const content = this.response?.content;
+                        if (typeof content === 'string') return content;
+                        return typeof content?.content === 'string' ? content.content : '';
+                    },
+                    get note() {
+                        const content = this.response?.content;
+                        if (typeof content === 'string') return '';
+                        return content?.truncation_note ?? content?.note ?? content?.error ?? '';
+                    } }">
     <div>
-        <!-- the symbol/heading map is plain text: render it as a monospace box,
-             not as a json string with escaped newlines -->
-        <div class="file-read-box" x-show="typeof response?.content === 'string'"
-             x-text="typeof response?.content === 'string' ? response.content : ''"></div>
+        <!-- render it as a monospace box, not as a json string with escaped
+             newlines; NOTE: sibling getters need `this.` (see editor-block) -->
+        <div class="file-read-box" x-show="map" x-text="map"></div>
+        <div class="grep-note" x-show="note" x-text="note"></div>
         <div class="display-footer" x-text="toolArgs(tool, cacheKey)?.path ?? ''"></div>
     </div>
 </template>
