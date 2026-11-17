@@ -322,7 +322,12 @@ class PathResolver:
 
         try:
             if base is not None:
-                relative = str(Path(target).relative_to(base))
+                try:
+                    relative = str(Path(target).relative_to(base))
+                except ValueError:
+                    # never let a stale boundary turn into a raw relative_to
+                    # error: say what happened
+                    raise ValueError("path is not inside its workspace boundary")
                 fd = core.sandbox_open(str(base), relative, flags, 0o666)
             else:
                 fd = os.open(str(target), flags, 0o666)
@@ -340,3 +345,28 @@ class PathResolver:
         if "b" in mode:
             return os.fdopen(fd, fdopen_mode)
         return os.fdopen(fd, fdopen_mode, encoding="utf-8")
+
+    def _read_bytes(self, target, base=None):
+        """read a file's bytes through _open_target.
+
+        separate from read_bytes() so the webui routes can hand it to
+        asyncio.to_thread without blocking the loop.
+        """
+        with self._open_target(target, "rb", base) as f:
+            return f.read()
+
+    def _nofollow_open(self, path, mode="r"):
+        """open a text file refusing a symlink at the final component.
+
+        used by the walk-based tools (grep, content search): they open thousands
+        of paths, and _open_target's per-component sandbox walk is the wrong
+        cost at that scale. os.walk does not descend symlinked folders
+        (followlinks=False), so one O_NOFOLLOW open per file is the right guard.
+        """
+        try:
+            fd = os.open(str(path), getattr(os, "O_NOFOLLOW", 0) | os.O_RDONLY)
+        except OSError as e:
+            if e.errno == getattr(errno, "ELOOP", None):
+                raise ValueError("Symlinks are not allowed in the requested path")
+            raise
+        return os.fdopen(fd, mode, encoding="utf-8")

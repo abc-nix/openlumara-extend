@@ -85,8 +85,8 @@ class EditorRoutes:
                         "size": None if is_dir else stat.st_size,
                         "modified": stat.st_mtime,
                     })
-        except PermissionError:
-            return self.result(f"permission denied: '{target.name}'", False)
+        except (OSError, ValueError) as e:
+            return self.result(f"could not read '{target.name}': {e}", False)
 
         # folders first, then files, both A-Z (case-insensitive)
         entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
@@ -120,7 +120,7 @@ class EditorRoutes:
         kb = self._num_setting("max_preview_kb", self._DEFAULT_MAX_PREVIEW_KB)
 
         try:
-            with open(target, "rb") as f:
+            with self._open_target(target, "rb", root) as f:
                 # one open: magic-byte detection and the text read share the
                 # same handle
                 guess = filetype.guess(f)
@@ -131,7 +131,7 @@ class EditorRoutes:
                     return info  # previews disabled: metadata only
                 f.seek(0)
                 blob = f.read(kb * 1024 + 1)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             return self.result(f"could not read '{target.name}': {e}", False)
 
         # errors="replace": a char split at the limit must not turn a
@@ -253,7 +253,7 @@ class EditorRoutes:
                     try:
                         if os.path.getsize(fpath) > self.ui_max_read_bytes:
                             continue
-                        with open(fpath, "r", encoding="utf-8") as f:
+                        with self._nofollow_open(fpath) as f:
                             for line_num, line in enumerate(f, 1):
                                 if pattern:
                                     try:
@@ -271,7 +271,9 @@ class EditorRoutes:
                                     if len(results) >= max_matches:
                                         truncated = True
                                         break
-                    except (UnicodeDecodeError, IsADirectoryError, PermissionError, OSError):
+                    except (UnicodeDecodeError, IsADirectoryError, PermissionError,
+                            OSError, ValueError):
+                        # unreadable or symlinked file: skip it
                         continue
                     if truncated:
                         break
@@ -308,9 +310,9 @@ class EditorRoutes:
             return self.result(f"'{target.name}' is over max_attach_mb ({cap_mb} MB)", False)
 
         try:
-            data = await asyncio.to_thread(target.read_bytes)
-        except PermissionError:
-            return self.result(f"permission denied: '{target.name}'", False)
+            data = await asyncio.to_thread(self._read_bytes, target, root)
+        except (OSError, ValueError) as e:
+            return self.result(f"could not read '{target.name}': {e}", False)
 
         mime, _ = mimetypes.guess_type(target.name)
         return {
@@ -332,7 +334,7 @@ class EditorRoutes:
         """
         q = query or {}
         try:
-            target = self._resolve_path(
+            target, base = self._resolve_with_base(
                 str(q.get("workspace", "")), str(q.get("path", "")), read_only=True)
         except ValueError as e:
             return self.result(str(e), False)
@@ -350,9 +352,9 @@ class EditorRoutes:
             return self.result(f"'{target.name}' is over max_image_mb ({cap_mb} MB)", False)
 
         try:
-            data = await asyncio.to_thread(target.read_bytes)
-        except PermissionError:
-            return self.result(f"permission denied: '{target.name}'", False)
+            data = await asyncio.to_thread(self._read_bytes, target, base)
+        except (OSError, ValueError) as e:
+            return self.result(f"could not read '{target.name}': {e}", False)
 
         kind = filetype.guess(data[:8192])
         mime = (kind.mime if kind
@@ -439,8 +441,8 @@ class EditorRoutes:
 
         try:
             os.rename(target, dest)
-        except PermissionError:
-            return self.result(f"permission denied: '{target.name}'", False)
+        except (OSError, ValueError) as e:
+            return self.result(f"could not read '{target.name}': {e}", False)
         except OSError as e:
             return self.result(f"rename failed: {e}", False)
 
@@ -469,7 +471,7 @@ class EditorRoutes:
                 parent = target.parent
                 if parent:
                     parent.mkdir(parents=True, exist_ok=True)
-                with open(target, "x", encoding="utf-8") as f:
+                with self._open_target(target, "x", root) as f:
                     f.write("")
         except FileExistsError:
             return self.result("already exists", False)

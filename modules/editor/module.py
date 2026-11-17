@@ -20,7 +20,6 @@
 #   selectors (basename / full path / 0-based index).
 
 import ast
-import errno
 import os
 import asyncio
 import difflib
@@ -106,23 +105,6 @@ def _look_up_decorators(lines: list, def_index: int):
         return None
     joined = " ".join(decorators)
     return joined if len(joined) <= 120 else joined[:117] + "..."
-
-
-def _nofollow_open(path, mode="r"):
-    """open a text file refusing a symlink at the final component.
-
-    used by the grep walk: it opens thousands of paths, and core.sandbox_open
-    opens EVERY component of every path - the wrong cost at that scale.
-    os.walk already refuses to descend symlinked folders (followlinks=False),
-    so one O_NOFOLLOW open per file is the right guard here.
-    """
-    try:
-        fd = os.open(str(path), getattr(os, "O_NOFOLLOW", 0) | os.O_RDONLY)
-    except OSError as e:
-        if e.errno == getattr(errno, "ELOOP", None):
-            raise ValueError("Symlinks are not allowed in the requested path")
-        raise
-    return os.fdopen(fd, mode, encoding="utf-8")
 
 
 def _short_import(source: str):
@@ -390,7 +372,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def list(self, workspace: str, path: str = ""):
         """lists one directory level, folders first. paths are relative to the workspace root"""
         try:
-            target = self._resolve_path(workspace, path, read_only=True)
+            target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
             return self.result(str(e), False)
         if not target.exists():
@@ -432,7 +414,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                    char_start: int = None, char_end: int = None):
         """reads a file, or part of it. use line_start and line_end to read in chunks; char_start/char_end read an exact character window of each line (bypasses max_line_chars)"""
         try:
-            target = self._resolve_path(workspace, path, read_only=True)
+            target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
             return self.result(str(e), False)
         if not target.exists():
@@ -453,7 +435,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 }, False)
 
         try:
-            with open(target, "r", encoding="utf-8") as f:
+            with self._open_target(target, "r", base) as f:
                 content = f.read()
         except UnicodeDecodeError:
             return self.result("file is not valid utf-8 text - use info for metadata", False)
@@ -531,7 +513,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def info(self, workspace: str, path: str):
         """returns metadata for a file or folder (size, dates, type). for files also the detected mime (magic bytes) and whether it is text"""
         try:
-            target = self._resolve_path(workspace, path, read_only=True)
+            target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
             return self.result(str(e), False)
         if not target.exists():
@@ -553,7 +535,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         }
         if target.is_file():
             try:
-                with open(target, "rb") as f:
+                with self._open_target(target, "rb", base) as f:
                     head = f.read(8192)  # enough for magic-byte detection
                 kind = filetype.guess(head)
             except Exception:
@@ -579,7 +561,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def outline(self, workspace: str, path: str):
         """lists every function and class in a source file with its line range and signature, or a markdown/rst file's headings - map a file before reading it"""
         try:
-            target = self._resolve_path(workspace, path, read_only=True)
+            target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
             return self.result(str(e), False)
         if not target.exists():
@@ -599,7 +581,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 pass
 
         try:
-            with open(target, "r", encoding="utf-8") as f:
+            with self._open_target(target, "r", base) as f:
                 code = f.read()
         except UnicodeDecodeError:
             return self.result("file is not valid utf-8 text - use info for metadata", False)
@@ -986,12 +968,12 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def write(self, workspace: str, path: str, content: str):
         """writes content to a file, overwriting it. auto-creates parent folders. no syntax check (raw) - use create/edit for gated writes"""
         try:
-            target = self._resolve_path(workspace, path)
+            target, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
             return self.result(str(e), False)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            with open(target, "w", encoding="utf-8") as f:
+            with self._open_target(target, "w", base) as f:
                 f.write(content)
         except Exception as e:
             return self.result(str(e), False)
@@ -1001,12 +983,12 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def append(self, workspace: str, path: str, content: str):
         """appends content to a file, creating it if missing. no syntax check (raw)"""
         try:
-            target = self._resolve_path(workspace, path)
+            target, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
             return self.result(str(e), False)
         if target.exists():
             try:
-                with open(target, "r", encoding="utf-8") as f:
+                with self._open_target(target, "r", base) as f:
                     f.read()
             except UnicodeDecodeError:
                 return self.result("file is not valid utf-8 text - cannot append to it", False)
@@ -1014,7 +996,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 return self.result(str(e), False)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            with open(target, "a", encoding="utf-8") as f:
+            with self._open_target(target, "a", base) as f:
                 f.write(content)
         except Exception as e:
             return self.result(str(e), False)
@@ -1024,7 +1006,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def create(self, workspace: str, path: str, content: str):
         """creates a new file, refusing to overwrite existing ones. auto-creates parent folders. syntax-checked"""
         try:
-            target = self._resolve_path(workspace, path)
+            target, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
             return self.result(str(e), False)
         errors = await self._syntax_gate(content, target)
@@ -1032,7 +1014,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             return self.result({"errors": errors, "message": "syntax check failed - file was not written"}, False)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            with open(target, "x", encoding="utf-8") as f:
+            with self._open_target(target, "x", base) as f:
                 f.write(content)
         except FileExistsError:
             return self.result(f"'{path}' already exists - use write to overwrite or edit to modify", False)
@@ -1044,11 +1026,11 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def edit(self, workspace: str, path: str, original_code: str, replacement_code: str):
         """replaces original_code with replacement_code in a file. fails if nothing matched. syntax-checked"""
         try:
-            target = self._resolve_path(workspace, path)
+            target, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
             return self.result(str(e), False)
         try:
-            with open(target, "r", encoding="utf-8") as f:
+            with self._open_target(target, "r", base) as f:
                 current = f.read()
         except UnicodeDecodeError:
             return self.result("file is not valid utf-8 text - cannot edit it", False)
@@ -1065,7 +1047,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         if errors:
             return self.result({"errors": errors, "message": "syntax check failed - file was not written"}, False)
         try:
-            with open(target, "w", encoding="utf-8") as f:
+            with self._open_target(target, "w", base) as f:
                 f.write(new_content)
         except Exception as e:
             return self.result(str(e), False)
@@ -1075,14 +1057,14 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def replace_block(self, workspace: str, path: str, target: str, content: str):
         """replaces a whole block: a definition by name ('Class.method'), a markdown/rst section by heading ('Settings'), or exact lines ('ln:12-40'). code is re-indented and syntax-checked"""
         try:
-            target_path = self._resolve_path(workspace, path)
+            target_path, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
             return self.result(str(e), False)
         if not target_path.is_file():
             return self.result(f"'{target_path.name}' is not a file", False)
 
         try:
-            with open(target_path, "r", encoding="utf-8") as f:
+            with self._open_target(target_path, "r", base) as f:
                 code = f.read()
         except UnicodeDecodeError:
             return self.result("file is not valid utf-8 text - cannot edit it", False)
@@ -1151,7 +1133,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                     "message": "syntax check failed - file was not written",
                 }, False)
         try:
-            with open(target_path, "w", encoding="utf-8") as f:
+            with self._open_target(target_path, "w", base) as f:
                 f.write(merged)
         except Exception as e:
             return self.result(str(e), False)
@@ -1173,14 +1155,14 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         before = str(where).strip().lower() == "before"
 
         try:
-            target_path = self._resolve_path(workspace, path)
+            target_path, base = self._resolve_with_base(workspace, path)
         except ValueError as e:
             return self.result(str(e), False)
         if not target_path.is_file():
             return self.result(f"'{target_path.name}' is not a file", False)
 
         try:
-            with open(target_path, "r", encoding="utf-8") as f:
+            with self._open_target(target_path, "r", base) as f:
                 code = f.read()
         except UnicodeDecodeError:
             return self.result("file is not valid utf-8 text - cannot edit it", False)
@@ -1251,7 +1233,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                     "message": "syntax check failed - file was not written",
                 }, False)
         try:
-            with open(target_path, "w", encoding="utf-8") as f:
+            with self._open_target(target_path, "w", base) as f:
                 f.write(merged)
         except Exception as e:
             return self.result(str(e), False)
@@ -1487,9 +1469,10 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             """grep one file, return (matches, hit) - hit is None, "max_matches" or "chars\""""
             matches = []
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
+                with self._nofollow_open(filepath) as f:
                     all_lines = f.readlines()
-            except (UnicodeDecodeError, OSError):
+            except (UnicodeDecodeError, OSError, ValueError):
+                # unreadable or symlinked file: skip it, like an oversized one
                 return matches, None
             for line_num, line in enumerate(all_lines, 1):
                 try:
@@ -1605,7 +1588,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     # ----------------------
     # tools: media
     # ----------------------
-    async def _attach_media(self, meta, hint):
+    async def _attach_media(self, meta, hint, base=None):
         """deliver an image to the model as its own user message.
 
         the tool result is JSON text, so an image cannot travel inside it -
@@ -1623,7 +1606,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 f"Image too large to attach inline ({meta['size_bytes']} bytes > "
                 f"{max_bytes} byte limit). Raise max_image_mb if needed. Metadata only.")
             return self.result(meta)
-        with open(meta["path"], "rb") as f:
+        with self._open_target(meta["path"], "rb", base) as f:
             raw = f.read()
         mime = meta["mime_type"]
         await self.channel.context.chat.messages.add({
@@ -1642,7 +1625,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
     async def read_media(self, workspace: str, path: str, attach: bool = True):
         """attaches an image so the AI can see it. the image arrives as its own user message, not inside the tool result. videos are not attached (no frame path yet) and return metadata only. attach=False returns metadata only"""
         try:
-            target = self._resolve_path(workspace, path, read_only=True)
+            target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
             return self.result(str(e), False)
         if not target.exists():
@@ -1652,7 +1635,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
         try:
             size = target.stat().st_size
-            with open(target, "rb") as f:
+            with self._open_target(target, "rb", base) as f:
                 head = f.read(8192)
             kind = filetype.guess(head)
             mime = kind.mime if kind else "unknown"
@@ -1670,7 +1653,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
         if mime.startswith("image/"):
             return await self._attach_media(
-                meta, "Image is attached; you will see it in the next message.")
+                meta, "Image is attached; you will see it in the next message.", base)
 
         if mime.startswith("video/"):
             meta["note"] = ("Video detected but not attached: the framework has no video/"
