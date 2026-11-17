@@ -155,6 +155,7 @@
 <template x-if="toolDisplayView(tool) === 'editor-block'"
           x-data="{ get args() { return toolArgs(tool, cacheKey) },
                     get response() { return toolResponse(tool) },
+                    snap: null, asked: '',
                     get verb() {
                         // NOTE: a sibling getter is only reachable through `this`
                         // inside an x-data object literal - a bare `args` here is
@@ -162,13 +163,66 @@
                         if (toolDisplayName(tool) !== 'editor_insert_block') return 'replacing';
                         return 'inserting ' + (this.args.where === 'after' ? 'after' : 'before');
                     },
-                    get html() { return editorBlockHtml(this.args.content, editorLangForPath(this.args.path), cacheKey) } }">
+                    get html() { return editorBlockHtml(this.args.content, editorLangForPath(this.args.path), cacheKey) },
+                    get span() {
+                        // the tool reports which lines it replaced; that span is
+                        // the only handle the card has on a snapshot
+                        const text = String(this.response?.content ?? '');
+                        const m = text.match(/(?:was )?lines (\d+)-(\d+)/);
+                        return m ? [Number(m[1]), Number(m[2])] : null;
+                    },
+                    get diffHtml() {
+                        const s = this.snap;
+                        if (!s || !s.old) return '';
+                        return editorDiffHtml(s.old, s.new ?? '', editorLangForPath(this.args.path), cacheKey + ':b');
+                    },
+                    get diffSideHtml() {
+                        // the container is a size container: CSS shows the side
+                        // layout above 640px and the unified one below, so both
+                        // must exist - rendering only the unified left the box
+                        // empty at normal chat widths
+                        const s = this.snap;
+                        if (!s || !s.old) return '';
+                        return editorDiffSideHtml(s.old, s.new ?? '', editorLangForPath(this.args.path), cacheKey + ':b');
+                    },
+                    load() {
+                        // an insertion has no before-block to show
+                        if (toolDisplayName(tool) === 'editor_insert_block') return;
+                        const span = this.span;
+                        if (!span || !this.response?.content) return;
+                        const chat = Alpine.store('chat')?.chat?.id;
+                        if (!chat) return;
+                        const key = [chat, this.args.workspace ?? '', this.args.path ?? '',
+                                     this.args.target ?? '', span[0], span[1]].join('|');
+                        if (key === this.asked) return;
+                        this.asked = key;
+                        const qs = new URLSearchParams({
+                            chat, workspace: this.args.workspace ?? '', path: this.args.path ?? '',
+                            target: this.args.target ?? '', start: span[0], end: span[1] });
+                        simpleApiFetch('/api/ext/editor/block?' + qs)
+                            .then(j => {
+                                const list = j?.entries ?? [];
+                                // an exact content match first; repeated edits of
+                                // the same span are ambiguous, so newest is the fallback
+                                this.snap = list.find(e => (e.new ?? '').trim() === (this.args.content ?? '').trim())
+                                            || list[list.length - 1] || null;
+                            })
+                            .catch(() => { this.snap = null; });
+                    } }"
+          x-effect="load()">
     <div>
         <div class="block-head">
             <span class="grep-running-label" x-text="verb"></span>
             <span class="grep-running-pattern" x-show="args.target" x-text="args.target ?? ''"></span>
         </div>
-        <div class="file-read-box hljs" x-show="html" x-auto-scroll x-fade-html="html"></div>
+        <!-- a snapshot turns the card into a real before/after diff, rendered by
+             the same helpers the edit card uses; it comes from a module route,
+             never from the tool result, so the old text costs no context -->
+        <div class="diff-container" x-show="diffHtml">
+            <div class="tool-display hljs diff-unified" x-show="diffHtml" x-auto-scroll x-fade-html="diffHtml"></div>
+            <div class="diff-side hljs" x-show="diffSideHtml" x-auto-scroll x-fade-html="diffSideHtml"></div>
+        </div>
+        <div class="file-read-box hljs" x-show="!diffHtml && html" x-auto-scroll x-fade-html="html"></div>
         <!-- the tool's own result line: "was lines 12-40", "had no body", ... -->
         <div class="grep-note" x-show="response?.content" x-text="response?.content ?? ''"></div>
         <div class="display-footer" x-show="args.path" x-text="args.path ?? ''"></div>

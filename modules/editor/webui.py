@@ -9,6 +9,7 @@
 # the tool loader only registers public methods.
 
 import os
+import json
 import asyncio
 import base64
 import mimetypes
@@ -16,6 +17,7 @@ import shlex
 import shutil
 import subprocess
 import filetype
+import regex
 from pathlib import Path
 
 import channels.webui.api as webui
@@ -365,6 +367,43 @@ class EditorRoutes:
             "size": size,
             "b64": base64.b64encode(data).decode("ascii"),
         }
+
+    @webui.route("block")
+    async def _route_block(self, body=None, query=None):
+        """the before/after snapshot for one block edit (replace_block card).
+
+        display-only by construction: the tool writes the snapshot under the
+        data folder and never returns it, so the replaced text cannot cost
+        context. the card sends the same tuple the tool used (chat id,
+        workspace + path, target, line span from the "was lines A-B" note) and
+        the key is rebuilt here - a tool function has no access to its own tool
+        call id, so that id could never be the key.
+        """
+        q = query or {}
+        chat = str(q.get("chat", ""))
+        if not regex.fullmatch(r"[A-Za-z0-9_-]{1,40}", chat):
+            return self.result("bad chat id", False)
+        try:
+            start = int(q.get("start") or 0)
+            end = int(q.get("end") or 0)
+        except (TypeError, ValueError):
+            return self.result("bad line span", False)
+        try:
+            target, base = self._resolve_with_base(
+                str(q.get("workspace", "")), str(q.get("path", "")), read_only=True)
+        except ValueError as e:
+            return self.result(str(e), False)
+
+        stash = self._block_stash_file(chat, target, str(q.get("target", "")), start, end)
+        if not stash.exists():
+            return {"entries": []}
+        try:
+            entries = json.loads(stash.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"entries": []}
+        if not isinstance(entries, list):
+            return {"entries": []}
+        return {"entries": [e for e in entries if isinstance(e, dict)][-10:]}
 
     @webui.route("open", method="POST")
     async def _route_open(self, body=None, query=None):

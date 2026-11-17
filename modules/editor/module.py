@@ -22,6 +22,8 @@
 import ast
 import json
 import os
+import time
+import hashlib
 import asyncio
 import difflib
 import base64
@@ -1278,6 +1280,62 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             reindented.pop()
         return reindented
 
+    # ------------------------------------------
+    # helpers: block-edit snapshots (card diff)
+    # ------------------------------------------
+    _BLOCK_STASH_DAYS = 7
+
+    def _chat_id(self):
+        """the current chat's id, or None when there is no chat (tests, startup)."""
+        try:
+            chat = self.channel.context.chat
+            return str(chat.data[chat.current]["id"])
+        except Exception:
+            return None
+
+    def _block_stash_file(self, chat_id, target_path, target, start, end):
+        """where the before/after snapshot for one block edit lives.
+
+        keyed by chat + resolved path + target + line span, NOT by tool call id:
+        a tool function never sees its call id (core invokes it with the schema
+        arguments only), so the card has to be able to rebuild the key from what
+        it holds - workspace, path, target, and the "was lines A-B" result line.
+        """
+        material = "\n".join([chat_id, str(target_path), str(target), str(start), str(end)])
+        digest = hashlib.sha1(material.encode("utf-8")).hexdigest()[:16]
+        return Path(core.get_data_path(
+            os.path.join("editor", "blocks", chat_id, digest + ".json")))
+
+    def _stash_block(self, target_path, target, start, end, old_text, new_text):
+        """remember what a block edit replaced, for the card's before/after view.
+
+        display-only: the snapshot lives under the data folder and the card
+        fetches it through a module route, so the replaced text never enters the
+        tool result and cannot cost context. failures are swallowed - a missing
+        snapshot must never fail the edit. entries are pruned by age at write
+        time, because there is no hook tying these files to a chat's deletion.
+        """
+        chat_id = self._chat_id()
+        if not chat_id or not old_text:
+            return
+        try:
+            path = self._block_stash_file(chat_id, target_path, target, start, end)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            entries = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+            entries = [e for e in entries if isinstance(e, dict) and "old" in e and "new" in e]
+            entries.append({"ts": int(time.time()), "old": old_text, "new": new_text})
+            path.write_text(json.dumps(entries[-10:]), encoding="utf-8")
+
+            cutoff = time.time() - self._BLOCK_STASH_DAYS * 86400
+            for old_file in path.parent.iterdir():
+                try:
+                    if old_file.suffix == ".json" and old_file.stat().st_mtime < cutoff:
+                        old_file.unlink()
+                except OSError:
+                    pass
+        except Exception:
+            return
+
     def _decorator_start(self, lines, def_idx):
         """index of the first line of the decorator stack above a def/class
         line, or def_idx when there is none.
@@ -1474,11 +1532,17 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                     "errors": errors,
                     "message": "syntax check failed - file was not written",
                 }, False)
+        # what the card may show side by side later; captured before the write
+        old_block = "\n".join(lines[start_idx:end_idx + 1]) if end_idx >= start_idx else ""
+        new_block = "\n".join(new_lines)
         try:
             with self._open_target(target_path, "w", base) as f:
                 f.write(merged)
         except Exception as e:
             return self.result(str(e), False)
+        # display-only snapshot, and only now that the write landed; it must not
+        # travel in the result below, or the model would pay for it
+        self._stash_block(target_path, target, start_idx + 1, end_idx + 1, old_block, new_block)
         if span:
             return self.result(f"replaced {label} in {path}")
         if prose:
@@ -2098,6 +2162,24 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 if not n:
                     return ""
                 return f"{n} file" + ("" if n == 1 else "s")
+
+            case "editor_replace_block" | "editor_insert_block":
+                # the card and the collapsed step row both read this slot; the
+                # full result string ("replaced 'greet' (was lines 4-7) in …")
+                # is already in the card's note, so the hint stays short
+                if not isinstance(response, dict) or response.get("status") != "success":
+                    return ""
+                content = args.get("content")
+                if not isinstance(content, str) or not content:
+                    return ""
+                text = content[:-1] if content.endswith("\n") else content
+                n = max(1, len(text.split("\n")))
+                label = f"{n} line" + ("" if n == 1 else "s")
+                target = str(args.get("target") or "").strip()
+                if name == "editor_insert_block":
+                    where = "after" if args.get("where") == "after" else "before"
+                    return f"inserted {label} {where} {target}".replace("  ", " ").strip()
+                return f"replaced {target} \u00b7 {label}".replace("  ", " ").strip()
 
         return ""
 
