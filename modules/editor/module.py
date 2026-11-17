@@ -307,7 +307,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         self.disabled_tools = []
         if self.config.get("read-only"):
             self.disabled_tools.extend(
-                ["write", "append", "edit", "create", "replace_block",
+                ["write", "append", "edit", "create", "replace_block", "insert_block",
                  "move", "copy", "delete", "mkdir"]
             )
         # the webui routes have their own gate (webui.py _read_only_guard).
@@ -849,6 +849,31 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             reindented.pop()
         return reindented
 
+    def _decorator_start(self, lines, def_idx):
+        """index of the first line of the decorator stack above a def/class
+        line, or def_idx when there is none.
+
+        the structure span starts at the def/class keyword, so inserting
+        "before" a decorated symbol without this would slip between the
+        decorators and their definition. brackets are counted upward:
+        a closing paren means the decorator statement continues further up.
+        """
+        i = def_idx - 1
+        balance = 0
+        while i >= 0:
+            line = lines[i]
+            stripped = line.strip()
+            balance += line.count("(") - line.count(")")
+            if balance == 0:
+                if stripped.startswith("@"):
+                    i -= 1
+                    continue
+                break
+            if balance > 0 or not stripped:
+                break
+            i -= 1
+        return i + 1
+
     # ----------------------
     # tools: writing
     # ----------------------
@@ -1009,6 +1034,86 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             return self.result(f"replaced {label} in {path}")
         return self.result(
             f"replaced {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}")
+
+    @core.module.tool
+    async def insert_block(self, workspace: str, path: str, target: str, content: str, where: str = "before"):
+        """inserts content before/after a function/class ('Class.method') or a line ('ln:12'). code is re-indented to the neighbour and syntax-checked"""
+        if str(where).strip().lower() not in ("before", "after"):
+            return self.result(f"'where' must be 'before' or 'after', not '{where}'", False)
+        before = str(where).strip().lower() == "before"
+
+        try:
+            target_path = self._resolve_path(workspace, path)
+        except ValueError as e:
+            return self.result(str(e), False)
+        if not target_path.is_file():
+            return self.result(f"'{target_path.name}' is not a file", False)
+
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                code = f.read()
+        except UnicodeDecodeError:
+            return self.result("file is not valid utf-8 text - cannot edit it", False)
+        except Exception as e:
+            return self.result(str(e), False)
+
+        lines = code.split("\n")
+        total = len(lines) - 1 if lines and lines[-1] == "" else len(lines)
+
+        span = _span_target(target)
+        if span:
+            start, end = span
+            if start < 1 or end < start or end > total:
+                return self.result({
+                    "error": f"line range {start}-{end} does not fit this {total}-line file",
+                    "note": "use outline or read to find the right line",
+                }, False)
+            indent = self._line_indent(lines, start - 1)
+            insert_idx = start - 1 if before else end
+            label = f"line {start}" if start == end else f"lines {start}-{end}"
+        else:
+            if not HAVE_TSLP:
+                return self.result({
+                    "error": "this installation has no tree-sitter runtime, so symbols cannot be located",
+                    "note": "pass a line instead, e.g. 'ln:12' (use outline or read to find it)",
+                }, False)
+            located = await self._locate_symbol(code, target_path, target)
+            if not located:
+                return self.result({
+                    "error": f"symbol '{target}' was not found in {path}",
+                    "note": "names are dotted, e.g. 'Class.method'; use outline to see what is available, or pass a line like 'ln:12'",
+                }, False)
+            start_idx, end_idx = located
+            indent = self._line_indent(lines, start_idx)
+            insert_idx = self._decorator_start(lines, start_idx) if before else end_idx + 1
+            label = f"'{target}'"
+
+        reindented = self._reindent_block(content, indent)
+        if not reindented:
+            return self.result("content was empty - pass the block to insert", False)
+        if span:
+            # arbitrary text: nothing to infer, insert exactly what was passed
+            block = reindented
+        elif before:
+            # exactly one blank line between the new block and the neighbour
+            block = reindented + [""]
+        else:
+            block = [""] + reindented
+
+        merged = "\n".join(lines[:insert_idx] + block + lines[insert_idx:])
+        errors = await self._syntax_gate(merged, target_path)
+        if errors:
+            return self.result({
+                "errors": errors,
+                "message": "syntax check failed - file was not written",
+            }, False)
+        try:
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write(merged)
+        except Exception as e:
+            return self.result(str(e), False)
+        direction = "before" if before else "after"
+        return self.result(f"inserted {len(reindented)} line(s) {direction} {label} in {path}")
 
     # ----------------------
     # tools: file management
