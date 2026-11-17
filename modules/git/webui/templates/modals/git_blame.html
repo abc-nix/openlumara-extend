@@ -1,0 +1,48 @@
+{# -- git module: blame view. shows which commit last touched each run of
+   consecutive lines of one file. opened via $store.gitPanel.openBlame(path)
+   from the sidebar's per-file blame button. #}
+<template x-if="$store.ui.currentModal === 'git_blame' && $store.gitPanel" x-cloak>
+    <div class="modal git-blame-modal" @keydown.escape.window="$store.gitPanel.closeBlame()">
+        <div class="header">
+            <h2 class="coder-editor-title">
+                <span>blame</span>
+                <span class="git-ro-tag" x-text="$store.gitPanel.blame.path"></span>
+            </h2>
+            <div class="coder-editor-header-actions">
+                <button class="close" @click="$store.gitPanel.closeBlame()" aria-label="Close blame">&times;</button>
+            </div>
+        </div>
+
+        <div class="git-blame-body">
+            <template x-if="$store.gitPanel.blame.loading">
+                <div class="coder-empty">loading blame..</div>
+            </template>
+
+            <template x-if="!$store.gitPanel.blame.loading && $store.gitPanel.blame.error">
+                <div class="coder-empty" x-text="$store.gitPanel.blame.error"></div>
+            </template>
+
+            <template x-if="!$store.gitPanel.blame.loading && !$store.gitPanel.blame.groups.length">
+                <div class="coder-empty">no blame data</div>
+            </template>
+
+            {# groups = runs of consecutive lines sharing a commit, coalesced
+               server-side so a 500-line unchanged block is one entry #}
+            <template x-for="(g, gi) in $store.gitPanel.blame.groups" :key="gi">
+                <div class="git-blame-group">
+                    <div class="git-blame-head">
+                        <span class="h" x-text="g.short"></span>
+                        <span class="a" x-text="g.author"></span>
+                        <span class="d" x-text="g.date"></span>
+                        <span class="r"
+                              x-text="g.first_line === g.last_line
+                                      ? 'line ' + g.first_line
+                                      : 'lines ' + g.first_line + '–' + g.last_line"></span>
+                        <span class="s" x-text="g.summary"></span>
+                    </div>
+                    <pre class="git-blame-lines"><template x-for="(l, li) in g.lines" :key="li"><div class="git-blame-line"><span class="ln" x-text="l.line"></span><span class="code" x-text="l.text || ' '"></span></div></template></pre>
+                </div>
+            </template>
+        </div>
+    </div>
+</template>

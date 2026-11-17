@@ -1,0 +1,54 @@
+{# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+   push confirmation modal: shows exactly which commits leave the machine
+   plus warnings (diverged, uncommitted changes) before anything is sent.
+   opened via $store.gitPanel.openPush(). #}
+<template x-if="$store.ui.currentModal === 'git_push' && $store.gitPanel" x-cloak>
+    <div class="modal git-push-modal" @keydown.escape.window="if (!$store.gitPanel.push.pushing) $store.gitPanel.closePush()">
+        <div class="header">
+            <h2 class="coder-editor-title">
+                <span>confirm push</span>
+                <span class="git-ro-tag" x-text="$store.gitPanel.push.branch"></span>
+            </h2>
+            <button class="close" x-show="!$store.gitPanel.push.pushing" @click="$store.gitPanel.closePush()" aria-label="Close push dialog">&times;</button>
+        </div>
+
+        <div class="git-push-body">
+            <p class="git-push-summary">
+                push <span class="git-push-count" x-text="$store.gitPanel.push.ahead.length"></span>
+                commits to <span class="git-push-target" x-text="$store.gitPanel.push.target"></span><span x-show="!$store.gitPanel.push.has_upstream"> (new branch)</span>
+            </p>
+
+            <div class="git-push-warning" x-show="$store.gitPanel.push.behind > 0">
+                ⚠ <span class="git-push-target" x-text="$store.gitPanel.push.target"></span> has
+                <span x-text="$store.gitPanel.push.behind"></span> commits you do not have
+                locally. the push will be rejected until you pull or merge first.
+            </div>
+
+            <div class="git-push-warning" x-show="$store.gitPanel.push.dirty">
+                ⚠ you have uncommitted changes
+            </div>
+
+            <div class="git-push-commits">
+                <template x-for="entry in $store.gitPanel.push.ahead" :key="entry.hash">
+                    <div class="git-log-entry">
+                        <span class="h" x-text="entry.hash"></span>
+                        <span x-text="entry.msg"></span>
+                    </div>
+                </template>
+            </div>
+
+            <div class="git-push-error" x-show="$store.gitPanel.push.error" x-text="$store.gitPanel.push.error"></div>
+        </div>
+
+        <div class="git-push-actions">
+            <button type="button" class="coder-action" :disabled="$store.gitPanel.push.pushing" @click="$store.gitPanel.closePush()">cancel</button>
+            <button
+                type="button"
+                class="coder-action primary"
+                :disabled="$store.gitPanel.push.pushing"
+                @click="$store.gitPanel.doPush()"
+                x-text="$store.gitPanel.push.pushing ? 'pushing..' : 'push ' + $store.gitPanel.push.ahead.length + ' commits'"
+            ></button>
+        </div>
+    </div>
+</template>

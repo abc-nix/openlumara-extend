@@ -1,0 +1,198 @@
+{# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+   git sidebar tab: branch switcher, staged/unstaged changes with per-file
+   stage toggles + diff viewer, commit box, and log + push modals.
+   picks its own sandbox (independent of the coder filetree tab). #}
+<div class="git-panel" x-data="gitPanelComponent()" x-intersect.enter="refresh()">
+
+    <div class="coder-header">
+        <span class="coder-title">Git</span>
+        <span class="coder-readonly-badge" x-show="read_only" title="the git module is in read-only mode">read-only</span>
+        {# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+           fetch + pull buttons #}
+        <button type="button" class="coder-icon-btn" title="Fetch from remote" x-show="ready && is_repo && !read_only" @click="doFetch()" :disabled="pull.loading">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button type="button" class="coder-icon-btn" title="Pull from remote" x-show="ready && is_repo && !read_only" @click="doPull()" :disabled="pull.pulling">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+        </button>
+        {# push opens a confirmation modal (modals/git_push.html) #}
+        <button type="button" class="coder-icon-btn" title="Push commits" x-show="ready && is_repo && !read_only" @click="openPush()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>
+        {# commit log modal #}
+        <button type="button" class="coder-icon-btn" title="Commit log" @click="openLog()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+        </button>
+        <button type="button" class="coder-icon-btn" title="Refresh" @click="refresh(true)">
+            {% include 'svg/reload.svg' %}
+        </button>
+    </div>
+
+    <div class="git-body">
+        {# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+           sandbox picker: the git tab chooses its own sandbox and no longer
+           follows the coder filetree tab #}
+        <div class="git-reporow">
+            <svg class="git-branch-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <select class="coder-select" aria-label="Workspace" x-model="sandbox" @change="switchSandbox()">
+                <template x-if="!sandboxes.length">
+                    <option value="">no workspaces</option>
+                </template>
+                <template x-for="sb in sandboxes" :key="sb">
+                    <option :value="sb" x-text="sb"></option>
+                </template>
+            </select>
+        </div>
+
+        {# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+           repo picker lives OUTSIDE the is_repo block on purpose: the
+           sandbox root may not be a repo while a nested one is, and you
+           must always be able to reach this dropdown to switch out of a
+           non-repo selection. options = root + nested repos from git_repos #}
+        <div class="git-reporow">
+            <svg class="git-branch-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <select class="coder-select" aria-label="Repository" x-model="subpath" @change="switchRepo()">
+                <template x-if="!repos.length">
+                    <option value="">no repos found</option>
+                </template>
+                <template x-for="repo in repos" :key="repo">
+                    <option :value="repo" x-text="repoLabel(repo)"></option>
+                </template>
+            </select>
+        </div>
+
+        <template x-if="loading && !ready">
+            <div class="coder-empty">loading..</div>
+        </template>
+
+        <template x-if="ready && !is_repo">
+            <div class="coder-empty" x-text="error || 'this folder is not a git repository'"></div>
+        </template>
+
+        <template x-if="ready && is_repo">
+            <div class="git-repo">
+
+                {# a stopped rebase/merge/cherry-pick leaves the working tree
+                   looking clean, which used to be indistinguishable from
+                   "nothing to do" - this row is that missing signal #}
+                <template x-if="op.name !== 'none'">
+                    <div class="git-op">
+                        <span class="git-op-name"
+                              x-text="op.name + ' in progress' + (op.detail && op.detail.step ? ' (' + op.detail.step + ')' : '')"></span>
+                        <span class="git-op-hint">finish it with --continue or --abort in a terminal</span>
+                    </div>
+                </template>
+
+                <div class="git-branchrow">
+                    <svg class="git-branch-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                    <select class="coder-select" aria-label="Branch" x-model="branch" @change="onBranchSelect()" :disabled="read_only || !branches.length">
+                        <template x-for="b in branches" :key="b">
+                            <option :value="b" x-text="b"></option>
+                        </template>
+                        <option value="__manage__" disabled>───────────</option>
+                        <option value="__manage__">manage branches…</option>
+                    </select>
+                </div>
+
+                {# upstream tracking: the branch row shows the local name, this
+                   shows how far it is from its remote counterpart #}
+                <template x-if="upstream">
+                    <div class="git-upstream" :title="upstream.name">
+                        <span class="git-upstream-name" x-text="upstream.name"></span>
+                        <span class="git-upstream-ahead" x-show="upstream.ahead > 0"
+                              x-text="'↑ ' + upstream.ahead + ' to push'"></span>
+                        <span class="git-upstream-behind" x-show="upstream.behind > 0"
+                              x-text="'↓ ' + upstream.behind + ' to pull'"></span>
+                        <span class="git-upstream-ok" x-show="!upstream.ahead && !upstream.behind">in sync</span>
+                    </div>
+                </template>
+
+                {# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+                   incoming commits after fetch #}
+                <template x-if="pull.incoming.length">
+                    <div class="git-incoming">
+                        <div class="git-section-head"><span>incoming <span class="git-count" x-text="pull.incoming.length"></span></span></div>
+                        <template x-for="c in pull.incoming" :key="c.hash">
+                            <div class="git-change"><span class="git-path" x-text="c.hash + ' ' + c.msg"></span></div>
+                        </template>
+                        <button type="button" class="coder-action primary" x-show="!read_only" @click="doPull()" :disabled="pull.pulling" x-text="pull.pulling ? 'pulling..' : 'pull now'"></button>
+                    </div>
+                </template>
+
+                {# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+                   merge conflicts section #}
+                <template x-if="conflicts.length">
+                    <div class="git-conflicts">
+                        <div class="git-section-head"><span style="color:#ff5f7a">conflicts <span class="git-count" x-text="conflicts.length"></span></span></div>
+                        <template x-for="f in conflicts" :key="f">
+                            <div class="git-change">
+                                <span class="git-path" x-text="f"></span>
+                                <span class="git-resolve-btns">
+                                    <button type="button" class="coder-menu-item inline" @click="resolveConflict(f, 'ours')">mine</button>
+                                    <button type="button" class="coder-menu-item inline" @click="resolveConflict(f, 'theirs')">theirs</button>
+                                    <button type="button" class="coder-menu-item inline" @click="resolveConflict(f, 'both')">both</button>
+                                </span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <div class="git-section-head">
+                    <span>changes <span class="git-count" x-text="changes.length"></span></span>
+                    <span class="git-bulk" x-show="!read_only">
+                        <button type="button" class="coder-menu-item inline" @click="stageAll()" title="stage everything">stage all</button>
+                        <button type="button" class="coder-menu-item inline" @click="unstageAll()" title="unstage everything">unstage</button>
+                    </span>
+                </div>
+
+                <div class="git-changes">
+                    <template x-if="!changes.length">
+                        <div class="coder-empty">working tree clean</div>
+                    </template>
+
+                    {# keyed by path+status, NOT index: the list reorders as
+                       entries change state, and index keys make Alpine reuse
+                       stale nodes (ghost rows showing another file's badge) #}
+                    <template x-for="c in changes" :key="c.path + '|' + c.xy">
+                        <div class="git-change">
+                            <span class="git-badge" :class="{ staged: c.staged, untracked: c.untracked }" :title="badge(c)"></span>
+                            <span class="git-path" x-text="c.path" :title="'view diff: ' + c.path" @click="openDiff(c)"></span>
+                            <button type="button" class="coder-icon-btn git-stage-btn" title="blame: who last touched each line"
+                                    x-show="!c.untracked" @click="openBlame(c.path)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+                            </button>
+                            <button type="button" class="coder-icon-btn git-stage-btn" x-show="!read_only && !c.staged" title="stage" @click="stage(c.path)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            </button>
+                            <button type="button" class="coder-icon-btn git-stage-btn" x-show="!read_only && c.staged" title="unstage" @click="unstage(c.path)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="git-commit" x-show="!read_only">
+                    <textarea
+                        class="git-message"
+                        placeholder="commit message.. (ctrl+enter to commit)"
+                        rows="3"
+                        spellcheck="false"
+                        x-model="message"
+                        @keydown.ctrl.enter.prevent="commit()"
+                        @keydown.meta.enter.prevent="commit()"
+                    ></textarea>
+                    <button
+                        type="button"
+                        class="coder-action primary git-commit-btn"
+                        :disabled="committing || !message.trim() || stagedCount() === 0"
+                        @click="commit()"
+                        x-text="committing ? 'committing..' : 'commit ' + stagedCount() + ' staged'"
+                    ></button>
+                </div>
+
+            </div>
+        </template>
+    </div>
+
+    <div class="coder-footer" x-show="error" x-text="error"></div>
+</div>

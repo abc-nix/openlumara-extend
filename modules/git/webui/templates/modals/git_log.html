@@ -1,0 +1,54 @@
+{# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+   commit log modal for the git sidebar: hash + subject per row.
+   opened via $store.gitPanel.openLog() from the log button in the
+   sidebar header. #}
+<template x-if="$store.ui.currentModal === 'git_log' && $store.gitPanel" x-cloak>
+    <div class="modal git-log-modal" @keydown.escape.window="$store.gitPanel.closeLog()">
+        <div class="header">
+            <h2 class="coder-editor-title">
+                <span>commit log</span>
+                <span class="git-ro-tag" x-text="$store.gitPanel.branch"></span>
+            </h2>
+            <button class="close" @click="$store.gitPanel.closeLog()" aria-label="Close log">&times;</button>
+        </div>
+
+        <div class="git-log-body">
+            <div class="git-log-tools">
+                <input type="search" class="git-log-filter" placeholder="filter by message, author or sha.."
+                       aria-label="Filter commits" x-model="$store.gitPanel.logFilter">
+                <span class="git-log-hint" x-show="$store.gitPanel.log.length">
+                    click a commit to see its diff
+                </span>
+            </div>
+
+            <template x-if="!$store.gitPanel.visibleLog().length">
+                <div class="coder-empty"
+                     x-text="$store.gitPanel.log.length ? 'no commit matches the filter' : 'no commits found'"></div>
+            </template>
+
+            {# the row is a div with role=button, not a button element: it
+               contains the copy-sha button, and nested buttons are invalid #}
+            <template x-for="entry in $store.gitPanel.visibleLog()" :key="entry.hash">
+                <div class="git-log-entry" role="button" tabindex="0"
+                     :title="'show the diff of ' + entry.hash"
+                     @click="$store.gitPanel.openCommit(entry.hash)"
+                     @keydown.enter.prevent="$store.gitPanel.openCommit(entry.hash)"
+                     @keydown.space.prevent="$store.gitPanel.openCommit(entry.hash)">
+                    <span class="h" x-text="entry.hash"></span>
+                    <span class="msg" x-text="entry.msg"></span>
+                    <span class="meta"
+                          x-text="[entry.author, entry.date].filter(Boolean).join(' · ')"></span>
+                    <button type="button" class="git-log-copy"
+                            :title="'copy ' + entry.hash"
+                            x-text="$store.gitPanel.copied === entry.hash ? 'copied' : '⧉'"
+                            @click.stop="$store.gitPanel.copySha(entry.hash)"></button>
+                </div>
+            </template>
+
+            <button type="button" class="coder-action git-log-more" x-show="$store.gitPanel.logMore"
+                    :disabled="$store.gitPanel.logMoreLoading"
+                    x-text="$store.gitPanel.logMoreLoading ? 'loading..' : 'load more'"
+                    @click="$store.gitPanel.loadMoreLog()"></button>
+        </div>
+    </div>
+</template>

@@ -1,0 +1,65 @@
+{# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+   manage branches modal: lists all branches with inline delete-confirm,
+   plus a create input at the bottom. follows the categories-modal pattern.
+   opened via $store.ui.openModal('git_branch'). #}
+<template x-if="$store.ui.currentModal === 'git_branch' && $store.gitPanel" x-cloak>
+    <div @keydown.escape.window="$store.gitPanel.closeBranchManager()">
+        <div class="modal categories-modal">
+            <div class="header">
+                <h2>Manage branches</h2>
+                <button class="close" @click="$store.gitPanel.closeBranchManager()" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="categories-content">
+                <div class="category-rows">
+                    <template x-for="b in $store.gitPanel.branches" :key="b">
+                        <div class="category-row">
+                            <div class="category-info">
+                                <span class="category-name" x-text="b"></span>
+                                <span class="category-count" x-show="b === $store.gitPanel.branch" style="color:#3fdc97">current</span>
+                            </div>
+
+                            {# current branch is not deletable #}
+                            <template x-if="b !== $store.gitPanel.branch">
+                                <div class="category-actions">
+                                    <template x-if="$store.gitPanel.branchModal.confirming !== b">
+                                        <button class="action-btn delete" @click="$store.gitPanel.branchModal.confirming = b" title="Delete branch">
+                                            {% include 'svg/trash.svg' %}
+                                        </button>
+                                    </template>
+                                    <template x-if="$store.gitPanel.branchModal.confirming === b">
+                                        <div class="confirm-inline">
+                                            <span class="confirm-text">delete this branch?</span>
+                                            <button class="rename-action-btn save" @click="$store.gitPanel.deleteBranch(b)" :disabled="$store.gitPanel.branchModal.submitting" title="Confirm">
+                                                {% include 'svg/checkmark.svg' %}
+                                            </button>
+                                            <button class="rename-action-btn cancel" @click="$store.gitPanel.branchModal.confirming = null" title="Cancel">
+                                                {% include 'svg/cross.svg' %}
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="add-category">
+                    <input
+                        type="text"
+                        x-model="$store.gitPanel.branchModal.newName"
+                        placeholder="New branch name"
+                        autocomplete="off"
+                        spellcheck="false"
+                        @keydown.enter.prevent="$store.gitPanel.createBranch($store.gitPanel.branchModal.newName)"
+                    >
+                    <button class="add-btn" @click="$store.gitPanel.createBranch($store.gitPanel.branchModal.newName)" :disabled="$store.gitPanel.branchModal.submitting || !$store.gitPanel.branchModal.newName.trim()">Add</button>
+                </div>
+
+                <template x-if="$store.gitPanel.branchModal.error">
+                    <div class="category-error" x-text="$store.gitPanel.branchModal.error"></div>
+                </template>
+            </div>
+        </div>
+    </div>
+</template>

@@ -1,0 +1,29 @@
+{# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+   merge conflicts modal: lists conflicted files with resolve buttons.
+   opened via $store.ui.openModal('git_conflicts'). #}
+<template x-if="$store.ui.currentModal === 'git_conflicts' && $store.gitPanel" x-cloak>
+    <div class="modal coder-prompt-modal" @keydown.escape.window="$store.gitPanel.closeConflicts()">
+        <div class="header">
+            <h2>Merge Conflicts</h2>
+            <button class="close" @click="$store.gitPanel.closeConflicts()" aria-label="Close">&times;</button>
+        </div>
+        <div class="coder-prompt-body">
+            <p style="font-size:12px;color:var(--text-secondary);margin:0">
+                Resolve each conflicted file by choosing which version to keep:
+            </p>
+            <template x-for="f in $store.gitPanel.conflicts" :key="f">
+                <div class="git-conflict-row">
+                    <span class="git-conflict-path" x-text="f"></span>
+                    <span class="git-resolve-btns">
+                        <button type="button" class="coder-action" @click="$store.gitPanel.resolveConflict(f, 'ours')">Mine</button>
+                        <button type="button" class="coder-action" @click="$store.gitPanel.resolveConflict(f, 'theirs')">Theirs</button>
+                        <button type="button" class="coder-action" @click="$store.gitPanel.resolveConflict(f, 'both')">Both</button>
+                    </span>
+                </div>
+            </template>
+            <template x-if="!$store.gitPanel.conflicts.length">
+                <div class="coder-empty">no conflicts remaining ✓</div>
+            </template>
+        </div>
+    </div>
+</template>

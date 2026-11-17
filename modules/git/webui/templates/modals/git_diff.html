@@ -1,0 +1,130 @@
+{# -- AI GENERATED CODE (Qwen3.8 Flash Next) :: 2026-10-13
+   diff viewer modal: split (side-by-side) on desktop, unified on mobile.
+   both views are rendered; CSS media queries control which is visible.
+   opened via $store.ui.openModal('git_diff'). #}
+<template x-if="$store.ui.currentModal === 'git_diff' && $store.gitPanel" x-cloak>
+    <div class="modal git-diff-modal" @keydown.escape.window="$store.gitPanel.closeDiff()">
+        <div class="header">
+            <h2 class="coder-editor-title">
+                <span x-show="!$store.gitPanel.diff.commit" x-text="$store.gitPanel.diff.path"></span>
+                <span x-show="$store.gitPanel.diff.commit"
+                      x-text="$store.gitPanel.diff.commit && !$store.gitPanel.diff.commit.loading
+                              ? ($store.gitPanel.diff.commit.short || '') + ' · ' + ($store.gitPanel.diff.commit.subject || '')
+                              : ''"></span>
+                <span class="git-ro-tag" x-show="$store.gitPanel.diff.staged">staged</span>
+                <span class="git-ro-tag" x-show="$store.gitPanel.diff.commit">commit</span>
+            </h2>
+            <div class="coder-editor-header-actions">
+                {# prev/next walk the filtered log the commit came from #}
+                <template x-if="$store.gitPanel.diff.commit">
+                    <button type="button" class="coder-icon-btn" title="older commit"
+                            :disabled="!$store.gitPanel.hasPrevCommit()"
+                            @click="$store.gitPanel.commitNav(-1)">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    </button>
+                </template>
+                <template x-if="$store.gitPanel.diff.commit">
+                    <button type="button" class="coder-icon-btn" title="newer commit"
+                            :disabled="!$store.gitPanel.hasNextCommit()"
+                            @click="$store.gitPanel.commitNav(1)">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                </template>
+                <template x-if="!$store.gitPanel.diff.commit && $store.gitPanel.diff.path">
+                    <button type="button" class="coder-icon-btn" title="copy path"
+                            @click="$store.gitPanel.copyPath($store.gitPanel.diff.path)">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>
+                    </button>
+                </template>
+                <button class="close" @click="$store.gitPanel.closeDiff()" aria-label="Close diff">&times;</button>
+            </div>
+        </div>
+
+        {# commit header: only when the diff belongs to a commit from the log #}
+        <template x-if="$store.gitPanel.diff.commit">
+            <div class="git-commit-head">
+                <div class="git-commit-subject"
+                     x-text="$store.gitPanel.diff.commit.loading
+                             ? 'loading commit..'
+                             : ($store.gitPanel.diff.commit.subject || '')"></div>
+                <div class="git-commit-meta" x-show="!$store.gitPanel.diff.commit.loading">
+                    <span x-text="$store.gitPanel.diff.commit.hash"></span>
+                    <span x-show="$store.gitPanel.diff.commit.author"
+                          x-text="'· ' + $store.gitPanel.diff.commit.author"></span>
+                    <span x-show="$store.gitPanel.diff.commit.date"
+                          x-text="'· ' + $store.gitPanel.diff.commit.date"></span>
+                    <span x-show="$store.gitPanel.diff.commit.is_merge">· merge</span>
+                    <span x-show="$store.gitPanel.diff.commit.truncated">· truncated</span>
+                    <button type="button" class="git-log-copy"
+                            :title="'copy ' + $store.gitPanel.diff.commit.hash"
+                            x-text="$store.gitPanel.copied === $store.gitPanel.diff.commit.hash ? 'copied' : '⧉'"
+                            @click="$store.gitPanel.copySha($store.gitPanel.diff.commit.hash)"></button>
+                </div>
+                <pre class="git-commit-body" x-show="!$store.gitPanel.diff.commit.loading && $store.gitPanel.diff.commit.body"
+                     x-text="$store.gitPanel.diff.commit.body"></pre>
+                <div class="git-commit-files" x-show="!$store.gitPanel.diff.commit.loading">
+                    <template x-for="f in ($store.gitPanel.diff.commit.files || [])" :key="f.path">
+                        <button type="button" class="git-commit-file"
+                                :class="{ active: $store.gitPanel.diff.activeFile === f.path }"
+                                :title="'jump to ' + f.path"
+                                @click="$store.gitPanel.jumpToFile(f.path)">
+                            <span class="p" x-text="f.path"></span>
+                            <span class="add" x-show="!f.binary" x-text="'+' + (f.added || 0)"></span>
+                            <span class="del" x-show="!f.binary" x-text="'-' + (f.removed || 0)"></span>
+                            <span class="bin" x-show="f.binary">binary</span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        {# hunk-level staging: one chip per hunk, only for a single unstaged or
+           staged file. commit diffs are history and stay read-only #}
+        <div class="git-hunk-bar"
+             x-show="!$store.gitPanel.diff.commit && !$store.gitPanel.diff.untracked
+                     && !$store.gitPanel.read_only
+                     && $store.gitPanel.hunkList().length > 0
+                     && !$store.gitPanel.diff.loading">
+            <span class="git-hunk-label"
+                  x-text="$store.gitPanel.diff.staged ? 'unstage a hunk:' : 'stage a hunk:'"></span>
+            <template x-for="h in $store.gitPanel.hunkList()" :key="h.index">
+                <button type="button" class="git-hunk-chip"
+                        :title="($store.gitPanel.diff.staged ? 'unstage' : 'stage') + ' hunk ' + (h.index + 1)"
+                        @click="$store.gitPanel.stageHunk({ hunk: h.index }, $store.gitPanel.diff.staged ? 'unstage' : 'stage')">
+                    <span class="n" x-text="'#' + (h.index + 1)"></span>
+                    <span class="add" x-text="'+' + h.adds"></span>
+                    <span class="del" x-text="'−' + h.dels"></span>
+                </button>
+            </template>
+        </div>
+
+        {# unified diff: visible on mobile only #}
+        <pre class="git-diff-body git-diff-unified"><template x-for="(line, i) in $store.gitPanel.diff.lines" :key="i"><div class="git-diff-line" :class="{ add: line.startsWith('+') && !line.startsWith('+++'), del: line.startsWith('-') && !line.startsWith('---'), hunk: line.startsWith('@@'), file: line.startsWith('diff --git'), meta: line.startsWith('+++') || line.startsWith('---') }" x-text="line || ' '"></div></template></pre>
+
+        {# split diff: visible on desktop only #}
+        <div class="git-split-body git-diff-split">
+            <template x-if="$store.gitPanel.diff.loading">
+                <div class="coder-empty">loading diff..</div>
+            </template>
+            <template x-if="!$store.gitPanel.diff.loading && !$store.gitPanel.diff.rows.length">
+                <div class="coder-empty">(no changes)</div>
+            </template>
+            <table class="git-split-table" x-show="!$store.gitPanel.diff.loading && $store.gitPanel.diff.rows.length">
+                <colgroup><col class="ln-col"><col class="code-col"><col class="ln-col"><col class="code-col"></colgroup>
+                <tbody>
+                    <template x-for="(row, i) in $store.gitPanel.diff.rows" :key="i">
+                        <tr :class="'split-' + row.type">
+                            {# file boundary rows (multi-file commit): one full-width cell #}
+                            <td class="file" colspan="4" x-show="row.type === 'file'"
+                                x-text="row.path || ''"></td>
+                            <td class="ln" x-show="row.type !== 'file'" x-text="row.old_num || ''"></td>
+                            <td class="code" x-show="row.type !== 'file'" x-text="row.old_text || ' '"></td>
+                            <td class="ln" x-show="row.type !== 'file'" x-text="row.new_num || ''"></td>
+                            <td class="code" x-show="row.type !== 'file'" x-text="row.new_text || ' '"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</template>
