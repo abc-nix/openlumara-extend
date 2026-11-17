@@ -215,8 +215,15 @@ class PathResolver:
             f"{plain_error}. to scope into a subfolder, prefix a workspace "
             f"name: '<workspace>/<subfolder>' (e.g. 'git/openlumara')")
 
-    def _resolve_path(self, workspace, path, read_only=False):
-        """(workspace, path) -> absolute Path for the AI tools.
+    def _resolve_with_base(self, workspace, path, read_only=False):
+        """(workspace, path) -> (absolute Path, base).
+
+        `base` is the resolved anchor the path was resolved against: the
+        configured workspace root, or the scoped boundary when a
+        '<workspace>/<subfolder>' selector was used. the file-open layer needs
+        it to check every path component for symlinks (H2). it is None when the
+        path is a FREE absolute one - sandboxed off, or read_outside_sandbox -
+        where there is no boundary to anchor to.
 
         sandboxed: workspace required, path resolved inside it. not
         sandboxed: empty workspace = absolute path anywhere, OR - when
@@ -243,7 +250,8 @@ class PathResolver:
                 if read_only and self.config.get("read_outside_sandbox"):
                     p = Path(os.path.expanduser(raw))
                     if p.is_absolute():
-                        return p.resolve()
+                        # free absolute read: no boundary to anchor to
+                        return p.resolve(), None
                 raise ValueError("workspace is required when sandboxed mode is on (see workspaces)")
             p = Path(os.path.expanduser(raw))
             if not p.is_absolute():
@@ -253,11 +261,11 @@ class PathResolver:
                     p = (roots[0] / p).resolve()
                     if p != roots[0] and roots[0] not in p.parents:
                         raise ValueError("path escapes the workspace folder")
-                    return p
+                    return p, roots[0]
                 raise ValueError(
                     "path must be absolute when no workspace is given "
                     "(or name one of the configured workspaces)")
-            return p.resolve()
+            return p.resolve(), None
         root, scope = self._scope(ws)
         if scope:
             boundary = (root / scope).resolve()
@@ -279,4 +287,8 @@ class PathResolver:
                 raise ValueError(
                     f"path escapes the workspace scope '{root.name}/{scope}'")
             raise ValueError("path escapes the workspace folder")
-        return p
+        return p, boundary
+
+    def _resolve_path(self, workspace, path, read_only=False):
+        """absolute Path for the AI tools - see _resolve_with_base."""
+        return self._resolve_with_base(workspace, path, read_only=read_only)[0]
