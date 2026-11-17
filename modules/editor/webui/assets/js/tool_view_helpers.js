@@ -242,6 +242,9 @@ function _editorDiffSideHtmlNow(original, replacement, lang) {
 // highlight re-runs for every streamed chunk.
 function editorBlockHtml(code, lang, cacheKey) {
     if (!code) return '';
-    return streamMemo('block:' + cacheKey, [code, lang], () =>
-        `<pre class="editor-block-pre hljs">${highlightedCode(code, lang)}</pre>`);
+    // the highlighted html ONLY: the scroll box (and x-auto-scroll) lives on the
+    // wrapper in the template. a <pre> here would own the overflow instead, and
+    // x-auto-scroll would sit on a non-scrolling parent - it then never follows
+    // the stream, so the card stays pinned to the first lines.
+    return streamMemo('block:' + cacheKey, [code, lang], () => highlightedCode(code, lang));
 }

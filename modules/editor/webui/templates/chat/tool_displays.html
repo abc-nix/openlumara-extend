@@ -154,7 +154,7 @@
             <span class="grep-running-label" x-text="verb"></span>
             <span class="grep-running-pattern" x-show="args.target" x-text="args.target ?? ''"></span>
         </div>
-        <div x-show="html" x-auto-scroll x-fade-html="html"></div>
+        <div class="file-read-box hljs" x-show="html" x-auto-scroll x-fade-html="html"></div>
         <!-- the tool's own result line: "was lines 12-40", "had no body", ... -->
         <div class="grep-note" x-show="response?.content" x-text="response?.content ?? ''"></div>
         <div class="display-footer" x-show="args.path" x-text="args.path ?? ''"></div>
