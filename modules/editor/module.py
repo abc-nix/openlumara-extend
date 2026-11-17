@@ -126,6 +126,21 @@ _PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".rst")
 _SPAN_TARGET = regex.compile(r"^(?:ln:)?\s*(\d+)\s*(?:-\s*(\d+))?$")
 
 
+def _plain_heading(text):
+    """comparison form of a heading: markdown emphasis/code markers dropped,
+    closing #s removed, whitespace collapsed, lowercased.
+
+    a heading written "## **Settings**" must be reachable as "Settings" -
+    otherwise every formatted note needs its punctuation copied by hand.
+    exact and prefix matching on the RAW text runs first, so a heading that
+    genuinely contains underscores (a snake_case name) still matches exactly.
+    """
+    plain = " ".join(str(text or "").split()).strip("#").strip()
+    for marker in ("*", "`", "~", "_"):
+        plain = plain.replace(marker, "")
+    return plain.lower()
+
+
 def _span_target(target):
     """(start_line, end_line) from a line-range target, or None.
 
@@ -323,6 +338,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                     lines.append(f"- {r.name or str(r)} ({r})")
                 lines.append("file paths are relative to the workspace root; workspace is the name above, its path, or its 0-based index, or '<workspace>/<subfolder>' to scope into a subfolder, e.g. '" + (roots[0].name or str(roots[0])) + "/some/subdir' (see editor_workspaces)")
                 lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file (markdown/rst files get a heading map instead)")
+                lines.append("editor_replace_block and editor_insert_block take a definition name ('Class.method'), a markdown/rst heading ('Settings'), or a line range ('ln:12-40') as their target")
                 if self.config.get("read_outside_sandbox"):
                     lines.append("read-only tools may also open absolute paths outside these workspaces (read_outside_sandbox)")
                 if not self.config.get("sandboxed"):
@@ -777,19 +793,21 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             lines.append("imports: " + " | ".join(imports))
         return "\n".join(lines)
 
-    def _render_sections(self, code, rst=False):
-        """heading map for prose: one line per heading with its line number,
-        indented by level. no parser needed.
+    def _sections(self, code, rst=False):
+        """structured heading list: [{line, level, text, raw}], 1-based lines.
 
-        markdown uses ATX headings (#..###### - "#tag" without a space is not
-        one), rst uses underline headings (the next line repeats one
-        punctuation char), so the underline rule is only applied to rst -
-        otherwise a markdown frontmatter "---" would read as a heading.
-        fenced code blocks are skipped, so a # inside a sample is not a heading.
+        no parser needed. markdown uses ATX headings (#..###### - "#tag" without
+        a space is not one), rst uses underline headings and takes its levels
+        from the order the underline characters first appear. the underline rule
+        is only applied to rst, or a markdown frontmatter "---" would read as a
+        heading. fenced code blocks are skipped, so a # inside a sample is not a
+        heading either. this is the single source both the outline and the
+        heading locator read, so they can never disagree.
         """
         lines = code.split("\n")
-        out = []
+        sections = []
         in_fence = False
+        rst_styles = []
         for i, line in enumerate(lines):
             stripped = line.strip()
             if stripped.startswith("```") or stripped.startswith("~~~"):
@@ -800,15 +818,84 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             if stripped.startswith("#"):
                 level = len(stripped) - len(stripped.lstrip("#"))
                 if 1 <= level <= 6 and (len(stripped) == level or stripped[level] == " "):
-                    out.append(f"{'    ' * (level - 1)}ln:{i + 1} {stripped}")
+                    sections.append({
+                        "line": i + 1,
+                        "level": level,
+                        "text": stripped[level:].strip(),
+                        "raw": stripped,
+                    })
                     continue
             if rst and i + 1 < len(lines):
                 under = lines[i + 1].strip()
                 if (len(under) >= 3 and len(set(under)) == 1
                         and under[0] in "=-~^*+\"'"
                         and len(under) >= len(stripped)):
-                    out.append(f"ln:{i + 1} {stripped}")
-        return out
+                    if under[0] not in rst_styles:
+                        rst_styles.append(under[0])
+                    sections.append({
+                        "line": i + 1,
+                        "level": min(6, rst_styles.index(under[0]) + 1),
+                        "text": stripped,
+                        "raw": stripped,
+                    })
+        return sections
+
+    def _render_sections(self, code, rst=False):
+        """heading map text: `ln:<line> <heading>`, indented by level."""
+        return [
+            f"{'    ' * (max(1, s['level']) - 1)}ln:{s['line']} {s['raw']}"
+            for s in self._sections(code, rst=rst)
+        ]
+
+    def _match_section(self, sections, target):
+        """(index, error_text) for a heading target.
+
+        accepts the heading text with or without its #s, case-insensitively:
+        exact match first, then a unique prefix. returns an error string when no
+        heading matches or the text is ambiguous (two "## Duplicate"s).
+        """
+        wanted = " ".join(str(target or "").split()).lstrip("#").strip().lower()
+        if not wanted:
+            return None, "no heading name was given"
+
+        def pick(candidates, label):
+            if len(candidates) == 1:
+                return candidates[0], None
+            if len(candidates) > 1:
+                return None, self._ambiguous_sections([sections[i] for i in candidates], label)
+            return None, None
+
+        # raw text first (so snake_case headings match exactly), then the
+        # formatting-blind form, so "Settings" reaches "## **Settings**".
+        # within each form: exact before prefix
+        for raw in (True, False):
+            key = (lambda text: text.lower()) if raw else _plain_heading
+            value = wanted if raw else _plain_heading(wanted)
+            index, error = pick(
+                [i for i, s in enumerate(sections) if key(s["text"]) == value], target)
+            if index is not None or error:
+                return index, error
+            index, error = pick(
+                [i for i, s in enumerate(sections) if key(s["text"]).startswith(value)], target)
+            if index is not None or error:
+                return index, error
+
+        return None, f"heading '{target}' was not found in this file - use outline to see the headings"
+
+    def _ambiguous_sections(self, matches, wanted):
+        """error text listing the headings a target text collided with."""
+        listed = ", ".join(f"line {s['line']}: {s['raw']}" for s in matches[:8])
+        return (f"heading '{wanted}' matches {len(matches)} headings: {listed} - "
+                f"pass more of the heading text to pick one")
+
+    def _section_end(self, sections, index, total):
+        """1-based last line of a section: the line before the next heading of
+        the same or a higher level, or the last line of the file."""
+        level = sections[index]["level"]
+        for later in sections[index + 1:]:
+            if later["level"] <= level:
+                return later["line"] - 1
+        return total
 
     def _line_indent(self, lines, line_idx):
         """the leading whitespace of a 0-indexed line."""
@@ -968,7 +1055,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def replace_block(self, workspace: str, path: str, target: str, content: str):
-        """replaces a whole block: a function/class by name ('Class.method') or exact lines ('ln:12-40'). content is re-indented to the block and syntax-checked"""
+        """replaces a whole block: a definition by name ('Class.method'), a markdown/rst section by heading ('Settings'), or exact lines ('ln:12-40'). code is re-indented and syntax-checked"""
         try:
             target_path = self._resolve_path(workspace, path)
         except ValueError as e:
@@ -989,6 +1076,8 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         lines = code.split("\n")
         total = len(lines) - 1 if lines and lines[-1] == "" else len(lines)
 
+        prose = target_path.suffix.lower() in _PROSE_SUFFIXES
+        lead_blank = False
         span = _span_target(target)
         if span:
             start, end = span
@@ -999,6 +1088,19 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 }, False)
             start_idx, end_idx = start - 1, end - 1
             label = f"lines {start}-{end}"
+        elif prose:
+            sections = self._sections(code, rst=target_path.suffix.lower() == ".rst")
+            index, error = self._match_section(sections, target)
+            if error:
+                return self.result({"error": error, "note": "use outline to see the headings"}, False)
+            section = sections[index]
+            section_end = self._section_end(sections, index, total)
+            # replace the BODY, keeping the heading: the heading is what names
+            # the section, so re-emitting it is where headings get lost
+            start_idx = section["line"]                     # first line after the heading
+            end_idx = max(start_idx - 1, section_end - 1)   # an empty section replaces nothing
+            lead_blank = True                               # keep one blank line under the heading
+            label = f"section '{section['raw']}'"
         else:
             if not HAVE_TSLP:
                 return self.result({
@@ -1017,14 +1119,19 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         new_lines = self._reindent_block(content, self._line_indent(lines, start_idx))
         if not new_lines:
             return self.result("replacement content was empty - pass the complete new block", False)
+        if lead_blank:
+            # a section body needs a blank line under its heading and before
+            # whatever heading follows it
+            new_lines = [""] + new_lines + [""]
 
         merged = "\n".join(lines[:start_idx] + new_lines + lines[end_idx + 1:])
-        errors = await self._syntax_gate(merged, target_path)
-        if errors:
-            return self.result({
-                "errors": errors,
-                "message": "syntax check failed - file was not written",
-            }, False)
+        if not prose:
+            errors = await self._syntax_gate(merged, target_path)
+            if errors:
+                return self.result({
+                    "errors": errors,
+                    "message": "syntax check failed - file was not written",
+                }, False)
         try:
             with open(target_path, "w", encoding="utf-8") as f:
                 f.write(merged)
@@ -1032,12 +1139,17 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             return self.result(str(e), False)
         if span:
             return self.result(f"replaced {label} in {path}")
+        if prose:
+            if end_idx < start_idx:
+                return self.result(f"{label} had no body - inserted the content after the heading in {path}")
+            return self.result(
+                f"replaced the body of {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}")
         return self.result(
             f"replaced {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}")
 
     @core.module.tool
     async def insert_block(self, workspace: str, path: str, target: str, content: str, where: str = "before"):
-        """inserts content before/after a function/class ('Class.method') or a line ('ln:12'). code is re-indented to the neighbour and syntax-checked"""
+        """inserts content before/after a definition ('Class.method'), a markdown/rst section ('Settings') or a line ('ln:12'). code is re-indented and syntax-checked"""
         if str(where).strip().lower() not in ("before", "after"):
             return self.result(f"'where' must be 'before' or 'after', not '{where}'", False)
         before = str(where).strip().lower() == "before"
@@ -1060,6 +1172,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         lines = code.split("\n")
         total = len(lines) - 1 if lines and lines[-1] == "" else len(lines)
 
+        prose = target_path.suffix.lower() in _PROSE_SUFFIXES
         span = _span_target(target)
         if span:
             start, end = span
@@ -1071,6 +1184,17 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             indent = self._line_indent(lines, start - 1)
             insert_idx = start - 1 if before else end
             label = f"line {start}" if start == end else f"lines {start}-{end}"
+        elif prose:
+            sections = self._sections(code, rst=target_path.suffix.lower() == ".rst")
+            index, error = self._match_section(sections, target)
+            if error:
+                return self.result({"error": error, "note": "use outline to see the headings"}, False)
+            section = sections[index]
+            section_end = self._section_end(sections, index, total)
+            indent = self._line_indent(lines, section["line"] - 1)
+            # "after" means after the whole SECTION, matching "after" a symbol
+            insert_idx = section["line"] - 1 if before else section_end
+            label = f"section '{section['raw']}'"
         else:
             if not HAVE_TSLP:
                 return self.result({
@@ -1101,12 +1225,13 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             block = [""] + reindented
 
         merged = "\n".join(lines[:insert_idx] + block + lines[insert_idx:])
-        errors = await self._syntax_gate(merged, target_path)
-        if errors:
-            return self.result({
-                "errors": errors,
-                "message": "syntax check failed - file was not written",
-            }, False)
+        if not prose:
+            errors = await self._syntax_gate(merged, target_path)
+            if errors:
+                return self.result({
+                    "errors": errors,
+                    "message": "syntax check failed - file was not written",
+                }, False)
         try:
             with open(target_path, "w", encoding="utf-8") as f:
                 f.write(merged)
