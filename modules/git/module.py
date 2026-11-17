@@ -10,6 +10,7 @@
 # history-rewriting operations (push/pull/fetch/rebase) stay human-initiated
 # and live in the webui panel only.
 
+import asyncio
 import os
 import subprocess
 import time
@@ -184,11 +185,19 @@ class Git(core.module.Module):
         """runs git, returns (returncode, raw stdout bytes). no text mode,
         no stripping - for output that must be parsed byte-exactly."""
         try:
-            proc = subprocess.run(
+            # availability fix: subprocess.run inside an async def blocks the
+            # WHOLE event loop until git exits (up to the timeout). to_thread
+            # isolates the wait; stdin=DEVNULL stops git hanging on a
+            # credential prompt; start_new_session detaches the child from the
+            # app's process group.
+            proc = await asyncio.to_thread(
+                subprocess.run,
                 ["git", *args],
                 cwd=git_root,
                 capture_output=True,
                 timeout=timeout,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
             )
         except FileNotFoundError:
             return 127, b"git executable not found"
@@ -381,12 +390,17 @@ class Git(core.module.Module):
         """runs git in the workspace/repo root. returns (ok, output).
         accept lists return codes that count as success."""
         try:
-            proc = subprocess.run(
+            # see _run_git_bytes: to_thread keeps the loop free, DEVNULL and a
+            # new session guard against prompts and teardown
+            proc = await asyncio.to_thread(
+                subprocess.run,
                 ["git", *args],
                 cwd=git_root,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
             )
         except FileNotFoundError:
             return False, "git executable not found"
@@ -407,13 +421,16 @@ class Git(core.module.Module):
         """runs git with `input_text` on stdin - used by `git apply -`, the
         only way to stage a single hunk without touching the worktree."""
         try:
-            proc = subprocess.run(
+            # no stdin=DEVNULL here: `input` already supplies stdin (git apply -)
+            proc = await asyncio.to_thread(
+                subprocess.run,
                 ["git", *args],
                 cwd=git_root,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 input=input_text,
+                start_new_session=True,
             )
         except FileNotFoundError:
             return False, "git executable not found"
