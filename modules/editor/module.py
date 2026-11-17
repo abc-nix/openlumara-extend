@@ -20,6 +20,7 @@
 #   selectors (basename / full path / 0-based index).
 
 import ast
+import json
 import os
 import asyncio
 import difflib
@@ -122,6 +123,27 @@ def _short_import(source: str):
 # prose formats whose outline is a heading map instead of a symbol map
 _PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".rst")
 
+# config formats whose outline is a key map: json/yaml expose no definitions
+# for the structure pass (it answers zero symbols for both), and the map needs
+# no parser, so these also work when the tree-sitter runtime is missing
+_CONFIG_SUFFIXES = (".json", ".yaml", ".yml")
+
+# never collect more key rows than this, even with outline_max_keys = 0
+_CONFIG_KEY_CEILING = 50000
+
+# a key line in a yaml mapping (matched on the text after any "- "): a quoted
+# key may hold a colon, a bare one stops at the first - yaml requires a space
+# (or the line end) after it, so "a:1" stays a plain scalar and matches nothing
+_YAML_KEY = regex.compile(
+    r"""^(?P<key>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#[{][^:]*?)\s*:(?:\s|$)""")
+
+# "key": at the start of a pretty-printed json object line
+_JSON_KEY = regex.compile(r'^\s*"(?P<key>(?:[^"\\]|\\.)*)"\s*:')
+
+# json string literals, dropped before counting brackets: a "${VAR}" default
+# or a "a{b" string must not shift the depth of the lines below it
+_JSON_STRING = regex.compile(r'"(?:[^"\\]|\\.)*"')
+
 # a block target that names lines instead of a symbol: "ln:12-40", "12-40", "ln:12"
 _SPAN_TARGET = regex.compile(r"^(?:ln:)?\s*(\d+)\s*(?:-\s*(\d+))?$")
 
@@ -217,6 +239,11 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             "type": "number",
             "default": 10240,
             "description": "Files larger than this (KB) are refused by read before loading (memory guard). 0 = disabled.",
+        },
+        "outline_max_keys": {
+            "type": "number",
+            "default": 200,
+            "description": "Maximum keys outline lists for json/yaml config files (they get a key map instead of a symbol map). 0 = unlimited, up to a 50000-key safety ceiling.",
         },
         "grep_max_file_kb": {
             "type": "number",
@@ -337,7 +364,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 for r in roots:
                     lines.append(f"- {r.name or str(r)} ({r})")
                 lines.append("file paths are relative to the workspace root; workspace is the name above, its path, or its 0-based index, or '<workspace>/<subfolder>' to scope into a subfolder, e.g. '" + (roots[0].name or str(roots[0])) + "/some/subdir' (see editor_workspaces)")
-                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file (markdown/rst files get a heading map instead)")
+                lines.append("on source files, use editor_outline before editor_read - it maps every function and class with its line range, so a read can target one symbol instead of the whole file (markdown/rst files get a heading map, json/yaml files a key map instead)")
                 lines.append("editor_replace_block and editor_insert_block take a definition name ('Class.method'), a markdown/rst heading ('Settings'), or a line range ('ln:12-40') as their target")
                 if self.config.get("read_outside_sandbox"):
                     lines.append("read-only tools may also open absolute paths outside these workspaces (read_outside_sandbox)")
@@ -559,7 +586,7 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
 
     @core.module.tool
     async def outline(self, workspace: str, path: str):
-        """lists every function and class in a source file with its line range and signature, or a markdown/rst file's headings - map a file before reading it"""
+        """lists every function and class in a source file with its line range and signature, a markdown/rst file's headings, or a json/yaml config's keys with their lines - map a file before reading it"""
         try:
             target, base = self._resolve_with_base(workspace, path, read_only=True)
         except ValueError as e:
@@ -598,6 +625,26 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                     "note": "this file has no markdown/rst headings to map - use read",
                 }, False)
             return self.result("\n".join(sections))
+
+        # config files: a key map, also without a parser (json/yaml have no
+        # definitions for the structure pass to find), so it must sit above the
+        # HAVE_TSLP gate just like the prose branch
+        if target.suffix.lower() in _CONFIG_SUFFIXES:
+            limit = max(0, self._num_setting("outline_max_keys", 200))
+            keys, capped = self._render_config_keys(code, target.suffix.lower(), limit)
+            if not keys:
+                return self.result({
+                    "error": "no keys found",
+                    "note": "this config file has no keys to map - use read",
+                }, False)
+            if capped:
+                return self.result({
+                    "content": "\n".join(keys),
+                    "truncated": True,
+                    "truncation_note": (f"showing the first {len(keys)} keys - raise "
+                                        "outline_max_keys for the rest (0 = unlimited)"),
+                })
+            return self.result("\n".join(keys))
 
         if not HAVE_TSLP:
             return self.result({
@@ -846,6 +893,175 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             f"{'    ' * (max(1, s['level']) - 1)}ln:{s['line']} {s['raw']}"
             for s in self._sections(code, rst=rst)
         ]
+
+    # ------------------------------------
+    # helpers: config key map (json/yaml)
+    # ------------------------------------
+    def _yaml_key_rows(self, code, cap):
+        """key rows of a yaml file from indentation alone: [(line, depth, key)].
+
+        the stack holds (key column, key); a "- item:" line's column is where
+        its text starts, so the next line's keys at the same column come out as
+        siblings instead of children. blank, comment and document-marker lines
+        are skipped, and the body of a block scalar ("run: |", "- |") is
+        swallowed whole - otherwise every "key: value"-looking line inside a
+        shell snippet would be mapped as config. anchors/aliases ("<<: *base")
+        are not resolved: the key is emitted as written.
+
+        stops after cap rows (cap = 0 means no cap).
+        """
+        rows = []
+        stack = []
+        block_indent = None
+        for i, line in enumerate(code.split("\n")):
+            stripped = line.strip()
+            if block_indent is not None:
+                column = len(line) - len(line.lstrip())
+                if not stripped or column > block_indent:
+                    continue  # still inside the block scalar's body
+                block_indent = None
+            if not stripped or stripped.startswith("#"):
+                continue
+            if stripped in ("---", "..."):
+                if stripped == "---":
+                    rows.append((i + 1, 0, "--- document ---"))
+                stack.clear()  # a new document starts at depth 0
+                continue
+            if stripped.startswith("%"):
+                continue  # directive (%YAML, %TAG)
+            lead = len(line) - len(line.lstrip())
+            body = line[lead:]
+            column = lead
+            if body.startswith("-") and (len(body) == 1 or body[1] == " "):
+                tail = body[1:]
+                # the item's mapping starts where its text starts, so a dash
+                # that carries a key puts the column one step right of the dash
+                column = lead + 1 + (len(tail) - len(tail.lstrip(" ")))
+                body = tail.lstrip(" ")
+                if not body:
+                    continue  # a bare "-" carries no key of its own
+                if body[0] in "|>":
+                    block_indent = column
+                    continue
+            match = _YAML_KEY.match(body)
+            if not match:
+                continue
+            key = match.group("key").strip()
+            if key[:1] in ("'", '"'):
+                key = key[1:-1]
+            while stack and stack[-1][0] >= column:
+                stack.pop()
+            rows.append((i + 1, len(stack), key))
+            stack.append((column, key))
+            if body[match.end():].strip()[:1] in ("|", ">"):
+                block_indent = column
+            if cap and len(rows) >= cap:
+                return rows
+        return rows
+
+    def _json_key_rows(self, code, cap):
+        """key rows of a pretty-printed json file: [(line, depth, key)].
+
+        depth is counted from the brackets opened so far (minus the root
+        container, which is not a nesting level), not from the indentation, so
+        2-space, 4-space and tab-indented files all map the same; string
+        literals are dropped before counting, or a "${VAR}" default would shift
+        it. a one-line document is never scanned - the caller sends it to
+        _json_path_rows before this runs.
+        """
+        rows = []
+        open_containers = 0
+        for i, line in enumerate(code.split("\n")):
+            bare = _JSON_STRING.sub('""', line)
+            # a key may sit behind the bracket/comma that introduces it
+            # ({ "e": 2 } inside an array), so strip those before matching
+            match = _JSON_KEY.match(line.lstrip(" \t[{,"))
+            if match:
+                # the root container is not a nesting level: its keys are depth
+                # 0, or every line of a normal json file would be indented once
+                depth = max(0, open_containers - 1)
+                rows.append((i + 1, depth, match.group("key")))
+                if cap and len(rows) >= cap:
+                    return rows
+            open_containers += (bare.count("{") + bare.count("[")
+                                - bare.count("}") - bare.count("]"))
+            if open_containers < 0:
+                open_containers = 0
+        return rows
+
+    def _json_path_rows(self, data, cap, max_depth=6):
+        """key paths of a parsed json document: [(None, 0, "a.b[0].c")].
+
+        the fallback for minified json, where a line number would be useless:
+        every object key and every array element holding an object is listed by
+        path, so "how many entries, where does this branch start" is answered
+        without positions. max_depth keeps a pathological tree bounded.
+        """
+        rows = []
+
+        def walk(node, path, depth):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if cap and len(rows) >= cap:
+                        return
+                    child = f"{path}.{key}" if path else str(key)
+                    rows.append((None, 0, child))
+                    if isinstance(value, (dict, list)) and depth < max_depth:
+                        walk(value, child, depth + 1)
+            elif isinstance(node, list):
+                for index, value in enumerate(node):
+                    if not isinstance(value, (dict, list)):
+                        continue
+                    if cap and len(rows) >= cap:
+                        return
+                    child = f"{path}[{index}]"
+                    rows.append((None, 0, child))
+                    if depth < max_depth:
+                        walk(value, child, depth + 1)
+
+        walk(data, "", 0)
+        return rows
+
+    def _config_key_rows(self, code, suffix, limit):
+        """(rows, capped) - the key rows of a config file, capped at limit.
+
+        limit = 0 means no limit (the ceiling still applies). one row past the
+        limit is collected first, so a file with exactly `limit` keys is not
+        reported as truncated. invalid json (or a yaml file without a single
+        key) returns no rows, which the caller reports as an error the model
+        can act on.
+        """
+        want = limit or _CONFIG_KEY_CEILING
+        cap = want + 1
+        if suffix == ".json":
+            # a minified document has no per-key line to point at, so it goes
+            # straight to the path walk - the line scan would map only the keys
+            # that happen to share a line with the root bracket
+            rows = [] if "\n" not in code.strip() else self._json_key_rows(code, cap)
+            if not rows:
+                try:
+                    data = json.loads(code.lstrip("\ufeff"))
+                except Exception:
+                    return [], False
+                rows = self._json_path_rows(data, cap)
+        else:
+            rows = self._yaml_key_rows(code, cap)
+        return rows[:want], len(rows) > want
+
+    def _render_config_keys(self, code, suffix, limit):
+        """the config key map as (text lines, capped).
+
+        same shape as the other backends - `ln:<line> <key>`, indented two
+        spaces per nesting level (yaml's own step; the heading map's four would
+        push a deep config's line numbers off the screen). a minified file has
+        no line to point at, so its rows are bare key paths with no indent.
+        """
+        rows, capped = self._config_key_rows(code, suffix, limit)
+        lines = [
+            ("  " * min(depth, 12)) + (text if line is None else f"ln:{line} {text}")
+            for line, depth, text in rows
+        ]
+        return lines, capped
 
     def _match_section(self, sections, target):
         """(index, error_text) for a heading target.
