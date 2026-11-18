@@ -1,17 +1,19 @@
 {# -- AI GENERATED CODE (Qwen3.8-Flash-Next) :: (2026-10-07, popover variant)
-   browser panel launcher via the core bottom_of_tabbar slot: an icon-rail
+   browser panel launcher via the core sidebar_bottom slot: an icon-rail
    button that opens a tray-menu style POPOVER (fixed-position, anchored
    beside the rail) instead of a core modal — same spirit as the core
    model-switcher dropdown and the windows module's custom floating
    elements. The .browser-ext-mount wrapper holds button+popover together
    so @click.outside dismisses correctly (clicking the button toggles) and
-   Esc closes while open. margin-top:auto moved to the mount (rail pin).
+   Esc closes while open. the core rail footer pins itself to the bottom and
+   renders this slot inside it now, so the mount's margin-top:auto only does
+   anything on older cores where the slot was a direct child of the rail.
    Icon-only button: name + live status in the dynamic :title tooltip;
    dot = status badge on the icon corner. State lives in the shared
    $store.browserPanel (assets/js/browser.js); the old modal variant is
    parked in the .backups folder (browser-modal.html.*.popover-variant.bak). #}
 
-{% macro bottom_of_tabbar() %}
+{% macro sidebar_bottom() %}
 <div class="browser-ext-mount"
      @click.outside="$store.browserPanel.panelOpen && $store.browserPanel.closePanel()"
      @keydown.escape.window="$store.browserPanel.panelOpen && $store.browserPanel.closePanel()">
