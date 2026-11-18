@@ -62,6 +62,11 @@ const _index = { blocks: [] };
 // cannot depend on it and re-trigger itself
 const _view = { active: 0, from: -1, to: -1, renderedGen: -1, query: "" };
 
+// full-history cache for the outline, outside reactivity like _index/_view:
+// core only keeps a window of turns in memory now (stores/chat.js turnStart,
+// turnPageSize), so the rest of the chat is paged in through /api/chat/turns.
+const _all = { chatId: "", turns: [], loading: false };
+
 // the current hits grouped by the message (or block) they belong to, so one
 // paint cycle can cover every match that is on screen right now
 const _groups = { messages: new Map(), blocks: new Map() };
@@ -527,38 +532,81 @@ const CHAT_NAV_STORE = {
             const chat = Alpine.store("chat");
             const turns = chat.turnHistory || [];
             const tail = turns.length ? (turns[turns.length - 1].hash || "live") : "";
-            const next = (chat.selectedChat || "") + "|" + turns.length + "|" + tail;
+            // turnStart is part of the signature: paging older turns changes
+            // which slice is loaded, and the outline has to follow it
+            const next = (chat.selectedChat || "") + "|" + (chat.turnStart || 0) + "|" + turns.length + "|" + tail;
             if (next === signature) return;
 
             signature = next;
             this.reindex(chat.selectedChat || "");
         });
 
-        // the chat recycles message DOM while scrolling (stores/ui.js unmounts
-        // turns that drift away), so a permanent highlight is re-applied when
-        // its turn comes back. reading the key set is what subscribes this
-        // effect to mount changes.
+        // turns are not unmounted/recycled anymore (core renders everything it
+        // has loaded), so a permanent highlight only has to be re-applied when
+        // the loaded window changes: paging older turns, or another chat.
+        // (ui.turnMounted is gone - reading turnStart/length is the signal now.)
         Alpine.effect(() => {
-            const mounted = Alpine.store("ui").turnMounted;
-            void Object.keys(mounted || {}).length;
+            const chat = Alpine.store("chat");
+            void (chat.turnStart || 0);
+            void (chat.turnHistory || []).length;
 
             if (this.highlightSeconds === 0) this.queueRepaint();
         });
     },
 
     reindex(chatId) {
-        const turns = Alpine.store("chat").turnHistory || [];
+        const chat = Alpine.store("chat");
+        const windowTurns = chat.turnHistory || [];
+        const start = Number(chat.turnStart) || 0;
+        const serverTotal = Number(chat.totalTurns) || 0;
+        const total = Math.max(serverTotal, start + windowTurns.length);
+
+        // the outline covers the WHOLE chat. core switched to absolute turn
+        // indexes (a window of turns is kept in memory, data-turn-index is
+        // turnStart + position), so building blocks from the full history keeps
+        // block position == absolute turn index: the DOM selector, scrollToTurn
+        // and every hit line up again with no translation anywhere.
+        if (_all.chatId !== chatId) {
+            _all.chatId = chatId;
+            _all.turns = [];
+        }
+
+        const turns = _all.turns.slice();
+        if (turns.length < total) turns.length = total;
+
+        // the loaded window is the freshest data (it carries the live turn), so
+        // it wins over whatever the pages said
+        for (let i = 0; i < windowTurns.length; i++) turns[start + i] = windowTurns[i];
+
         const blocks = new Array(turns.length);
         let maxChars = 1;
 
         for (let i = 0; i < turns.length; i++) {
-            const info = turnInfo(turns[i], this.toolLimit);
+            const turn = turns[i];
+
+            if (!turn) {
+                // a turn whose page has not arrived yet: the slot keeps the
+                // outline complete and fills in when the page lands
+                blocks[i] = {
+                    index: i,
+                    ordinal: i + 1,
+                    role: "",
+                    preview: "",
+                    tools: 0,
+                    chars: 0,
+                    records: [],
+                    width: "8.0%"
+                };
+                continue;
+            }
+
+            const info = turnInfo(turn, this.toolLimit);
             if (info.chars > maxChars) maxChars = info.chars;
 
             blocks[i] = {
                 index: i,
                 ordinal: i + 1,
-                role: turns[i].role,
+                role: turn.role,
                 preview: info.preview,
                 tools: info.toolSteps,
                 chars: info.chars,
@@ -569,6 +617,7 @@ const CHAT_NAV_STORE = {
 
         // relative block size, sqrt-normalised so short blocks stay visible
         for (const block of blocks) {
+            if (!block.records.length) continue;
             block.width = (8 + 92 * Math.sqrt(block.chars / maxChars)).toFixed(1) + "%";
         }
 
@@ -587,6 +636,99 @@ const CHAT_NAV_STORE = {
         this.highlightClear();
 
         if (_view.query) this.scheduleSearch(0, false);
+
+        // page in whatever the window does not hold, then rebuild once
+        if (_all.turns.length < serverTotal) this.ensureFullHistory(chatId);
+    },
+
+    /* ------------------- full history (paging) --------------------- */
+
+    // one page of the currently open chat's turns, or null when the chat
+    // changed underneath the request
+    async _fetchPage(chatId, before, limit) {
+        const url = before === null
+            ? `/api/chat/turns?limit=${limit}`
+            : `/api/chat/turns?before=${before}&limit=${limit}`;
+
+        const result = await simpleApiFetch(url);
+        if (!result) return null;
+        if (Alpine.store("chat").selectedChat !== chatId) return null;
+
+        return {
+            turns: result.turns || [],
+            start: Number(result.start) || 0,
+            total: Number(result.total) || 0
+        };
+    },
+
+    // walks the chat backwards page by page; the core caps one page at 200 turns
+    async _fetchAllPages(chatId) {
+        const limit = 200;
+        let collected = [];
+        let before = null;
+
+        for (let guard = 0; guard < 100; guard++) {
+            const page = await this._fetchPage(chatId, before, limit);
+            if (!page) return null;
+
+            collected = page.turns.concat(collected);
+            if (!page.turns.length || page.start <= 0) break;
+            before = page.start;
+        }
+
+        return collected;
+    },
+
+    async ensureFullHistory(chatId) {
+        if (_all.loading || _all.chatId !== chatId) return;
+
+        _all.loading = true;
+        try {
+            if (_all.turns.length === 0) {
+                const everything = await this._fetchAllPages(chatId);
+                if (everything) _all.turns = everything;
+            } else {
+                // cheap top-up after new turns: the newest page, spliced in at
+                // its own start index (older entries stay as they are)
+                const page = await this._fetchPage(chatId, null, 200);
+                if (page) {
+                    for (let i = 0; i < page.turns.length; i++) {
+                        _all.turns[page.start + i] = page.turns[i];
+                    }
+                }
+            }
+        } finally {
+            _all.loading = false;
+        }
+
+        if (Alpine.store("chat").selectedChat === chatId) this.reindex(chatId);
+    },
+
+    // core only keeps a window of turns loaded and scrollToTurn gives up when
+    // no element matches, so a jump has to page the target in first. the page
+    // size is raised for the walk so a long jump is a handful of requests
+    // instead of one per five turns.
+    async ensureTurnLoaded(absIndex) {
+        const chat = Alpine.store("chat");
+        if (!Number.isFinite(absIndex) || absIndex < 0) return false;
+        if (absIndex >= (Number(chat.turnStart) || 0)) return true;
+
+        const pageSize = chat.turnPageSize;
+        chat.turnPageSize = 200;
+
+        try {
+            for (let guard = 0; guard < 100; guard++) {
+                if (absIndex >= (Number(chat.turnStart) || 0)) break;
+                if (!chat.hasMoreOlder) break;
+
+                await chat.loadOlderTurns(false);
+                await Alpine.nextTick();
+            }
+        } finally {
+            chat.turnPageSize = pageSize;
+        }
+
+        return absIndex >= (Number(chat.turnStart) || 0);
     },
 
     /* ---------------------------- searching ---------------------------- */
@@ -781,8 +923,11 @@ const CHAT_NAV_STORE = {
 
         this.activeHit = index;
 
-        // mount and centre the block first; a hit with a message anchor then
-        // re-aims at its own occurrence inside it
+        // page the target turn in first (core only scrolls to loaded turns),
+        // then centre the block; a hit with a message anchor re-aims at its own
+        // occurrence inside it further down in paintSearch()
+        await this.ensureTurnLoaded(hit.block);
+        await Alpine.nextTick();
         await Alpine.store("ui").scrollToTurn(hit.block);
         this.flash(hit.block);
 
@@ -792,6 +937,9 @@ const CHAT_NAV_STORE = {
     /* ----------------------------- jumping ----------------------------- */
 
     async jumpTo(blockIndex) {
+        // block index is the absolute turn index now; load it before scrolling
+        await this.ensureTurnLoaded(blockIndex);
+        await Alpine.nextTick();
         await Alpine.store("ui").scrollToTurn(blockIndex);
         this.flash(blockIndex);
     },
@@ -1205,29 +1353,28 @@ const CHAT_NAV_PANEL = {
         }, 100);
     },
 
-    // only mounted turns are around the viewport, and ui.js tells us which
-    // ones they are - no need to measure thousands of placeholders per scroll
+    // every loaded turn is in the DOM now (no lazy mounting) and
+    // data-turn-index carries the absolute turn index, so the active block can
+    // be read straight off the elements around the viewport
     spy() {
         if (!_index.blocks.length || !this.isOpen()) return;
 
         const container = document.getElementById("messages");
         if (!container) return;
 
-        const mounted = Object.keys(Alpine.store("ui").turnMounted || {}).map(Number).sort((a, b) => a - b);
-        if (!mounted.length) return;
+        const elements = container.querySelectorAll("[data-turn-index]");
+        if (!elements.length) return;
 
         const rect = container.getBoundingClientRect();
         const probe = rect.top + rect.height * 0.35;
 
-        let active = mounted[0];
-        for (const index of mounted) {
-            const element = container.querySelector('[data-turn-index="' + index + '"]');
-            if (!element) continue;
+        let active = Number(elements[0].dataset.turnIndex);
+        for (const element of elements) {
             if (element.getBoundingClientRect().top > probe) break;
-            active = index;
+            active = Number(element.dataset.turnIndex);
         }
 
-        if (active !== _view.active) this.setActive(active);
+        if (Number.isFinite(active) && active !== _view.active) this.setActive(active);
     },
 
     scrollActiveIntoView() {
