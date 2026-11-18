@@ -44,6 +44,11 @@
 
         <div class="cn-wordmode">
             <span class="cn-filters-sep"></span>
+            {# ALL first: it decides whether a search may page the chat at all,
+               ahead of the two query narrowers #}
+            <button type="button" class="cn-chip cn-and" :class="{ 'on': $store.chatNav.searchAllTurns }"
+                title="ALL / whole chat: search every turn, paging the older ones in from the backend (200 per request) - the outline fills its previews as they arrive. Off (default): only the turns already loaded in the chat are searched, and nothing older is fetched."
+                @click="$store.chatNav.toggleAll()">ALL</button>
             <button type="button" class="cn-chip cn-and" :class="{ 'on': $store.chatNav.markdownMode }"
                 title="MD: ignore the emphasis markers markdown renders away, so **bold** and _italic_ count as plain text and a query can span them. Off: the raw text is searched, markers included."
                 @click="$store.chatNav.toggleMarkdown()">MD</button>
@@ -75,7 +80,10 @@
                         :data-block="row.index" @click="$store.chatNav.jumpTo(row.index)">
                         <div class="cn-line1">
                             <span class="cn-ord" x-text="row.ordinal"></span>
-                            <span class="cn-role" x-text="row.role === 'user' ? 'You' : 'AI'"></span>
+                            {# a turn whose page is not fetched yet carries no role: its
+                               owner is simply unknown, so it stays neutral instead of
+                               claiming to be the AI's #}
+                            <span class="cn-role" x-text="row.role === 'user' ? 'You' : (row.role ? 'AI' : 'MESSAGE')"></span>
                             <span class="cn-ticks" x-show="row.tools" x-text="row.tools + ' tool'"></span>
                         </div>
                         <div class="cn-prev" x-text="row.preview"></div>

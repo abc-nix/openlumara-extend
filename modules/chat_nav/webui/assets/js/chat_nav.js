@@ -468,6 +468,9 @@ const CHAT_NAV_STORE = {
     // renders away (bold, italics) stand between you and a match
     andMode: false,
     markdownMode: true,
+    // the ALL switch: search the whole chat (paging older turns in) or only the
+    // turns the chat already has loaded
+    searchAllTurns: false,
     chips: CHAT_NAV_CHIPS,
     counts: {},
     results: [],
@@ -518,6 +521,10 @@ const CHAT_NAV_STORE = {
 
         const savedMarkdown = localStorage.getItem("chatNavMarkdown");
         this.markdownMode = savedMarkdown === null ? data.defaultMarkdown === "1" : savedMarkdown === "1";
+
+        // the third switch: whole-chat search or loaded-window search
+        const savedSearchAll = localStorage.getItem("chatNavSearchAll");
+        this.searchAllTurns = savedSearchAll === null ? data.defaultSearchAll === "1" : savedSearchAll === "1";
     },
 
     // rebuilds the index whenever the chat or its turn list actually changes.
@@ -637,8 +644,10 @@ const CHAT_NAV_STORE = {
 
         if (_view.query) this.scheduleSearch(0, false);
 
-        // page in whatever the window does not hold, then rebuild once
-        if (_all.turns.length < serverTotal) this.ensureFullHistory(chatId);
+        // only the ALL switch pages the history in: off keeps the outline at
+        // ordinals-with-no-preview for unloaded turns (block count stays right)
+        // and never fetches an older page
+        if (this.searchAllTurns && _all.turns.length < serverTotal) this.ensureFullHistory(chatId);
     },
 
     /* ------------------- full history (paging) --------------------- */
@@ -768,6 +777,28 @@ const CHAT_NAV_STORE = {
     toggleMarkdown() {
         this.markdownMode = !this.markdownMode;
         localStorage.setItem("chatNavMarkdown", this.markdownMode ? "1" : "0");
+        if (_view.query) this.runSearch();
+    },
+
+    // ALL: page the whole history in and search all of it. off (default) keeps
+    // the loaded window as the searchable copy, so searching never pulls older
+    // pages off the backend; switching it on loads whatever is missing and the
+    // search re-runs over everything (see ensureFullHistory).
+    toggleAll() {
+        this.searchAllTurns = !this.searchAllTurns;
+        localStorage.setItem("chatNavSearchAll", this.searchAllTurns ? "1" : "0");
+
+        const chatId = Alpine.store("chat").selectedChat || "";
+
+        if (this.searchAllTurns) {
+            this.ensureFullHistory(chatId);
+        } else if (_all.turns.length) {
+            // drop the cached pages: "off" must mean loaded-only, even in a
+            // session where ALL was on before
+            _all.turns = [];
+            this.reindex(chatId);
+        }
+
         if (_view.query) this.runSearch();
     },
 
@@ -941,7 +972,33 @@ const CHAT_NAV_STORE = {
         await this.ensureTurnLoaded(blockIndex);
         await Alpine.nextTick();
         await Alpine.store("ui").scrollToTurn(blockIndex);
+        await this.alignTurnTop(blockIndex);
         this.flash(blockIndex);
+    },
+
+    // scrollToTurn() centres the turn, which is wrong for a "go to this message"
+    // click: on a tall answer (a long chain easily runs to 2000px) the centre
+    // puts the start of the message off the top of the viewport, so you land in
+    // the middle of it. bring the turn's top to the top of the viewport instead,
+    // re-measuring until it settles (markdown/images keep changing height while
+    // they render, and the last turn of a chat cannot always reach the top).
+    async alignTurnTop(absIndex) {
+        const container = document.getElementById("messages");
+        if (!container || !Number.isFinite(absIndex)) return;
+
+        let previousTop = -1;
+        for (let pass = 0; pass < 12; pass += 1) {
+            const element = container.querySelector('[data-turn-index="' + absIndex + '"]');
+            if (!element) return;
+
+            const offset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+            if (Math.abs(offset) < 4) return;
+            if (container.scrollTop === previousTop) return;
+
+            previousTop = container.scrollTop;
+            container.scrollTo({ top: container.scrollTop + offset, behavior: "instant" });
+            await new Promise(resolve => setTimeout(resolve, 80));
+        }
     },
 
     flash(index) {

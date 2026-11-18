@@ -79,6 +79,10 @@ class ChatNav(core.module.Module):
             "description": "Start with the panel's MD switch on: the emphasis markers markdown renders away (* and _, bold and italics) count as nothing, so a phrase can run across them the way the rendered page reads, and snippets show the text without the markers. Off: the raw markdown is searched, markers included, which is what you need to search for a literal * or a pair of underscores around a phrase. Underscores inside a word (chat_nav) are never treated as markers. Remembered per browser once you touch the switch.",
             "default": True
         },
+        "search_whole_chat_by_default": {
+            "description": "Start with the panel's ALL switch on: a search pages the whole chat in from the backend (200 turns per request) and matches everywhere, not just in the turns already loaded. Off by default: only the loaded window is searched and no older page is fetched, so opening a chat and typing costs nothing. Turning it on pages the missing turns in on demand; the switch is remembered per browser once you touch it.",
+            "default": False
+        },
         "search_per_occurrence": {
             "description": "Navigate every occurrence of the typed string instead of one hit per message, landing on that occurrence and painting it apart from the other matches. Applies to your messages and the assistant's final answers; reasoning and tool hits stay one per block, because their rendered text cannot be addressed per occurrence. With the AND switch on, a hit is always the message itself, placed on the words' tightest run.",
             "default": True
