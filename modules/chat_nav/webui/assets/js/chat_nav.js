@@ -1367,6 +1367,16 @@ const CHAT_NAV_PANEL = {
         this.refreshWindow();
         this.spy();
         this.scrollActiveIntoView();
+
+        // one pass is not enough. x-intersect fires before the panel is laid out
+        // when a host switches in (the dock's search tab, a sidebar tab):
+        // scrollActiveIntoView() bails on isOpen() because offsetParent is still
+        // null, and the row of the active block that spy() just recomputed may
+        // not be rendered yet either. measured: opening the dock after scrolling
+        // to turn 3 left the outline parked at the old scrollTop with the active
+        // row off screen. re-run once layout and the window are actually there.
+        requestAnimationFrame(() => this.scrollActiveIntoView());
+        Alpine.nextTick(() => this.scrollActiveIntoView());
     },
 
     refreshWindow() {
