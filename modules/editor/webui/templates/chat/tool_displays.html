@@ -185,19 +185,13 @@
                         if (!s || !s.old) return '';
                         return editorDiffSideHtml(s.old, s.new ?? '', editorLangForPath(this.args.path), cacheKey + ':b');
                     },
-                    get liveActive() { return !this.snap && !!this.pre; },
-                    get liveDiffHtml() {
-                        // the before side comes from the FILE (fetched), the after
-                        // side is the argument still streaming - the same diff
-                        // renderer the edit card uses, re-run as it arrives
-                        if (!this.liveActive) return '';
-                        return editorDiffHtml(this.pre.old ?? '', this.args.content ?? '',
-                                              editorLangForPath(this.args.path), cacheKey + ':live');
-                    },
-                    get liveDiffSideHtml() {
-                        if (!this.liveActive) return '';
-                        return editorDiffSideHtml(this.pre.old ?? '', this.args.content ?? '',
-                                                  editorLangForPath(this.args.path), cacheKey + ':live');
+                    get livePair() { return !this.snap && !!this.pre; },
+                    get preHtml() {
+                        // the block as it is on disk right now - static, no diff
+                        // colours: diffing a half-written replacement churns and
+                        // leaves the newest line clipped at the bottom edge
+                        if (!this.pre) return '';
+                        return codeLinesHtml(this.pre.old, editorLangForPath(this.args.path), null, cacheKey + ':pre');
                     },
                     load() {
                         // an insertion has no before-block to show
@@ -250,15 +244,22 @@
             <div class="tool-display hljs diff-unified" x-show="diffHtml" x-auto-scroll x-fade-html="diffHtml"></div>
             <div class="diff-side hljs" x-show="diffSideHtml" x-auto-scroll x-fade-html="diffSideHtml"></div>
         </div>
-        <!-- while the call streams, the before side is the block the FILE still
-             holds (fetched through the module, since it is not in the arguments),
-             so the same diff renderer can run live as the replacement arrives;
-             the snapshot diff takes over the moment the call completes -->
-        <div class="diff-container" x-show="liveActive">
-            <div class="tool-display hljs diff-unified" x-show="liveDiffHtml" x-auto-scroll x-fade-html="liveDiffHtml"></div>
-            <div class="diff-side hljs" x-show="liveDiffSideHtml" x-auto-scroll x-fade-html="liveDiffSideHtml"></div>
+        <!-- while the call streams: the block as it is on disk (left, static,
+             fetched through the module since it is not in the arguments) next to
+             the replacement being written (right, autoscrolled). no diff colours
+             here - a diff against a half-written block churns; the real diff
+             appears the moment the call completes -->
+        <div class="live-pair" x-show="livePair">
+            <div class="live-pane">
+                <div class="live-label" x-text="pre?.label ?? 'before'"></div>
+                <div class="file-read-box hljs live-before" x-fade-html="preHtml"></div>
+            </div>
+            <div class="live-pane">
+                <div class="live-label">after</div>
+                <div class="file-read-box hljs" x-auto-scroll x-fade-html="html"></div>
+            </div>
         </div>
-        <div class="file-read-box hljs" x-show="!diffHtml && !liveActive && html" x-auto-scroll x-fade-html="html"></div>
+        <div class="file-read-box hljs" x-show="!diffHtml && !livePair && html" x-auto-scroll x-fade-html="html"></div>
         <!-- the tool's own result line: "was lines 12-40", "had no body", ... -->
         <div class="grep-note" x-show="response?.content" x-text="response?.content ?? ''"></div>
         <div class="display-footer" x-show="args.path" x-text="args.path ?? ''"></div>

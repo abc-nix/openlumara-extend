@@ -149,3 +149,31 @@
         }
     }
 }
+
+/* live replace_block preview: before (static, read from the file) | after (the
+   argument as it streams, autoscrolled). deliberately NOT a diff - diffing a
+   half-written block churns line by line and leaves the newest line clipped at
+   the bottom edge. the real diff replaces this the moment the call completes. */
+.live-pair {
+    display: grid;
+    /* auto-fit keeps one column on a narrow card without a media query */
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.live-pane {
+    min-width: 0;
+}
+
+.live-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.6;
+    margin-bottom: 4px;
+}
+
+.live-before {
+    opacity: 0.85;
+}
