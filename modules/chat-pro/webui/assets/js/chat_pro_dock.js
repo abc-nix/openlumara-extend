@@ -23,7 +23,8 @@ chatPart({
 
         this.panelOpen = Boolean(open);
         try { localStorage.setItem("chatProPanelOpen", this.panelOpen ? "1" : "0"); } catch (error) { /* private mode */ }
-        this._applyPanelLayout(this.panelOpen);
+        // the width change re-wraps the chat: keep the reader's place
+        this._withChatAnchor(() => this._applyPanelLayout(this.panelOpen));
         this._syncDelegateHost();
     },
 
@@ -40,6 +41,67 @@ chatPart({
                 Alpine.store("chatPro").setPanelOpen(false);
             }
         });
+    },
+
+    // the docked panel reserves width in the chat column, so opening/closing it - and
+    // switching to full mode - re-wraps every message. measured on a 205-turn
+    // window: opening it shrank #messages from 974px to 614px and grew the content
+    // from 110848 to 150370px while scrollTop stayed 57368, so what you were reading
+    // jumped ~21566px out of view; closing it put it back. core sets overflow-anchor:
+    // none on #messages, so the browser does not compensate for the reflow either.
+    //
+    // hold the same message under the viewport top across the change: remember the
+    // first turn whose bottom is below it (and its offset), plus whether we were at
+    // the bottom, then correct scrollTop for a handful of frames while the new
+    // layout settles.
+    _withChatAnchor(apply) {
+        const container = document.getElementById("messages");
+        if (!container) { apply(); return; }
+
+        const top = container.getBoundingClientRect().top;
+        let anchor = null;
+        for (const el of container.querySelectorAll("[data-turn-index]")) {
+            if (el.getBoundingClientRect().bottom > top) { anchor = el; break; }
+        }
+
+        const turn = anchor ? Number(anchor.dataset.turnIndex) : null;
+        const before = anchor ? anchor.getBoundingClientRect().top - top : 0;
+        const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+
+        apply();
+
+        if (!Number.isFinite(turn)) { return; }
+
+        // wrapping settles over the next frames; every pass is a no-op once the
+        // anchor is back where it was, and the loop is bounded either way
+        const limit = atBottom ? 6 : 20;
+        let pass = 0;
+        let previous = null;
+
+        const settle = () => {
+            if (pass++ >= limit) { return; }
+
+            const el = container.querySelector(`[data-turn-index="${turn}"]`);
+            if (!el) { return; }
+
+            if (atBottom) {
+                container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
+                requestAnimationFrame(settle);
+                return;
+            }
+
+            const offset = el.getBoundingClientRect().top - container.getBoundingClientRect().top - before;
+            if (Math.abs(offset) > 1) {
+                container.scrollTo({ top: container.scrollTop + offset, behavior: "instant" });
+            } else if (previous !== null && Math.abs(previous) <= 1) {
+                return;
+            }
+
+            previous = offset;
+            requestAnimationFrame(settle);
+        };
+
+        requestAnimationFrame(settle);
     },
 
     // the panel hangs under the header and the chat reserves its width. the header
@@ -85,7 +147,7 @@ chatPart({
     togglePanelFull() {
         this.panelFull = !this.panelFull;
         try { localStorage.setItem("chatProPanelFull", this.panelFull ? "1" : "0"); } catch (error) { /* private mode */ }
-        this._applyPanelLayout(this.panelOpen);
+        this._withChatAnchor(() => this._applyPanelLayout(this.panelOpen));
     },
 
     /* ----------------
@@ -136,7 +198,8 @@ chatPart({
             if (["branches", "search", "links", "tasks"].includes(tab)) { this.panelTab = tab; }
         } catch (error) { /* private mode */ }
 
-        this._applyPanelLayout(this.panelOpen);
+        // the width change re-wraps the chat: keep the reader's place
+        this._withChatAnchor(() => this._applyPanelLayout(this.panelOpen));
         this._syncDelegateHost();
     },
 });
