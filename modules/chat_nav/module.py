@@ -83,6 +83,10 @@ class ChatNav(core.module.Module):
             "description": "Start with the panel's ALL switch on: a search pages the whole chat in from the backend (200 turns per request) and matches everywhere, not just in the turns already loaded. Off by default: only the loaded window is searched and no older page is fetched, so opening a chat and typing costs nothing. Turning it on pages the missing turns in on demand; the switch is remembered per browser once you touch it.",
             "default": False
         },
+        "show_jump_arrows": {
+            "description": "Show two small floating arrows at the left edge of the chat (just above the input): up jumps to the previous compaction summary - or to the first message when there is none - and down to the next summary, or to the very bottom. Both work while a reply is streaming: up stops following the stream so you can read, down goes back to the bottom and follows it again.",
+            "default": True
+        },
         "mark_compression_summaries": {
             "description": "Mark compaction handoff summaries in the outline: the row is tinted, gets an accent edge and a small 'summary' chip beside the owner. Detection uses the SUMMARIZATION_CUTOFF marker that compression stores just before the summary, so it costs nothing extra and also covers turns paged in by the ALL switch. Off: a summary looks like any other AI block.",
             "default": True

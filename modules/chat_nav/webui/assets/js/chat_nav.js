@@ -67,6 +67,11 @@ const _view = { active: 0, from: -1, to: -1, renderedGen: -1, query: "" };
 // turnPageSize), so the rest of the chat is paged in through /api/chat/turns.
 const _all = { chatId: "", turns: [], loading: false };
 
+// compaction summaries of the open chat, for the jump arrows: the loaded window
+// contributes them as soon as it is indexed, the rest comes from one paged scan
+// done lazily (only when an arrow is used, so opening a chat costs nothing).
+const _summaries = { chatId: "", total: 0, scanned: false, turns: [] };
+
 // the current hits grouped by the message (or block) they belong to, so one
 // paint cycle can cover every match that is on screen right now
 const _groups = { messages: new Map(), blocks: new Map() };
@@ -486,6 +491,19 @@ const CHAT_NAV_STORE = {
 
     // mark compaction handoff summaries in the outline (module setting)
     markSummaries: true,
+
+    // jump arrows: dimming state, kept up to date by the scroll tracker, which
+    // runs even while the panel is closed because the arrows work on their own
+    atTop: false,
+    atBottom: false,
+    _trackBound: false,
+    _trackQueued: false,
+
+    // a detach has to outlive a jump that was already in flight when it was
+    // clicked (see toggleFollowing); until this timestamp, the tracker keeps the
+    // follow flag down
+    _holdUntil: 0,
+    _holdTimer: null,
     chips: CHAT_NAV_CHIPS,
     counts: {},
     results: [],
@@ -578,6 +596,26 @@ const CHAT_NAV_STORE = {
 
             if (this.highlightSeconds === 0) this.queueRepaint();
         });
+
+        // the jump arrows need the current position even while the panel is
+        // closed, so the tracker is bound here (ensureReady runs on every page)
+        // instead of in the panel component.
+        if (!this._trackBound) {
+            this._trackBound = true;
+
+            const messages = document.getElementById("messages");
+            if (messages) {
+                messages.addEventListener("scroll", () => {
+                    if (this._trackQueued) return;
+                    this._trackQueued = true;
+
+                    requestAnimationFrame(() => {
+                        this._trackQueued = false;
+                        this.trackPosition();
+                    });
+                }, { passive: true });
+            }
+        }
     },
 
     reindex(chatId) {
@@ -666,10 +704,43 @@ const CHAT_NAV_STORE = {
 
         if (_view.query) this.scheduleSearch(0, false);
 
+        // keep the arrow index fresh from whatever is loaded: a compaction that
+        // happens while you are streaming lands at the tail, so it needs no
+        // refetch - the rest of the history is scanned lazily on first use
+        this._noteSummaries(chatId, blocks);
+
         // only the ALL switch pages the history in: off keeps the outline at
         // ordinals-with-no-preview for unloaded turns (block count stays right)
         // and never fetches an older page
         if (this.searchAllTurns && _all.turns.length < serverTotal) this.ensureFullHistory(chatId);
+    },
+
+    // the cache belongs to one chat AND one timeline: a branch switch changes the
+    // turn count by more than one, while a stream only ever adds one, so a big
+    // jump means the history was replaced and the summary index must be rebuilt.
+    _syncSummaryCache(chatId) {
+        const total = Number(Alpine.store("chat").totalTurns) || 0;
+
+        if (_summaries.chatId !== chatId || Math.abs(total - _summaries.total) > 1) {
+            _summaries.chatId = chatId;
+            _summaries.total = total;
+            _summaries.scanned = false;
+            _summaries.turns = [];
+        }
+    },
+
+    // fold the summaries of the freshly indexed window into the arrow cache (the
+    // lazy full scan fills in everything that is not loaded)
+    _noteSummaries(chatId, blocks) {
+        this._syncSummaryCache(chatId);
+
+        for (const block of blocks) {
+            if (!block.summary) continue;
+            if (_summaries.turns.includes(block.index)) continue;
+            _summaries.turns.push(block.index);
+        }
+
+        _summaries.turns.sort((a, b) => a - b);
     },
 
     /* ------------------- full history (paging) --------------------- */
@@ -1021,6 +1092,182 @@ const CHAT_NAV_STORE = {
             container.scrollTo({ top: container.scrollTop + offset, behavior: "instant" });
             await new Promise(resolve => setTimeout(resolve, 80));
         }
+    },
+
+    /* ------------------- jump arrows (summaries) -------------------- */
+
+    // where the reader is: the active block is the turn at ~35% of the viewport
+    // (same probe as spy), and atTop/atBottom dim the arrows. runs from the
+    // scroll tracker, so it also works while the panel is closed.
+    trackPosition(container) {
+        const el = container || document.getElementById("messages");
+        if (!el) return;
+
+        const rect = el.getBoundingClientRect();
+        const probe = rect.top + rect.height * 0.35;
+
+        let active = -1;
+        for (const turnEl of el.querySelectorAll("[data-turn-index]")) {
+            if (turnEl.getBoundingClientRect().top > probe) break;
+            active = Number(turnEl.dataset.turnIndex);
+        }
+        if (active >= 0) _view.active = active;
+
+        this.atTop = el.scrollTop <= 4;
+        this.atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+
+        // while a detach is being held, an in-flight _jumpToBottom keeps scrolling
+        // to the bottom and its own scroll event re-enables following (distance 0
+        // is under the 50px threshold): keep the flag down until the hold ends.
+        if (this._holdUntil) {
+            const ui = Alpine.store("ui");
+
+            if (performance.now() < this._holdUntil) {
+                ui.shouldScroll = false;
+            } else {
+                this._holdUntil = 0;
+            }
+        }
+    },
+
+    // one paged pass over the chat, the first time an arrow is used: the summary
+    // markers live in the turn payloads, so this is the same /api/chat/turns walk
+    // the outline uses for ALL. cached per chat, topped up by _noteSummaries().
+    async _ensureSummaries(chatId) {
+        const chat = Alpine.store("chat");
+
+        this._syncSummaryCache(chatId);
+        if (_summaries.scanned) return;
+
+        let before = Number(chat.turnStart) || 0;
+
+        for (let guard = 0; guard < 100 && before > 0; guard += 1) {
+            const page = await simpleApiFetch(`/api/chat/turns?before=${before}&limit=200`);
+            if (!page) break;
+            if (Alpine.store("chat").selectedChat !== chatId) return;
+
+            const start = Number(page.start) || 0;
+            (page.turns || []).forEach((turn, i) => {
+                if (!hasCompressionMarker(turn)) return;
+                if (!_summaries.turns.includes(start + i)) _summaries.turns.push(start + i);
+            });
+
+            const next = Number(page.start);
+            if (!Number.isFinite(next) || next >= before) break;
+            before = next;
+        }
+
+        _summaries.turns.sort((a, b) => a - b);
+        _summaries.scanned = true;
+    },
+
+    // up: previous compaction (or the first message). also breaks away from a
+    // running stream, so the view stays where you put it while you read.
+    async jumpUp() {
+        const chat = Alpine.store("chat");
+        await this._ensureSummaries(chat.selectedChat || "");
+
+        const above = _summaries.turns.filter((t) => t < _view.active);
+        const target = above.length ? above[above.length - 1] : 0;
+
+        Alpine.store("ui").shouldScroll = false;
+
+        await this.ensureTurnLoaded(target);
+        await Alpine.nextTick();
+        await Alpine.store("ui").scrollToTurn(target);
+        await this.alignTurnTop(target);
+
+        // the scroll above fires the tracker, but say it explicitly: following
+        // the stream is what drags you back down
+        Alpine.store("ui").shouldScroll = false;
+        this.trackPosition();
+    },
+
+    // down: next compaction, or the true bottom - and from there the stream is
+    // followed again (forceScrollToBottom sets shouldScroll).
+    async jumpDown() {
+        const chat = Alpine.store("chat");
+        await this._ensureSummaries(chat.selectedChat || "");
+
+        const below = _summaries.turns.filter((t) => t > _view.active);
+
+        if (below.length) {
+            const target = below[0];
+            await this.ensureTurnLoaded(target);
+            await Alpine.nextTick();
+            await Alpine.store("ui").scrollToTurn(target);
+            await this.alignTurnTop(target);
+            this.trackPosition();
+            return;
+        }
+
+        const end = (Number(chat.turnStart) || 0) + (chat.turnHistory || []).length - 1;
+        if (end < (Number(chat.totalTurns) || 0) - 1) { await chat.reloadChat(); }
+
+        await Alpine.nextTick();
+        await Alpine.store("ui").forceScrollToBottom();
+        this.trackPosition();
+    },
+
+    // the little dot between the arrows. while a reply streams, core's autoscroll
+    // keeps chasing the newest token as long as ui.shouldScroll is true - that is
+    // what pins the view to the bottom and why the wheel can lose the race.
+    // dropping the flag (the lerp pump checks it every frame) lets the view stay
+    // where you put it; turning it back on returns to the bottom first, so this is
+    // never a dead end.
+    toggleFollowing() {
+        const ui = Alpine.store("ui");
+
+        if (ui.shouldScroll) {
+            ui.shouldScroll = false;
+
+            // two things keep pulling the view down and neither looks at the
+            // flag the way one would hope:
+            //   1. the lerp pump (_pumpScrollToBottom) glides every frame and is
+            //      only stopped by a wheel/touch, so a click must stop it too;
+            //   2. core's @scroll handler re-enables following whenever the
+            //      distance to the bottom is under scrollThreshold (50px), and
+            //      clicking while pinned means exactly that.
+            // so: stop the pump, and step just past the threshold.
+            if (typeof ui._stopPump === "function") ui._stopPump();
+
+            const el = document.getElementById("messages");
+            if (el) {
+                const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+                if (dist < 60) el.scrollTo({ top: el.scrollTop - (60 - dist), behavior: "instant" });
+            }
+
+            // a jump that was already in flight when the click landed scrolls to the
+            // bottom BEFORE it checks the flag, and its own scroll event re-enables
+            // following right after (distance 0 < threshold). hold the flag down for
+            // a moment so the detach survives it; resuming or scrolling clears this.
+            this._holdUntil = performance.now() + 900;
+
+            // when the hold ends, make sure we are actually away from the bottom
+            // again (a jump may have snapped us onto it), otherwise the next
+            // scroll event would flip following straight back on.
+            if (this._holdTimer) clearTimeout(this._holdTimer);
+            this._holdTimer = setTimeout(() => {
+                this._holdUntil = 0;
+
+                const box = document.getElementById("messages");
+                if (!box) return;
+
+                ui.shouldScroll = false;
+                const dist = box.scrollHeight - box.scrollTop - box.clientHeight;
+                if (dist < 60) box.scrollTo({ top: box.scrollTop - (60 - dist), behavior: "instant" });
+            }, 950);
+
+            this.trackPosition();
+            return;
+        }
+
+        // resuming: hand control back to core, which jumps and follows again
+        if (this._holdTimer) clearTimeout(this._holdTimer);
+        this._holdUntil = 0;
+        ui.shouldScroll = true;
+        ui.forceScrollToBottom();
+        this.trackPosition();
     },
 
     flash(index) {
@@ -1482,3 +1729,36 @@ const CHAT_NAV_PANEL = {
         return this.visibleBlocks.length ? "" : "No messages in this chat yet.";
     }
 };
+
+
+// floating jump arrows for the open chat (see show_jump_arrows): two buttons at
+// the left edge of #messages, just above the input. nothing in core reserves a
+// slot there, so js positions them against the messages rect - the chat column
+// moves when the sidebar or the chat-pro dock changes width.
+function chatNavArrows() {
+    return {
+        _observer: null,
+
+        place() {
+            const messages = document.getElementById("messages");
+            if (!messages || !this.$root) return;
+
+            const rect = messages.getBoundingClientRect();
+            this.$root.style.left = `${Math.round(rect.left + 10)}px`;
+            this.$root.style.bottom = `${Math.max(10, Math.round(window.innerHeight - rect.bottom + 20))}px`;
+        },
+
+        init() {
+            this.place();
+            window.addEventListener("resize", () => this.place());
+
+            if (window.ResizeObserver) {
+                const messages = document.getElementById("messages");
+                if (messages) {
+                    this._observer = new ResizeObserver(() => this.place());
+                    this._observer.observe(messages);
+                }
+            }
+        },
+    };
+}

@@ -60,4 +60,34 @@
         </button>
     </div>
 </div>
+
+{% if module_config.get("show_jump_arrows", True) %}
+{# floating jump arrows: previous / next compaction summary, or the ends of the
+   chat. placed by js against #messages (the chat column moves with the sidebar
+   and the chat-pro dock), so only the markup lives here. #}
+<div class="cn-jump-arrows" x-data="chatNavArrows()" x-show="!$store.ui.isMobile" x-cloak>
+    <button type="button" class="cn-jump cn-jump-up" :class="{ dim: $store.chatNav.atTop }"
+            title="Previous summary (or the first message)" aria-label="Jump to the previous summary"
+            @click.stop="$store.chatNav.jumpUp()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+    </button>
+    {# follow / detach, shown only while a reply is streaming: core's autoscroll
+       keeps pulling the view to the newest token and the wheel can lose that
+       race, so this is the deliberate way out. solid dot = following, hollow =
+       detached; clicking toggles (the down arrow re-attaches too). #}
+    <button type="button" class="cn-jump cn-jump-follow" x-show="$store.stream.state !== 'idle'"
+            :class="{ detached: !$store.ui.shouldScroll }"
+            :title="$store.ui.shouldScroll ? 'Following the reply - click to untether and read' : 'Detached - click to follow the bottom again'"
+            aria-label="Stop or resume following the reply"
+            @click.stop="$store.chatNav.toggleFollowing()">
+        <span class="cn-jump-dot"></span>
+    </button>
+
+    <button type="button" class="cn-jump cn-jump-down" :class="{ dim: $store.chatNav.atBottom }"
+            title="Next summary (or the bottom of the chat)" aria-label="Jump to the next summary"
+            @click.stop="$store.chatNav.jumpDown()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+</div>
+{% endif %}
 {% endmacro %}
