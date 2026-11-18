@@ -1,0 +1,85 @@
+{#
+    abc-extras: chat-header additions.
+
+    the core header only calls extension slots now, so the elements that used
+    to be built into it come back from here:
+      - the stream-state bubble (idle / thinking / calling tools / ...)
+      - the model dropdown (same markup and the same modelQuickSwitch()
+        component the core input bar uses, so both stay in sync)
+      - the settings gear (upstream moved it to the sidebar footer)
+
+    placement
+    ---------
+    the slot decides *which* cluster (left() = title area, right() = controls),
+    and `cluster_order` decides where inside it: header .left/.right are flex
+    rows, so an inline `order` moves an element before or after the others --
+    exactly what chat-pro does with `order: 99` in its own CSS to land after the
+    core buttons. -1 = before the default (0) modules, 100+ = after chat-pro.
+
+    everything is gated by this module's settings, exposed as `module_config`
+    by the extension system (an unset key falls back to its schema default).
+#}
+
+{% set cluster_order = module_config.get("cluster_order") %}
+{% set order_style = "order: " ~ (cluster_order if cluster_order is not none else 0) %}
+
+{% macro stream_state() %}
+    {% if module_config.get("show_stream_state") %}
+        {% set state_style = module_config.get("state_style") or "badge" %}
+        <span class="{{ 'stream-state ' if state_style == 'badge' }}ae-state ae-style-{{ state_style }}"
+              style="{{ order_style }}"
+              x-data="abcExtrasState({ hideWhenIdle: {{ 'true' if module_config.get('hide_state_when_idle') else 'false' }} })"
+              :class="'ae-tone-' + tone + (busy ? ' is-busy' : '')"
+              x-show="visible" x-cloak
+              :title="'stream state: ' + state">
+            <span class="ae-dot" aria-hidden="true"></span>
+            <span class="ae-label" x-text="label"></span>
+        </span>
+    {% endif %}
+{% endmacro %}
+
+{% macro model_switcher() %}
+    {% if module_config.get("show_model_switcher") %}
+        <div class="model-switcher" style="{{ order_style }}"
+             x-data="modelQuickSwitch()" x-show="!$store.ui.isMobile" x-cloak>
+            <select class="model-select" :value="currentModel" :disabled="saving"
+                    @change="setModel($event.target.value)"
+                    @focus="lazyFetch()"
+                    title="Switch model">
+                <template x-for="model in options" :key="model">
+                    <option :value="model" x-text="model"></option>
+                </template>
+            </select>
+        </div>
+    {% endif %}
+{% endmacro %}
+
+{% macro settings_button() %}
+    {% if module_config.get("show_settings_button") %}
+        <button type="button" class="btn" style="{{ order_style }}"
+                title="Settings (Ctrl+S)"
+                x-show="!window.ADMIN_SETTINGS_DISABLED" x-cloak
+                @click="await $store.ui.openModal('settings')">
+            {% include 'svg/gear.svg' %}
+        </button>
+    {% endif %}
+{% endmacro %}
+
+{% macro extras() %}
+    {% if (module_config.get("element_order") or "state_first") == "model_first" %}
+        {{ model_switcher() }}
+        {{ stream_state() }}
+    {% else %}
+        {{ stream_state() }}
+        {{ model_switcher() }}
+    {% endif %}
+    {{ settings_button() }}
+{% endmacro %}
+
+{% macro right() %}
+    {% if (module_config.get("header_slot") or "right") != "left" %}{{ extras() }}{% endif %}
+{% endmacro %}
+
+{% macro left() %}
+    {% if (module_config.get("header_slot") or "right") == "left" %}{{ extras() }}{% endif %}
+{% endmacro %}

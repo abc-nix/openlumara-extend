@@ -1,0 +1,142 @@
+/*
+ * abc-extras -- chat-header stream-state bubble.
+ *
+ * the "badge" style deliberately carries the core .stream-state class, so its
+ * pill (padding, border, radius) keeps coming from header.css and follows the
+ * theme. these rules only bring the dot, the tone colours and the two lighter
+ * styles. theme vars with fallbacks, like the rest of the webui.
+ */
+
+header .right .ae-state {
+    gap: 7px;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* ---- the dot ------------------------------------------------------------ */
+
+.ae-state .ae-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-muted, #888);
+}
+
+/* ---- tones: dot colour, and a matching label where it helps -------------- */
+
+.ae-state.ae-tone-idle .ae-dot      { background: var(--text-muted, #888); }
+.ae-state.ae-tone-sending .ae-dot,
+.ae-state.ae-tone-received .ae-dot  { background: var(--text-secondary, #999); }
+.ae-state.ae-tone-thinking .ae-dot  { background: var(--accent, #00d4ff); }
+.ae-state.ae-tone-streaming .ae-dot { background: #2ecc71; }
+.ae-state.ae-tone-tools .ae-dot     { background: #ffb86b; }
+.ae-state.ae-tone-busy .ae-dot      { background: var(--accent, #00d4ff); }
+
+.ae-state.ae-tone-thinking .ae-label { color: var(--accent, #00d4ff); }
+.ae-state.ae-tone-tools .ae-label    { color: #ffb86b; }
+.ae-state.ae-tone-streaming .ae-label { color: #2ecc71; }
+
+/* ---- activity: slow pulse, no layout shift ------------------------------ */
+
+.ae-state.is-busy .ae-dot {
+    animation: ae-state-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ae-state-pulse {
+    0%, 100% { opacity: 1;    transform: scale(1); }
+    50%      { opacity: 0.45; transform: scale(0.82); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ae-state.is-busy .ae-dot { animation: none; }
+}
+
+/* ---- lighter styles ----------------------------------------------------- */
+
+.ae-state.ae-style-text,
+.ae-state.ae-style-dot {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.85rem;
+    line-height: 1;
+    color: var(--text-secondary, #a0a0a0);
+    border: none;
+}
+
+.ae-state.ae-style-text {
+    gap: 7px;
+    padding: 4px 2px;
+}
+
+/* dot only: the full state name stays available in the tooltip */
+.ae-state.ae-style-dot {
+    gap: 0;
+    padding: 4px 3px;
+}
+
+.ae-state.ae-style-dot .ae-dot {
+    width: 10px;
+    height: 10px;
+}
+
+.ae-state.ae-style-dot .ae-label {
+    display: none;
+}
+
+/* --------------------------------------------------------------------------
+ * model dropdown, in the header
+ *
+ * upstream keeps the .model-switcher / .model-select rules nested inside the
+ * input area's CSS (chat/input.css), so a dropdown rendered in the header got
+ * no styles at all and the browser drew its native boxed <select>. this is a
+ * copy of that look, scoped to the header and with a fixed height because the
+ * core version sizes itself off the 48px input row (`height: calc(100% - 12px)`).
+ * -------------------------------------------------------------------------- */
+
+header .model-switcher {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+
+    .model-select {
+        background: none;
+        border: none;
+        border-radius: var(--radius-sm);
+        height: 30px;
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        font-family: inherit;
+        padding: 0 12px;
+        max-width: 220px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-overflow: ellipsis;
+        box-sizing: border-box;
+
+        &:hover {
+            color: var(--accent);
+        }
+
+        &:focus,
+        &:focus-visible {
+            outline: none;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
+        option {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+    }
+}
+
+/* the header hides on mobile for this element (x-show), but the left slot is
+   only wide enough for a short name -- keep it from pushing the title */
+header .left .model-switcher .model-select {
+    max-width: 160px;
+}
