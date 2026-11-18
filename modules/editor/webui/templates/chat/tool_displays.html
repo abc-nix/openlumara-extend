@@ -164,12 +164,12 @@
                         return 'inserting ' + (this.args.where === 'after' ? 'after' : 'before');
                     },
                     get html() { return editorBlockHtml(this.args.content, editorLangForPath(this.args.path), cacheKey) },
-                    get span() {
-                        // the tool reports which lines it replaced; that span is
-                        // the only handle the card has on a snapshot
-                        const text = String(this.response?.content ?? '');
-                        const m = text.match(/(?:was )?lines (\d+)-(\d+)/);
-                        return m ? [Number(m[1]), Number(m[2])] : null;
+                    get token() {
+                        // the tool ends its result with a marker plus a hex token
+                        // (one per call), so every card keeps its own before-block
+                        // and a repeated edit cannot show someone else's snapshot
+                        const m = String(this.response?.content ?? '').match(/#([0-9a-f]{8,32})/);
+                        return m ? m[1] : '';
                     },
                     get diffHtml() {
                         const s = this.snap;
@@ -188,24 +188,17 @@
                     load() {
                         // an insertion has no before-block to show
                         if (toolDisplayName(tool) === 'editor_insert_block') return;
-                        const span = this.span;
-                        if (!span || !this.response?.content) return;
+                        const token = this.token;
+                        if (!token) return;
                         const chat = Alpine.store('chat')?.chat?.id;
                         if (!chat) return;
-                        const key = [chat, this.args.workspace ?? '', this.args.path ?? '',
-                                     this.args.target ?? '', span[0], span[1]].join('|');
+                        const key = chat + '|' + token;
                         if (key === this.asked) return;
                         this.asked = key;
-                        const qs = new URLSearchParams({
-                            chat, workspace: this.args.workspace ?? '', path: this.args.path ?? '',
-                            target: this.args.target ?? '', start: span[0], end: span[1] });
-                        simpleApiFetch('/api/ext/editor/block?' + qs)
+                        simpleApiFetch('/api/ext/editor/block?' + new URLSearchParams({ chat, token }))
                             .then(j => {
-                                const list = j?.entries ?? [];
-                                // an exact content match first; repeated edits of
-                                // the same span are ambiguous, so newest is the fallback
-                                this.snap = list.find(e => (e.new ?? '').trim() === (this.args.content ?? '').trim())
-                                            || list[list.length - 1] || null;
+                                this.snap = (j && j.old !== undefined)
+                                    ? { old: j.old, new: j.new } : null;
                             })
                             .catch(() => { this.snap = null; });
                     } }"

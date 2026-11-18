@@ -20,6 +20,7 @@ import filetype
 import regex
 from pathlib import Path
 
+import core
 import channels.webui.api as webui
 
 
@@ -370,40 +371,33 @@ class EditorRoutes:
 
     @webui.route("block")
     async def _route_block(self, body=None, query=None):
-        """the before/after snapshot for one block edit (replace_block card).
+        """the before/after snapshot of ONE block edit, addressed by its token.
 
         display-only by construction: the tool writes the snapshot under the
-        data folder and never returns it, so the replaced text cannot cost
-        context. the card sends the same tuple the tool used (chat id,
-        workspace + path, target, line span from the "was lines A-B" note) and
-        the key is rebuilt here - a tool function has no access to its own tool
-        call id, so that id could never be the key.
+        data folder and puts only a short token in its result, so the replaced
+        text cannot cost context. the token is validated as hex (no path, no
+        user input reaching the filesystem) and the chat id is checked before
+        it is used as a folder name - the route can only read what the tool
+        itself wrote.
         """
         q = query or {}
         chat = str(q.get("chat", ""))
+        token = str(q.get("token", ""))
         if not regex.fullmatch(r"[A-Za-z0-9_-]{1,40}", chat):
             return self.result("bad chat id", False)
-        try:
-            start = int(q.get("start") or 0)
-            end = int(q.get("end") or 0)
-        except (TypeError, ValueError):
-            return self.result("bad line span", False)
-        try:
-            target, base = self._resolve_with_base(
-                str(q.get("workspace", "")), str(q.get("path", "")), read_only=True)
-        except ValueError as e:
-            return self.result(str(e), False)
+        if not regex.fullmatch(r"[0-9a-f]{8,32}", token):
+            return self.result("bad token", False)
 
-        stash = self._block_stash_file(chat, target, str(q.get("target", "")), start, end)
+        stash = Path(core.get_data_path(os.path.join("editor", "blocks", chat, token + ".json")))
         if not stash.exists():
-            return {"entries": []}
+            return self.result("no snapshot for this call", False)
         try:
-            entries = json.loads(stash.read_text(encoding="utf-8"))
+            entry = json.loads(stash.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {"entries": []}
-        if not isinstance(entries, list):
-            return {"entries": []}
-        return {"entries": [e for e in entries if isinstance(e, dict)][-10:]}
+            return self.result("snapshot could not be read", False)
+        if not isinstance(entry, dict):
+            return self.result("snapshot could not be read", False)
+        return {"old": entry.get("old", ""), "new": entry.get("new", "")}
 
     @webui.route("open", method="POST")
     async def _route_open(self, body=None, query=None):

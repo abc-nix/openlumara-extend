@@ -1293,48 +1293,51 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
         except Exception:
             return None
 
-    def _block_stash_file(self, chat_id, target_path, target, start, end):
-        """where the before/after snapshot for one block edit lives.
-
-        keyed by chat + resolved path + target + line span, NOT by tool call id:
-        a tool function never sees its call id (core invokes it with the schema
-        arguments only), so the card has to be able to rebuild the key from what
-        it holds - workspace, path, target, and the "was lines A-B" result line.
-        """
-        material = "\n".join([chat_id, str(target_path), str(target), str(start), str(end)])
-        digest = hashlib.sha1(material.encode("utf-8")).hexdigest()[:16]
-        return Path(core.get_data_path(
-            os.path.join("editor", "blocks", chat_id, digest + ".json")))
-
     def _stash_block(self, target_path, target, start, end, old_text, new_text):
         """remember what a block edit replaced, for the card's before/after view.
 
-        display-only: the snapshot lives under the data folder and the card
-        fetches it through a module route, so the replaced text never enters the
-        tool result and cannot cost context. failures are swallowed - a missing
-        snapshot must never fail the edit. entries are pruned by age at write
-        time, because there is no hook tying these files to a chat's deletion.
+        one file per CALL, named by a fresh token that the result then carries
+        (`… in f.py · #7f3a2c`): a tool function never sees its call id (core
+        invokes it with the schema arguments only), so the token is the only way
+        to give every call its own snapshot - keying by path/target/span instead
+        made repeated edits share one entry, and an old card could then show a
+        newer "before".
+
+        display-only: the file lives under the data folder and the card fetches
+        it through a module route, so the replaced text never enters the tool
+        result and cannot cost context. failures are swallowed (- the edit must
+        never fail because a snapshot could not be written) and callers only
+        append the token when one comes back. snapshots are pruned by age at
+        write time, because nothing ties these files to a chat's deletion.
         """
         chat_id = self._chat_id()
         if not chat_id or not old_text:
-            return
+            return ""
         try:
-            path = self._block_stash_file(chat_id, target_path, target, start, end)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            entries = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-            entries = [e for e in entries if isinstance(e, dict) and "old" in e and "new" in e]
-            entries.append({"ts": int(time.time()), "old": old_text, "new": new_text})
-            path.write_text(json.dumps(entries[-10:]), encoding="utf-8")
+            folder = Path(core.get_data_path(os.path.join("editor", "blocks", chat_id)))
+            folder.mkdir(parents=True, exist_ok=True)
+            token = hashlib.sha1(os.urandom(16)).hexdigest()[:12]
+            entry = {
+                "ts": int(time.time()),
+                "path": str(target_path),
+                "target": str(target),
+                "start": start,
+                "end": end,
+                "old": old_text,
+                "new": new_text,
+            }
+            (folder / (token + ".json")).write_text(json.dumps(entry), encoding="utf-8")
 
             cutoff = time.time() - self._BLOCK_STASH_DAYS * 86400
-            for old_file in path.parent.iterdir():
+            for old_file in folder.iterdir():
                 try:
                     if old_file.suffix == ".json" and old_file.stat().st_mtime < cutoff:
                         old_file.unlink()
                 except OSError:
                     pass
+            return token
         except Exception:
-            return
+            return ""
 
     def _decorator_start(self, lines, def_idx):
         """index of the first line of the decorator stack above a def/class
@@ -1540,18 +1543,22 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
                 f.write(merged)
         except Exception as e:
             return self.result(str(e), False)
-        # display-only snapshot, and only now that the write landed; it must not
-        # travel in the result below, or the model would pay for it
-        self._stash_block(target_path, target, start_idx + 1, end_idx + 1, old_block, new_block)
+        # display-only snapshot, and only now that the write landed
+        token = self._stash_block(target_path, target, start_idx + 1, end_idx + 1,
+                                  old_block, new_block)
+        # the token is the only trace of the snapshot in the result: a dozen
+        # characters the card needs to fetch the old text, nothing else
+        ref = f" \u00b7 #{token}" if token else ""
         if span:
-            return self.result(f"replaced {label} in {path}")
+            return self.result(f"replaced {label} in {path}{ref}")
         if prose:
             if end_idx < start_idx:
-                return self.result(f"{label} had no body - inserted the content after the heading in {path}")
+                return self.result(
+                    f"{label} had no body - inserted the content after the heading in {path}{ref}")
             return self.result(
-                f"replaced the body of {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}")
+                f"replaced the body of {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}{ref}")
         return self.result(
-            f"replaced {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}")
+            f"replaced {label} (was lines {start_idx + 1}-{end_idx + 1}) in {path}{ref}")
 
     @core.module.tool
     async def insert_block(self, workspace: str, path: str, target: str, content: str, where: str = "before"):
