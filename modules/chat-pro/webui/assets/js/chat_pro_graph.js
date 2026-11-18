@@ -556,25 +556,50 @@ chatPart({
             // it from dragging the view to the bottom. scrollToTurn on a missing
             // element breaks immediately and clears the intent by itself.
             ui.scrollToTurnIndex = -1;
+
+            const chat = Alpine.store("chat");
+            const beforeTotal = chat.totalTurns;
+            const beforeStart = chat.turnStart;
+
             await simpleApiPost("/api/ext/chat-pro/switch", { node: nodeId });
             this.closeGraph();
 
-            // counters catch up on their own signature change
+            // same shape as the branch-row path (chat_pro_branch.js): the route
+            // broadcasts sync before answering, and core's resyncWindow() re-fetches
+            // only the slice it already had, started from the OLD turnStart. picking
+            // an off-path card that makes the chat LONGER therefore left the window
+            // ending before the newest turn - measured 10..209 with total 230, i.e.
+            // 20 newest turns unloaded and the chat stopping short of its own end.
+            // let that write land, then rebuild the window from the newest page.
+            for (let guard = 0; guard < 40; guard += 1) {
+                if (chat.totalTurns !== beforeTotal || chat.turnStart !== beforeStart) { break; }
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+
+            chat.resetWindow();
+            await chat.reloadChat();
+
+            // counters catch up on their own signature change; the node's turn index
+            // is only meaningful against the NEW history, so re-read the state
             this._signature = null;
             await this.refresh(true);
 
-            // the switch rewrote the *server's* history: the client's copy arrives
-            // with the sync broadcast and the dom with reloadChat(). wait for that
-            // before measuring anything - the old dom belongs to the old path.
-            await this._graphWaitForPath(nodeId);
+            let turnIndex = this._turnIndexFor(nodeId);
+            if (turnIndex < 0) {
+                // a node the state cannot map yet: wait for its message to show up,
+                // reloading once if the sync is late
+                await this._graphWaitForPath(nodeId);
+                turnIndex = this._turnIndexFor(nodeId);
+            }
 
-            const turnIndex = this._turnIndexFor(nodeId);
             if (turnIndex >= 0) {
                 // leave the correct target behind, so a sync that lands late scrolls
                 // to the card instead of the bottom of the chat
                 ui.scrollToTurnIndex = turnIndex;
                 await this._graphGotoTurn(turnIndex);
             }
+
+            ui.scrollToTurnIndex = null;
         } catch (error) {
             ui.scrollToTurnIndex = null;
             this._fail("Switching branch failed", error);
