@@ -173,7 +173,7 @@
                     @click="$store.chatPro.refKind = 'url'">Links</button>
             <button type="button" class="cp-refkind" :class="{ on: $store.chatPro.refKind === 'file' }"
                     @click="$store.chatPro.refKind = 'file'">Files</button>
-            <span class="cp-refs-count" x-text="$store.chatPro.filteredRefs().length + ' found'"></span>
+            <span class="cp-refs-count" x-text="$store.chatPro.filteredRefs().length + ' found' + ($store.chatPro.refsScanning ? ' \u00b7 scanning older turns\u2026' : '')"></span>
         </div>
 
         <div class="cp-refs-list">

@@ -9,57 +9,84 @@ chatPart({
      * ----------------- */
     // scanned from the history the client already holds - no route, works on
     // whatever branch is open. the refresh button re-runs it.
+    // references: urls and file paths. built from the history the client holds,
+    // then completed from the pages of the turns that are not loaded - core keeps
+    // only a window of turns in memory now, so scanning just that window silently
+    // missed every reference in the older turns of a long chat (measured: 1005
+    // refs from 205 loaded turns of a 230-turn chat).
     scanRefs() {
         const chat = Alpine.store("chat");
+        const chatId = chat.selectedChat ?? null;
+        const token = (this._refsToken = (this._refsToken || 0) + 1);
+
+        const acc = this._refsAccumulator();
+
+        // the loaded window first: rows appear instantly, exactly as before
+        acc.scanTurns(chat.turnHistory || []);
+        this.refs = acc.finish();
+
+        const start = Number(chat.turnStart) || 0;
+        const total = Number(chat.totalTurns) || 0;
+        const loaded = (chat.turnHistory || []).length;
+        this.refsScanning = start > 0 || loaded < total;
+
+        if (this.refsScanning) {
+            this._refsScanOlder(chatId, token, acc);
+        }
+    },
+
+    // one accumulator per scan: the text parts (with where they came from), the
+    // message indexes the DOM can anchor to, and the rows found so far. finish()
+    // matches only the parts added since the last call, so republishing after
+    // every page does not double-count.
+    _refsAccumulator() {
         const parts = [];
-
-        (chat.turnHistory || []).forEach((turn) => {
-            const base = turn.first_message_index || 0;
-            (turn.messages || []).forEach((message, offset) => {
-                const index = base + offset;
-                // the answer is what the user and the final assistant message
-                // say. everything else - tool output, tool_calls arguments,
-                // intermediate narration and reasoning - is process
-                const isFinal = message.role === "assistant" && !(message.tool_calls || []).length;
-                const source = (message.role === "user" || isFinal) ? "content" : "tools";
-                const push = (value) => {
-                    if (value) parts.push({ value: String(value), source, index });
-                };
-
-                const content = message.content;
-                if (typeof content === "string") {
-                    push(content);
-                } else if (Array.isArray(content)) {
-                    content.forEach((block) => {
-                        if (block && block.type === "text" && block.text) push(block.text);
-                    });
-                }
-                if (Array.isArray(message.tool_calls)) {
-                    message.tool_calls.forEach((call) => {
-                        const args = call && call.function ? call.function.arguments : null;
-                        if (args) push(typeof args === "string" ? args : JSON.stringify(args));
-                    });
-                }
-                if (message.reasoning_content) {
-                    // thinking has its own toggle: never the answer's text, and
-                    // kept apart from tool output as well
-                    parts.push({ value: String(message.reasoning_content), source: "reasoning", index });
-                }
-            });
-        });
-
-        // the below_message anchors exist for user messages and assistant
-        // finals only; a tool step cannot be addressed, so it must not pretend
         const anchorable = new Set();
-        (chat.turnHistory || []).forEach((turn) => {
-            const base = turn.first_message_index || 0;
-            (turn.messages || []).forEach((message, offset) => {
-                const final = message.role === "assistant" && !(message.tool_calls || []).length;
-                if (message.role === "user" || final) anchorable.add(base + offset);
-            });
-        });
-
         const found = new Map();
+        const urlValues = [];
+        let matchedUntil = 0;
+
+        const scanTurns = (turns) => {
+            (turns || []).forEach((turn) => {
+                const base = turn.first_message_index || 0;
+                (turn.messages || []).forEach((message, offset) => {
+                    const index = base + offset;
+                    // the answer is what the user and the final assistant message
+                    // say. everything else - tool output, tool_calls arguments,
+                    // intermediate narration and reasoning - is process
+                    const isFinal = message.role === "assistant" && !(message.tool_calls || []).length;
+                    const source = (message.role === "user" || isFinal) ? "content" : "tools";
+                    const push = (value) => {
+                        if (value) parts.push({ value: String(value), source, index });
+                    };
+
+                    const content = message.content;
+                    if (typeof content === "string") {
+                        push(content);
+                    } else if (Array.isArray(content)) {
+                        content.forEach((block) => {
+                            if (block && block.type === "text" && block.text) push(block.text);
+                        });
+                    }
+                    if (Array.isArray(message.tool_calls)) {
+                        message.tool_calls.forEach((call) => {
+                            const args = call && call.function ? call.function.arguments : null;
+                            if (args) push(typeof args === "string" ? args : JSON.stringify(args));
+                        });
+                    }
+                    if (message.reasoning_content) {
+                        // thinking has its own toggle: never the answer's text, and
+                        // kept apart from tool output as well
+                        parts.push({ value: String(message.reasoning_content), source: "reasoning", index });
+                    }
+
+                    // the below_message anchors exist for user messages and
+                    // assistant finals only; a tool step cannot be addressed
+                    if (message.role === "user" || isFinal) anchorable.add(index);
+                });
+            });
+        };
+
         const bs = String.fromCharCode(92);
         const cleanRef = (value) => {
             let out = String(value);
@@ -86,45 +113,78 @@ chatPart({
 
         const roots = ["/home/", "/usr/", "/etc/", "/tmp/", "/opt/", "/var/", "/mnt/",
             "/media/", "/srv/", "/root/", "/proc/", "/dev/"];
-        const urlValues = [];
 
-        parts.forEach((part) => {
-            const text = part.value;
+        const match = () => {
+            for (let i = matchedUntil; i < parts.length; i += 1) {
+                const part = parts[i];
+                const text = part.value;
 
-            (text.match(/https?:\/\/[^\s<>"'`)\]]+/g) || []).forEach((raw) => {
-                const value = cleanRef(raw).replace(/[.,;:!?]+$/, "");
-                add("url", value, part.source, part.index);
-                urlValues.push(value);
+                (text.match(/https?:\/\/[^\s<>"'`)\]]+/g) || []).forEach((raw) => {
+                    const value = cleanRef(raw).replace(/[.,;:!?]+$/, "");
+                    add("url", value, part.source, part.index);
+                    urlValues.push(value);
+                });
+
+                // a slice of an address is not a file: .../wiki/Character.ai is a page.
+                // an absolute path must start at a real root, and // is a protocol.
+                (text.match(/(?:~\/|\/|\.\/)?[\w.-]+(?:\/[\w.-]+)+\.[A-Za-z0-9]{1,6}\b/g) || []).forEach((raw) => {
+                    if (raw.startsWith(".../") || raw.startsWith("\u2026/")) return;
+                    if (raw.includes("://") || raw.startsWith("//")) return;
+                    if (raw.startsWith("/") && !roots.some((root) => raw.startsWith(root))) return;
+                    if (urlValues.some((url) => url.includes(raw))) return;
+                    add("file", raw.replace(/^\.\//, ""), part.source, part.index);
+                });
+
+                // bare names with a known extension, unless a path already covers them
+                (text.match(/\b[\w-]+\.(?:py|md|markdown|json|ya?ml|toml|ini|cfg|js|css|html|txt|sh|log)\b/g) || []).forEach((raw) => {
+                    const covered = [...found.values()].some((row) => row.kind === "file" && row.value.endsWith("/" + raw));
+                    if (covered || urlValues.some((url) => url.includes(raw))) return;
+                    add("file", raw, part.source, part.index);
+                });
+            }
+
+            matchedUntil = parts.length;
+        };
+
+        const finish = () => {
+            match();
+
+            for (const row of found.values()) {
+                row.jumpHits = row.hits.filter((index) => anchorable.has(index));
+            }
+
+            return [...found.values()].sort((a, b) => {
+                if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
+                return a.value.localeCompare(b.value);
             });
+        };
 
-            // a slice of an address is not a file: .../wiki/Character.ai is a page.
-            // an absolute path must start at a real root, and // is a protocol.
-            (text.match(/(?:~\/|\/|\.\/)?[\w.-]+(?:\/[\w.-]+)+\.[A-Za-z0-9]{1,6}\b/g) || []).forEach((raw) => {
-                if (raw.startsWith(".../") || raw.startsWith("\u2026/")) return;
-                if (raw.includes("://") || raw.startsWith("//")) return;
-                if (raw.startsWith("/") && !roots.some((root) => raw.startsWith(root))) return;
-                if (urlValues.some((url) => url.includes(raw))) return;
-                add("file", raw.replace(/^\.\//, ""), part.source, part.index);
-            });
-
-            // bare names with a known extension, unless a path already covers them
-            (text.match(/\b[\w-]+\.(?:py|md|markdown|json|ya?ml|toml|ini|cfg|js|css|html|txt|sh|log)\b/g) || []).forEach((raw) => {
-                const covered = [...found.values()].some((row) => row.kind === "file" && row.value.endsWith("/" + raw));
-                if (covered || urlValues.some((url) => url.includes(raw))) return;
-                add("file", raw, part.source, part.index);
-            });
-        });
-
-        for (const row of found.values()) {
-            row.jumpHits = row.hits.filter((index) => anchorable.has(index));
-        }
-
-        this.refs = [...found.values()].sort((a, b) => {
-            if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
-            return a.value.localeCompare(b.value);
-        });
+        return { scanTurns, finish };
     },
 
+    // page the turns older than the loaded window and fold them into the same
+    // accumulator; every page republishes the rows, so the list grows while it
+    // scans. a chat switch or a newer scan cancels this one.
+    async _refsScanOlder(chatId, token, acc) {
+        const chat = Alpine.store("chat");
+        let before = Number(chat.turnStart) || 0;
+
+        for (let guard = 0; guard < 100 && before > 0; guard += 1) {
+            const page = await simpleApiFetch(`/api/chat/turns?before=${before}&limit=200`);
+            if (!page) { break; }
+
+            if (Alpine.store("chat").selectedChat !== chatId || this._refsToken !== token) { return; }
+
+            acc.scanTurns(page.turns || []);
+            this.refs = acc.finish();
+
+            const start = Number(page.start);
+            if (!Number.isFinite(start) || start >= before) { break; }
+            before = start;
+        }
+
+        this.refsScanning = false;
+    },
     // jump to the message that mentions a reference; repeated clicks walk its
     // occurrences. scrollToTurn mounts lazy turns, so the flash waits for it.
     async jumpToRef(row) {

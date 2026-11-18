@@ -87,6 +87,8 @@ chatPart({
 
     // references tab: urls and file paths found in this chat's history
     refs: [],
+    // true while the scan is still paging the turns older than the loaded window
+    refsScanning: false,
     refsQuery: "",
     refKind: "all",        // "all" | "url" | "file"
     refShowContent: true,  // references the message text mentions
