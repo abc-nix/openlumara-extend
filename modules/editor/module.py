@@ -1456,6 +1456,57 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             return self.result(str(e), False)
         return self.result(f"edited {path}")
 
+    # -------------------------------
+    # helper: block target locator
+    # -------------------------------
+    async def _locate_block(self, code, lines, target_path, target, path_label=""):
+        """(start_idx, end_idx, label, lead_blank) for a block target, or (None, error).
+
+        shared by replace_block and the card's live preview: the route has to
+        find exactly the span the tool is about to replace, so both come through
+        here and cannot disagree. indices are 0-based and inclusive; end_idx may
+        be start_idx - 1 for an empty section body (nothing to replace).
+        """
+        total = len(lines) - 1 if lines and lines[-1] == "" else len(lines)
+
+        span = _span_target(target)
+        if span:
+            start, end = span
+            if start < 1 or end < start or end > total:
+                return None, {
+                    "error": f"line range {start}-{end} does not fit this {total}-line file",
+                    "note": "use outline or read to find the right range",
+                }
+            return (start - 1, end - 1, f"lines {start}-{end}", False), None
+
+        if target_path.suffix.lower() in _PROSE_SUFFIXES:
+            sections = self._sections(code, rst=target_path.suffix.lower() == ".rst")
+            index, error = self._match_section(sections, target)
+            if error:
+                return None, {"error": error, "note": "use outline to see the headings"}
+            section = sections[index]
+            section_end = self._section_end(sections, index, total)
+            # replace the BODY, keeping the heading: the heading is what names
+            # the section, so re-emitting it is where headings get lost
+            start_idx = section["line"]                     # first line after the heading
+            return (start_idx, max(start_idx - 1, section_end - 1),
+                    f"section '{section['raw']}'", True), None
+
+        if not HAVE_TSLP:
+            return None, {
+                "error": "this installation has no tree-sitter runtime, so symbols cannot be located",
+                "note": "pass a line range instead, e.g. 'ln:12-40' (use outline or read to find it)",
+            }
+        located = await self._locate_symbol(code, target_path, target)
+        if not located:
+            where = f" in {path_label}" if path_label else ""
+            return None, {
+                "error": f"symbol '{target}' was not found{where}",
+                "note": "names are dotted, e.g. 'Class.method'; use outline to see what is available, or pass a line range like 'ln:12-40'",
+            }
+        start_idx, end_idx = located
+        return (start_idx, end_idx, f"'{target}'", False), None
+
     @core.module.tool
     async def replace_block(self, workspace: str, path: str, target: str, content: str):
         """replaces a whole block: a definition ('Class.method'), a markdown/rst heading ('Settings') or exact lines ('ln:12-40'). prefer it over edit for whole definitions/sections: re-indented, and the merged file is syntax-checked"""
@@ -1477,47 +1528,12 @@ class Editor(EditorRoutes, PathResolver, core.module.Module):
             return self.result("file is empty", False)
 
         lines = code.split("\n")
-        total = len(lines) - 1 if lines and lines[-1] == "" else len(lines)
-
+        located, error = await self._locate_block(code, lines, target_path, target, path)
+        if error:
+            return self.result(error, False)
+        start_idx, end_idx, label, lead_blank = located
         prose = target_path.suffix.lower() in _PROSE_SUFFIXES
-        lead_blank = False
         span = _span_target(target)
-        if span:
-            start, end = span
-            if start < 1 or end < start or end > total:
-                return self.result({
-                    "error": f"line range {start}-{end} does not fit this {total}-line file",
-                    "note": "use outline or read to find the right range",
-                }, False)
-            start_idx, end_idx = start - 1, end - 1
-            label = f"lines {start}-{end}"
-        elif prose:
-            sections = self._sections(code, rst=target_path.suffix.lower() == ".rst")
-            index, error = self._match_section(sections, target)
-            if error:
-                return self.result({"error": error, "note": "use outline to see the headings"}, False)
-            section = sections[index]
-            section_end = self._section_end(sections, index, total)
-            # replace the BODY, keeping the heading: the heading is what names
-            # the section, so re-emitting it is where headings get lost
-            start_idx = section["line"]                     # first line after the heading
-            end_idx = max(start_idx - 1, section_end - 1)   # an empty section replaces nothing
-            lead_blank = True                               # keep one blank line under the heading
-            label = f"section '{section['raw']}'"
-        else:
-            if not HAVE_TSLP:
-                return self.result({
-                    "error": "this installation has no tree-sitter runtime, so symbols cannot be located",
-                    "note": "pass a line range instead, e.g. 'ln:12-40' (use outline or read to find it)",
-                }, False)
-            located = await self._locate_symbol(code, target_path, target)
-            if not located:
-                return self.result({
-                    "error": f"symbol '{target}' was not found in {path}",
-                    "note": "names are dotted, e.g. 'Class.method'; use outline to see what is available, or pass a line range like 'ln:12-40'",
-                }, False)
-            start_idx, end_idx = located
-            label = f"'{target}'"
 
         new_lines = self._reindent_block(content, self._line_indent(lines, start_idx))
         if not new_lines:

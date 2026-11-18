@@ -399,6 +399,46 @@ class EditorRoutes:
             return self.result("snapshot could not be read", False)
         return {"old": entry.get("old", ""), "new": entry.get("new", "")}
 
+    @webui.route("block-preview")
+    async def _route_block_preview(self, body=None, query=None):
+        """the block a PENDING replace_block is about to replace (live card view).
+
+        read-only, and honest only while the call is still streaming: nothing
+        has been written yet, so the file itself still holds the pre-edit text.
+        once the call completes the card switches to the token snapshot, because
+        this route would then return the new text instead of the old one.
+
+        the span comes from Editor._locate_block, the same helper the tool uses,
+        so the preview can never point at a different block than the one the
+        edit will rewrite.
+        """
+        q = query or {}
+        target_name = str(q.get("target", "")).strip()
+        if not target_name:
+            return self.result("no target", False)
+        try:
+            target, base = self._resolve_with_base(
+                str(q.get("workspace", "")), str(q.get("path", "")), read_only=True)
+        except ValueError as e:
+            return self.result(str(e), False)
+        if not target.is_file():
+            return self.result(f"'{target.name}' is not a file", False)
+        try:
+            with self._open_target(target, "r", base) as f:
+                code = f.read()
+        except UnicodeDecodeError:
+            return self.result("file is not valid utf-8 text", False)
+        except (OSError, ValueError) as e:
+            return self.result(str(e), False)
+
+        lines = code.split("\n")
+        located, error = await self._locate_block(code, lines, target, target_name)
+        if error:
+            return self.result(error, False)
+        start_idx, end_idx, label, lead_blank = located
+        old = "\n".join(lines[start_idx:end_idx + 1]) if end_idx >= start_idx else ""
+        return {"old": old, "label": label}
+
     @webui.route("open", method="POST")
     async def _route_open(self, body=None, query=None):
         """launch a file/folder with the system default app (open_command).
