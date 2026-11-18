@@ -39,6 +39,11 @@ chatPart({
     hasTree: false,
     variants: {},
     indexIds: {},
+    // live message index -> ABSOLUTE turn index, straight from the state route.
+    // core only keeps a window of turns in memory now, so a card whose message
+    // is older than that window has no turn index the client could derive.
+    turnIndex: {},
+    turnTotal: 0,
     branches: [],
     branchCount: 0,
     branchPoints: 0,
@@ -171,3 +176,43 @@ setInterval(() => {
         CHAT_PRO.refresh(false);
     } catch (error) { /* ignore */ }
 }, 1500);
+
+
+/* core paginates turns: scrollToTurn() only finds turns that are actually
+ * loaded (a window starting at chat.turnStart), so a jump to an older turn has
+ * to page it in first. the page size is raised for the walk, so a long jump is a
+ * handful of requests instead of one per five turns. returns whether the target
+ * ended up loaded. */
+async function cpEnsureTurnLoaded(absIndex) {
+    if (!Number.isFinite(absIndex) || absIndex < 0) { return false; }
+
+    const chat = window.Alpine && window.Alpine.store("chat");
+    if (!chat || !chat.turnAt) { return false; }
+
+    if (absIndex >= (Number(chat.turnStart) || 0)) { return true; }
+
+    const pageSize = chat.turnPageSize;
+    chat.turnPageSize = 200;
+
+    try {
+        for (let guard = 0; guard < 100; guard += 1) {
+            if (absIndex >= (Number(chat.turnStart) || 0)) { break; }
+            if (!chat.hasMoreOlder) { break; }
+
+            await chat.loadOlderTurns(false);
+            await window.Alpine.nextTick();
+        }
+    } finally {
+        chat.turnPageSize = pageSize;
+    }
+
+    return absIndex >= (Number(chat.turnStart) || 0);
+}
+
+/* total turns in the open chat: core keeps a window in memory, so the count is
+ * totalTurns, never turnHistory.length (that is only what is loaded). */
+function cpTurnTotal(chat) {
+    if (!chat) { return 0; }
+    const loaded = (Number(chat.turnStart) || 0) + (chat.turnHistory || []).length;
+    return Math.max(Number(chat.totalTurns) || 0, loaded);
+}

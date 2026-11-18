@@ -250,6 +250,8 @@ class ChatPro(core.module.Module):
                 "branch_points": 0,
                 "variants": {},
                 "index_ids": {},
+                "turn_index": {},
+                "turn_total": 0,
                 "active": [],
             }
 
@@ -279,6 +281,8 @@ class ChatPro(core.module.Module):
                 "nodes": [],
                 "active": [],
                 "index_ids": {},
+                "turn_index": {},
+                "turn_total": 0,
             }
 
         state = tree.state()
@@ -287,6 +291,35 @@ class ChatPro(core.module.Module):
         # keeps the stale turn and the id would never show up. indices always
         # match the list the client just loaded.
         state["index_ids"] = {str(index): node_id for index, node_id in enumerate(tree.active)}
+
+        # live message index -> ABSOLUTE turn index in the grouped history.
+        # core only keeps a window of turns in memory now (chat.turnStart +
+        # turnHistory, and data-turn-index is the absolute index), so a node
+        # outside that window has no turn index the client could derive by
+        # itself. the grouping the webui renders is available right here, so map
+        # it once per state refresh: node -> message index (index_ids, inverted)
+        # -> turn index. a position here is the same number the DOM carries.
+        turn_index = {}
+        try:
+            history = await channel.group_history()
+            for position, turn in enumerate(history):
+                first = turn.get("first_message_index")
+                if not isinstance(first, int):
+                    continue
+
+                last = turn.get("last_message_index")
+                if not isinstance(last, int) or last < first:
+                    last = first
+
+                for message_index in range(first, last + 1):
+                    turn_index[str(message_index)] = position
+
+            state["turn_total"] = len(history)
+        except Exception as e:
+            self.log("chat-pro", f"could not map message indexes to turns: {core.detail_error(e)}")
+            state["turn_total"] = 0
+
+        state["turn_index"] = turn_index
         state.update({"has_tree": True, "chat_id": chat_id})
         return state
 

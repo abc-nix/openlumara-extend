@@ -134,14 +134,30 @@ chatPart({
         row._cursor = ((row._cursor ?? -1) + 1) % hits.length;
         const messageIndex = hits[row._cursor];
 
-        const turns = Alpine.store("chat").turnHistory || [];
-        const turnIndex = turns.findIndex((turn) => {
-            const first = turn.first_message_index || 0;
-            const last = first + Math.max(1, (turn.messages || []).length) - 1;
-            return messageIndex >= first && messageIndex <= last;
-        });
-        if (turnIndex < 0) return;
+        // message index -> absolute turn index. the state route maps the whole
+        // history; the loaded window only answers for its own turns, so it is
+        // just the fallback (translated by turnStart).
+        const pro = window.Alpine && Alpine.store("chatPro");
+        const mapped = pro && pro.turnIndex ? pro.turnIndex[String(messageIndex)] : undefined;
 
+        let turnIndex = mapped === undefined ? -1 : Number(mapped);
+
+        if (turnIndex < 0) {
+            const chat = Alpine.store("chat");
+            const turns = chat.turnHistory || [];
+            const start = Number(chat.turnStart) || 0;
+            const position = turns.findIndex((turn) => {
+                const first = turn.first_message_index || 0;
+                const last = first + Math.max(1, (turn.messages || []).length) - 1;
+                return messageIndex >= first && messageIndex <= last;
+            });
+            if (position < 0) return;
+            turnIndex = start + position;
+        }
+
+        // page the turn in first: core only scrolls to turns that are loaded
+        await cpEnsureTurnLoaded(turnIndex);
+        await Alpine.nextTick();
         await Alpine.store("ui").scrollToTurn(turnIndex);
 
         // land on the message, not its turn: one turn can hold dozens of steps and

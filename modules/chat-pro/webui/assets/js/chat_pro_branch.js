@@ -50,6 +50,10 @@ chatPart({
             this.hasTree = Boolean(state.has_tree);
             this.variants = state.variants || {};
             this.indexIds = state.index_ids || {};
+            // absolute turn index per live message, plus the true turn count: the
+            // state route groups the whole history, the client only holds a window
+            this.turnIndex = state.turn_index || {};
+            this.turnTotal = Number(state.turn_total) || 0;
             this.branches = state.branches || [];
             this.branchCount = this.branches.filter((row) => row.kind === "branch").length;
             this.branchPoints = state.branch_points || 0;
@@ -64,7 +68,7 @@ chatPart({
             // a pending fork is tied to one chat and one turn count: if either
             // moved, its message index would point somewhere else now
             if (this.forkConfirm && (this.forkConfirm.chat !== chat.selectedChat ||
-                    this.forkConfirm.turns !== (chat.turnHistory || []).length)) {
+                    this.forkConfirm.turns !== cpTurnTotal(chat))) {
                 this.forkConfirm = null;
             }
         } catch (error) {
@@ -243,7 +247,9 @@ chatPart({
         if (Alpine.store("stream").state !== "idle") { return; }
 
         const chat = Alpine.store("chat");
-        const turn = (chat.turnHistory || [])[turnIndex];
+        // turnIndex arrives absolute (the message buttons pass data-turn-index),
+        // so resolve through turnAt() instead of indexing the loaded window
+        const turn = chat.turnAt(turnIndex);
         if (!turn) { return; }
 
         const index = turn.last_message_index ?? turn.first_message_index;
@@ -257,7 +263,7 @@ chatPart({
             turnIndex: turnIndex,
             index: index,
             chat: chat.selectedChat,
-            turns: (chat.turnHistory || []).length,
+            turns: cpTurnTotal(chat),
             role: turn.role,
             label: this._previewOf(last)
         };

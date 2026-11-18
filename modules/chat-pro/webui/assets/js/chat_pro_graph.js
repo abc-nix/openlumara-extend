@@ -165,16 +165,24 @@ chatPart({
         return viewing;
     },
 
-    // live message index -> turn index: core's turn starts are ascending, so the
-    // last one at or before the message is the turn that contains it
+    // live message index -> ABSOLUTE turn index. the state route already maps
+    // every live message to its turn (it groups the whole history), which also
+    // covers messages older than the window core keeps loaded. the scan below is
+    // the fallback and has to add turnStart, since positions are window-relative.
     _graphTurnIndexForLive(messageIndex) {
         if (!(messageIndex >= 0)) { return -1; }
 
-        const turns = Alpine.store("chat").turnHistory || [];
+        const mapped = this.turnIndex ? this.turnIndex[String(messageIndex)] : undefined;
+        if (mapped !== undefined) { return Number(mapped); }
+
+        const chat = Alpine.store("chat");
+        const turns = chat.turnHistory || [];
+        const start = Number(chat.turnStart) || 0;
+
         let index = -1;
         turns.forEach((turn, position) => {
             if (turn.first_message_index !== undefined && turn.first_message_index <= messageIndex) {
-                index = position;
+                index = start + position;
             }
         });
         return index;
@@ -585,15 +593,32 @@ chatPart({
     // the last real turn, so the selector found no element, scrollToTurn broke on
     // its first pass and the view stayed at the top of the chat (the first message).
     _turnIndexFor(nodeId) {
-        const turns = Alpine.store("chat").turnHistory || [];
         const byId = (this._graphData && this._graphData.byId) || new Map();
+        const turnIndex = this.turnIndex || {};
+        const indexIds = this.indexIds || {};
 
         let id = nodeId;
         for (let guard = 0; id && guard < 4096; guard += 1) {
-            const index = turns.findIndex((turn) => (turn.messages || []).some(
+            // node id -> live message index -> absolute turn index: both maps come
+            // from the state route, which groups the whole history, so a card older
+            // than the loaded window resolves too (the loaded window alone is what
+            // used to be scanned here, and it silently missed those)
+            for (const [messageIndex, candidate] of Object.entries(indexIds)) {
+                if (candidate !== id) { continue; }
+
+                const mapped = turnIndex[messageIndex];
+                if (mapped !== undefined) { return Number(mapped); }
+            }
+
+            // fallback for a node the state does not map yet: the loaded window,
+            // translated to an absolute index
+            const chat = Alpine.store("chat");
+            const turns = chat.turnHistory || [];
+            const start = Number(chat.turnStart) || 0;
+            const position = turns.findIndex((turn) => (turn.messages || []).some(
                 (message) => (((message && message._metadata) || {}).chatpro_id) === id
             ));
-            if (index >= 0) { return index; }
+            if (position >= 0) { return start + position; }
 
             // a card whose message the chat never renders (internal) lands on the
             // nearest ancestor card that it does render
@@ -617,12 +642,25 @@ chatPart({
             if (present()) { return true; }
             await new Promise((resolve) => setTimeout(resolve, 50));
         }
+
         await chat.reloadChat();
+
+        // the switched-to path can be older than the window core loads: page the
+        // target turn in so the dom can actually receive it before we measure
+        const turnIndex = this._turnIndexFor(nodeId);
+        if (turnIndex >= 0) { await cpEnsureTurnLoaded(turnIndex); }
+
         return present();
     },
 
     async _graphGotoTurn(turnIndex) {
         if (turnIndex < 0) { return; }
+
+        // the target can be older than the window core keeps loaded; scrollToTurn
+        // only finds turns that are in the dom, so page it in first
+        await cpEnsureTurnLoaded(turnIndex);
+        await Alpine.nextTick();
+
         await Alpine.store("ui").scrollToTurn(turnIndex);
         await this._graphAlignTurn(turnIndex);
     },
