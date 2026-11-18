@@ -76,7 +76,8 @@
         <template x-if="!$store.chatNav.query.trim()">
             <div class="cn-rows">
                 <template x-for="row in visibleBlocks" :key="row.index">
-                    <button type="button" class="cn-block" :class="{ 'active': row.index === activeBlock, 'user': row.role === 'user' }"
+                    <button type="button" class="cn-block"
+                        :class="{ 'active': row.index === activeBlock, 'user': row.role === 'user', 'is-summary': row.summary }"
                         :data-block="row.index" @click="$store.chatNav.jumpTo(row.index)">
                         <div class="cn-line1">
                             <span class="cn-ord" x-text="row.ordinal"></span>
@@ -84,6 +85,10 @@
                                owner is simply unknown, so it stays neutral instead of
                                claiming to be the AI's #}
                             <span class="cn-role" x-text="row.role === 'user' ? 'You' : (row.role ? 'AI' : 'MESSAGE')"></span>
+                            {# compaction boundary: the owner is still the AI, the chip adds
+                               what kind of block it is. wording may become 'compacted'. #}
+                            <span class="cn-tag" x-show="row.summary"
+                                title="Compaction handoff summary: the chat was compressed here, and the model sees this instead of the earlier turns.">summary</span>
                             <span class="cn-ticks" x-show="row.tools" x-text="row.tools + ' tool'"></span>
                         </div>
                         <div class="cn-prev" x-text="row.preview"></div>
@@ -103,6 +108,8 @@
                         <div class="cn-line1">
                             <span class="cn-ord" x-text="'#' + hit.ordinal"></span>
                             <span class="cn-role" x-text="hit.role"></span>
+                            <span class="cn-tag" x-show="hit.summary"
+                                title="Compaction handoff summary: the chat was compressed here, and the model sees this instead of the earlier turns.">summary</span>
                             <span class="cn-ticks" x-text="hit.kind"></span>
                         </div>
                         <div class="cn-snippet" x-html="hit.html"></div>

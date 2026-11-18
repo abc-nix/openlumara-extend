@@ -19,6 +19,7 @@
     data-default-and="{{ 1 if module_config.get('search_all_words_by_default', False) else 0 }}"
     data-default-markdown="{{ 1 if module_config.get('ignore_markdown_by_default', True) else 0 }}"
     data-default-search-all="{{ 1 if module_config.get('search_whole_chat_by_default', False) else 0 }}"
+    data-mark-summaries="{{ 1 if module_config.get('mark_compression_summaries', True) else 0 }}"
     data-default-user="{{ 1 if module_config.get('search_user_by_default', True) else 0 }}"
     data-default-answer="{{ 1 if module_config.get('search_answers_by_default', True) else 0 }}"
     data-default-process="{{ 1 if module_config.get('search_process_by_default', False) else 0 }}"

@@ -242,6 +242,32 @@
     cursor: pointer;
 }
 
+/* compaction handoff summaries: the SUMMARIZATION_CUTOFF marker inside the turn
+   flags them (see hasCompressionMarker in chat_nav.js). fill and edge borrow
+   --info: chat-pro's graph marks compressions with that colour on its landmark
+   rail, so both modules say "compression" the same way. the fill is mixed with
+   --bg-secondary so it reads as a filled card, not a wash over the page. */
+.cn-block.is-summary {
+    background: color-mix(in srgb, var(--info, #38bdf8) 10%, var(--bg-secondary, #f3f3f8));
+    border-left-color: var(--info, #38bdf8);
+}
+
+/* hover keeps the info family; without this the generic hover rule would drop
+   the row back to the plain fill and the row would stop reading as a summary
+   exactly when you point at it (higher specificity: 3 vs 2) */
+.cn-block.is-summary:hover {
+    background: color-mix(in srgb, var(--info, #38bdf8) 18%, var(--bg-secondary, #f3f3f8));
+}
+
+/* .active is deliberately NOT overridden here: a selected summary row has to
+   look selected like any other row (accent edge, plain selected fill). only the
+   chip keeps the info colour, so it still reads as a summary while selected. */
+
+.cn-block.is-summary .cn-len span {
+    background: var(--info, #38bdf8);
+    opacity: 0.6;
+}
+
 .cn-block:hover,
 .cn-hit:hover {
     background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
@@ -264,6 +290,20 @@
 .cn-ord {
     font-variant-numeric: tabular-nums;
     opacity: 0.8;
+}
+
+/* chip beside the owner label: what kind of block this is (today: summary).
+   same --info colour as the row, so the chip keeps the meaning even once the
+   row is selected and takes the normal accent edge. */
+.cn-tag {
+    padding: 0 5px;
+    border: 1px solid color-mix(in srgb, var(--info, #38bdf8) 55%, transparent);
+    border-radius: 999px;
+    color: var(--info, #38bdf8);
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.35;
 }
 
 .cn-role {

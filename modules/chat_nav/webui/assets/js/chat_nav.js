@@ -198,6 +198,17 @@ function tightestWindow(marks, terms) {
     return best;
 }
 
+// a compaction handoff summary is recognisable by the marker compression stores
+// right before it: {"_metadata": {"signal": "SUMMARIZATION_CUTOFF"}} (core's
+// Context.SUMMARIZATION_CUTOFF). the marker itself has no role and no text - it
+// exists so context.get() knows where to cut the history - and it shares a turn
+// with the summary that follows it, which is what makes this check cheap: those
+// turn objects are already indexed here, so no extra fetch and no server work.
+function hasCompressionMarker(turn) {
+    const messages = (turn && turn.messages) || [];
+    return messages.some(message => (((message && message._metadata) || {}).signal) === "SUMMARIZATION_CUTOFF");
+}
+
 function turnInfo(turn, toolLimit) {
     const cached = _turnCache.get(turn);
     if (cached && cached.toolLimit === toolLimit) return cached;
@@ -318,6 +329,7 @@ function makeHit(block, record, needles, position, sequence, occurrence, span, p
         key: block.index + ":" + record.kind + ":" + sequence,
         block: block.index,
         ordinal: block.ordinal,
+        summary: Boolean(block.summary),
         role: block.role === "user" ? "You" : "AI",
         kind: record.kind in RECORD_LABEL ? RECORD_LABEL[record.kind] : record.kind,
         msgIndex: record.msgIndex,
@@ -471,6 +483,9 @@ const CHAT_NAV_STORE = {
     // the ALL switch: search the whole chat (paging older turns in) or only the
     // turns the chat already has loaded
     searchAllTurns: false,
+
+    // mark compaction handoff summaries in the outline (module setting)
+    markSummaries: true,
     chips: CHAT_NAV_CHIPS,
     counts: {},
     results: [],
@@ -525,6 +540,10 @@ const CHAT_NAV_STORE = {
         // the third switch: whole-chat search or loaded-window search
         const savedSearchAll = localStorage.getItem("chatNavSearchAll");
         this.searchAllTurns = savedSearchAll === null ? data.defaultSearchAll === "1" : savedSearchAll === "1";
+
+        // module setting, not a switch: marking summaries is a presentation
+        // choice, so it lives with the other module options
+        this.markSummaries = data.markSummaries !== "0";
     },
 
     // rebuilds the index whenever the chat or its turn list actually changes.
@@ -602,6 +621,7 @@ const CHAT_NAV_STORE = {
                     tools: 0,
                     chars: 0,
                     records: [],
+                    summary: false,
                     width: "8.0%"
                 };
                 continue;
@@ -618,6 +638,8 @@ const CHAT_NAV_STORE = {
                 tools: info.toolSteps,
                 chars: info.chars,
                 records: info.records,
+                // compaction boundary: the row is tinted and gets a chip
+                summary: this.markSummaries && hasCompressionMarker(turn),
                 width: ""
             };
         }
@@ -1373,6 +1395,7 @@ const CHAT_NAV_PANEL = {
                 role: block.role,
                 preview: block.preview,
                 tools: block.tools,
+                summary: block.summary,
                 width: block.width
             };
         }

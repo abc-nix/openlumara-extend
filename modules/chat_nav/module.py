@@ -83,6 +83,10 @@ class ChatNav(core.module.Module):
             "description": "Start with the panel's ALL switch on: a search pages the whole chat in from the backend (200 turns per request) and matches everywhere, not just in the turns already loaded. Off by default: only the loaded window is searched and no older page is fetched, so opening a chat and typing costs nothing. Turning it on pages the missing turns in on demand; the switch is remembered per browser once you touch it.",
             "default": False
         },
+        "mark_compression_summaries": {
+            "description": "Mark compaction handoff summaries in the outline: the row is tinted, gets an accent edge and a small 'summary' chip beside the owner. Detection uses the SUMMARIZATION_CUTOFF marker that compression stores just before the summary, so it costs nothing extra and also covers turns paged in by the ALL switch. Off: a summary looks like any other AI block.",
+            "default": True
+        },
         "search_per_occurrence": {
             "description": "Navigate every occurrence of the typed string instead of one hit per message, landing on that occurrence and painting it apart from the other matches. Applies to your messages and the assistant's final answers; reasoning and tool hits stay one per block, because their rendered text cannot be addressed per occurrence. With the AND switch on, a hit is always the message itself, placed on the words' tightest run.",
             "default": True
