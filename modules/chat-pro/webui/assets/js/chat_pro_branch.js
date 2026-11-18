@@ -117,10 +117,45 @@ chatPart({
 
         this.busy = true;
         try {
+            const chat = Alpine.store("chat");
+            const beforeTotal = chat.totalTurns;
+            const beforeStart = chat.turnStart;
+
             await simpleApiPost("/api/ext/chat-pro/switch", { node: nodeId });
-            // the backend broadcasts sync: the chat reloads from it, and the poll
-            // refreshes the counters once the new history is in place
+
+            // the route broadcasts "sync" BEFORE it answers, so core's sync handler
+            // is already running resyncWindow() by the time this resumes. that
+            // re-fetch was started from the OLD turnStart (before = turnStart +
+            // size) and REPLACES the window when it lands - measured: a fresh tail
+            // of 205..209 got overwritten by the stale-shaped 9..208, because the
+            // slice ends before the newest turn and the chat then stops short of
+            // its own end (trailing blocks with no data, bottom not the real
+            // bottom) until a hard reload.
+            //
+            // so: let that write land first (it ends by updating totalTurns), then
+            // rebuild the window from the newest page. correct for a longer and a
+            // shorter branch alike.
+            for (let guard = 0; guard < 40; guard += 1) {
+                if (chat.totalTurns !== beforeTotal || chat.turnStart !== beforeStart) { break; }
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+
+            chat.resetWindow();
+            await chat.reloadChat();
+
+            // a node's turn index is only meaningful against the NEW history, so
+            // re-read the state before resolving it, then page the turn in and
+            // land on the message the user picked instead of the middle of nowhere
             this._signature = null;
+            await this.refresh(true);
+
+            const turn = this._turnIndexFor(nodeId);
+            if (turn >= 0) {
+                await cpEnsureTurnLoaded(turn);
+                await Alpine.nextTick();
+                await Alpine.store("ui").scrollToTurn(turn);
+                await this._graphAlignTurn(turn);
+            }
         } catch (error) {
             this._fail("Switching branch failed", error);
         } finally {
