@@ -169,7 +169,11 @@ chatPart({
         if (anchor) {
             const target = anchor.closest(".message-wrapper") || anchor.parentElement;
             if (target) {
-                target.scrollIntoView({ block: "center" });
+                // show the START of the message, not its middle: centring a 4366px
+                // answer put its top ~1586px above the viewport, so the reference
+                // you clicked could be pages below the fold. (the graph uses the
+                // same top-align idea for its cards.)
+                await this._alignMessageTop(target);
                 element = target;
             }
         }
@@ -178,6 +182,28 @@ chatPart({
 
         element.classList.add("cp-flash");
         setTimeout(() => element.classList.remove("cp-flash"), 1200);
+    },
+
+    // bring a message's top to the top of the chat viewport, re-measuring until
+    // it settles: markdown, images and code blocks keep changing height while
+    // they render, and the last message of a chat can never reach the top (the
+    // scrollbar stops), so this exits on |offset| < 4 or when scrolling stops
+    // moving. same shape as the graph's card alignment, but on the message
+    // wrapper: one turn can hold several messages and only one mentions the ref.
+    async _alignMessageTop(target) {
+        const container = document.getElementById("messages");
+        if (!container || !target) { return; }
+
+        let previousTop = -1;
+        for (let pass = 0; pass < 12; pass += 1) {
+            const offset = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+            if (Math.abs(offset) < 4) { return; }
+            if (container.scrollTop === previousTop) { return; }
+
+            previousTop = container.scrollTop;
+            container.scrollTo({ top: container.scrollTop + offset, behavior: "instant" });
+            await new Promise((resolve) => setTimeout(resolve, 80));
+        }
     },
 
     restoreRefPrefs() {
